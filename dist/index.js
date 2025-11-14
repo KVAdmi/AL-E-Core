@@ -15,5 +15,5 @@ app.get("/health", (req, res) => {
 });
 app.use("/lia", liaRouter_js_1.liaRouter);
 app.listen(env_js_1.env.port, "0.0.0.0", () => {
-    console.log(`AL-E Core escuchando en ${env_js_1.env.port}`);
+    console.log(`AL-E Core listening on port ${env_js_1.env.port}`);
 });
