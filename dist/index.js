@@ -5,7 +5,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
-const env_js_1 = require("./config/env.js");
 const liaRouter_js_1 = require("./lia/liaRouter.js");
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
@@ -14,6 +13,6 @@ app.get("/health", (req, res) => {
     res.json({ status: "ok", service: "al-e-core", timestamp: new Date().toISOString() });
 });
 app.use("/lia", liaRouter_js_1.liaRouter);
-app.listen(env_js_1.env.port, "0.0.0.0", () => {
-    console.log(`AL-E Core listening on port ${env_js_1.env.port}`);
+app.listen(3000, "0.0.0.0", () => {
+    console.log("AL-E Core listening on port 3000");
 });
