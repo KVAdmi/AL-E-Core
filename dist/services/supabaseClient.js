@@ -2,5 +2,5 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.supabase = void 0;
 const supabase_js_1 = require("@supabase/supabase-js");
-const env_js_1 = require("../config/env.js");
-exports.supabase = (0, supabase_js_1.createClient)(env_js_1.env.supabaseUrl, env_js_1.env.supabaseAnonKey);
+const env_1 = require("../config/env");
+exports.supabase = (0, supabase_js_1.createClient)(env_1.env.supabaseUrl, env_1.env.supabaseAnonKey);
