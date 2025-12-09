@@ -234,9 +234,11 @@ router.post('/chat', async (req, res) => {
             genericActions.forEach(a => actions.push(a));
         }
         const memories_to_add = detectMemories(userText + '\n' + (response.content || ''));
+        const answerContent = response.content || '';
         // Respuesta normalizada
         res.json({
-            answer: response.content || '',
+            answer: answerContent,
+            displayText: answerContent, // Campo para UI - texto limpio sin JSON
             actions,
             memories_to_add
         });
