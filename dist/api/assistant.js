@@ -40,6 +40,8 @@ exports.assistantRouter = void 0;
 const express_1 = __importDefault(require("express"));
 const assistantService_1 = require("../services/assistantService");
 const memoryService_1 = require("../memory/memoryService");
+const intentDetector_1 = require("../integrations/intentDetector");
+const externalData_1 = require("../integrations/externalData");
 const os = __importStar(require("os"));
 const router = express_1.default.Router();
 exports.assistantRouter = router;
@@ -109,7 +111,57 @@ router.post('/chat', async (req, res) => {
                 importance: 1,
             });
         }
-        // Procesar solicitud
+        // ============================================
+        // DETECCIÓN DE INTENTS PARA DATOS EXTERNOS
+        // ============================================
+        const userText = lastUserMessage?.content || '';
+        const externalIntent = (0, intentDetector_1.detectExternalDataIntent)(userText);
+        // Si detectamos un intent de datos externos, intentamos resolverlo
+        if (externalIntent.type !== 'NONE') {
+            console.log('[EXTERNAL_DATA_HANDLER] Intent detectado:', externalIntent.type);
+            // INTENT: Tipo de cambio USD/MXN
+            if (externalIntent.type === 'EXCHANGE_RATE_USD_MXN') {
+                const exchangeRate = await (0, externalData_1.getExchangeRateUSDToMXN)();
+                if (exchangeRate !== null) {
+                    // Respuesta directa con datos de la API externa
+                    console.log('[EXTERNAL_DATA_HANDLER] Respondiendo con tipo de cambio:', exchangeRate);
+                    const answer = `El tipo de cambio actual USD/MXN está aproximadamente en $${exchangeRate.toFixed(2)} pesos mexicanos por dólar. Esta información proviene de una fuente financiera externa actualizada en tiempo real.`;
+                    return res.json({
+                        answer,
+                        displayText: answer,
+                        actions: [],
+                        memories_to_add: [],
+                        source: 'external_api',
+                        data: { exchangeRate, base: 'USD', target: 'MXN' }
+                    });
+                }
+                else {
+                    // Si la API falla, continuar con OpenAI pero agregar contexto
+                    console.log('[EXTERNAL_DATA_HANDLER] API externa falló, continuando con OpenAI');
+                    // Modificar el último mensaje para indicar que no se pudo obtener datos externos
+                    payload.messages = [
+                        ...payload.messages.slice(0, -1),
+                        {
+                            role: 'system',
+                            content: 'NOTA: El usuario preguntó por el tipo de cambio USD/MXN, pero no se pudo obtener información en tiempo real de fuentes externas. Responde de forma general y sugiere consultar fuentes financieras oficiales.'
+                        },
+                        lastUserMessage
+                    ];
+                }
+            }
+            // Otros intents (WEATHER, NEWS, CRYPTO) caen aquí cuando estén implementados
+            // Por ahora continúan con el flujo normal de OpenAI
+            if (externalIntent.type === 'WEATHER') {
+                console.log('[EXTERNAL_DATA_HANDLER] WEATHER intent detectado pero no implementado, usando OpenAI');
+            }
+            if (externalIntent.type === 'NEWS') {
+                console.log('[EXTERNAL_DATA_HANDLER] NEWS intent detectado pero no implementado, usando OpenAI');
+            }
+            if (externalIntent.type === 'CRYPTO_PRICE') {
+                console.log('[EXTERNAL_DATA_HANDLER] CRYPTO_PRICE intent detectado pero no implementado, usando OpenAI');
+            }
+        }
+        // Procesar solicitud con OpenAI (flujo normal o fallback)
         const response = await (0, assistantService_1.processAssistantRequest)(payload);
         // Reconocimiento simple de acciones basado en texto
         function detectActions(text) {
@@ -157,7 +209,7 @@ router.post('/chat', async (req, res) => {
             return memories;
         }
         const userLastMsg = (payload.messages || []).filter(m => m.role === 'user').slice(-1)[0];
-        const userText = userLastMsg?.content || '';
+        const userTextForActions = userLastMsg?.content || '';
         // Extracción de detalles para citas
         function extractAppointmentDetails(userMessage) {
             const text = userMessage || '';
@@ -215,9 +267,9 @@ router.post('/chat', async (req, res) => {
         }
         // Detectar intención de crear cita y construir acción con detalles
         const actions = [];
-        const appointmentIntent = /(agend(ar|a)\s+(una\s+)?cita|program(ar|a)\s+(una\s+)?reuni[óo]n|cita\s+(mañana|hoy|pasado mañana|el)\b|cita\s+con\s+el\s+dentista)/i.test(userText);
+        const appointmentIntent = /(agend(ar|a)\s+(una\s+)?cita|program(ar|a)\s+(una\s+)?reuni[óo]n|cita\s+(mañana|hoy|pasado mañana|el)\b|cita\s+con\s+el\s+dentista)/i.test(userTextForActions);
         if (appointmentIntent) {
-            const details = extractAppointmentDetails(userText);
+            const details = extractAppointmentDetails(userTextForActions);
             actions.push({
                 type: 'CREATE_APPOINTMENT',
                 payload: {
@@ -230,10 +282,10 @@ router.post('/chat', async (req, res) => {
             });
         }
         else {
-            const genericActions = detectActions(userText + '\n' + (response.content || ''));
+            const genericActions = detectActions(userTextForActions + '\n' + (response.content || ''));
             genericActions.forEach(a => actions.push(a));
         }
-        const memories_to_add = detectMemories(userText + '\n' + (response.content || ''));
+        const memories_to_add = detectMemories(userTextForActions + '\n' + (response.content || ''));
         const answerContent = response.content || '';
         // Respuesta normalizada
         res.json({
