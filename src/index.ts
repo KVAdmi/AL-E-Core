@@ -10,7 +10,13 @@ const app = express();
 // CORS configurado usando ALE_ALLOWED_ORIGINS
 const allowedOrigins = process.env.ALE_ALLOWED_ORIGINS
   ? process.env.ALE_ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : ['http://localhost:3000', 'http://localhost:3001'];
+  : [
+      'https://al-eon.com',
+      'http://localhost:3000', 
+      'http://localhost:3001'
+    ];
+
+const netlifyRegex = /^https:\/\/.+\.netlify\.app$/;
 
 console.log('[CORS] Orígenes permitidos:', allowedOrigins);
 
@@ -31,12 +37,18 @@ const corsOptions = {
       return callback(null, true);
     }
     
+    // Verificar si es un dominio de Netlify
+    if (netlifyRegex.test(origin)) {
+      console.log('[CORS] Origin Netlify - PERMITIDO:', origin);
+      return callback(null, true);
+    }
+    
     console.log('[CORS] Origin BLOQUEADO:', origin);
     console.log('[CORS] Lista de permitidos:', allowedOrigins);
     callback(new Error('Not allowed by CORS: ' + origin));
   },
   credentials: true,
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'OPTIONS', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 };
 
@@ -49,9 +61,9 @@ app.use((req, res, next) => {
     const origin = req.headers.origin;
     console.log('[OPTIONS] Handling preflight for:', req.path, 'from origin:', origin);
     
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.includes(origin) || (origin && netlifyRegex.test(origin))) {
       res.header('Access-Control-Allow-Origin', origin || '*');
-      res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PATCH, DELETE');
       res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
       res.header('Access-Control-Allow-Credentials', 'true');
       return res.sendStatus(200);
@@ -63,8 +75,36 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '10mb' }));
 
-app.get("/health", (req, res) => {
-	res.json({ status: "ok", service: "al-e-core", timestamp: new Date().toISOString() });
+app.get("/health", async (req, res) => {
+	try {
+		const status: any = { 
+			status: "ok", 
+			service: "al-e-core", 
+			timestamp: new Date().toISOString(),
+			uptime: process.uptime(),
+			memory: {
+				used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+				total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024)
+			}
+		};
+
+		// Test DB opcional (comentado para evitar delay en health checks)
+		// try {
+		//   await supabase.from('ae_sessions').select('id').limit(1);
+		//   status.database = 'connected';
+		// } catch (err) {
+		//   status.database = 'error';
+		// }
+
+		res.json(status);
+	} catch (error) {
+		res.status(503).json({
+			status: 'error',
+			service: 'al-e-core',
+			timestamp: new Date().toISOString(),
+			error: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
 });
 
 // app.use("/lia", liaRouter);

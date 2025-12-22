@@ -16,19 +16,24 @@ export class OpenAIAssistantProvider implements IAssistantProvider {
   
   private getSystemPrompt(mode?: string): string {
     switch (mode) {
-      case 'aleon':
+      case 'universal':
+      case 'aleon': // Alias legacy
         return ALEON_SYSTEM_PROMPT;
       
       case 'lucy_legal':
+      case 'legal':
         return LUCY_LEGAL_PROMPT;
       
       case 'lucy_medical':
+      case 'medico':
         return LUCY_MEDICAL_PROMPT;
       
       case 'lucy_insurance':
+      case 'seguros':
         return LUCY_INSURANCE_PROMPT;
       
       case 'lucy_accounting':
+      case 'contabilidad':
         return LUCY_ACCOUNTING_PROMPT;
       
       default:
@@ -39,7 +44,7 @@ export class OpenAIAssistantProvider implements IAssistantProvider {
 
   async chat(request: AssistantRequest): Promise<AssistantResponse> {
     try {
-      const mode = request.mode || 'aleon';
+      const mode = request.mode || 'universal';
       const systemPrompt = this.getSystemPrompt(mode);
       
       const response = await callOpenAIChat({

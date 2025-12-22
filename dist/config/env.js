@@ -20,5 +20,5 @@ exports.env = {
     supabaseServiceRoleKey: ensure(process.env.SUPABASE_SERVICE_ROLE_KEY, "SUPABASE_SERVICE_ROLE_KEY"),
     assistantId: process.env.ASSISTANT_ID || "al-e",
     defaultWorkspaceId: process.env.DEFAULT_WORKSPACE_ID || "default",
-    defaultMode: process.env.DEFAULT_MODE || "aleon",
+    defaultMode: process.env.DEFAULT_MODE || "universal",
 };

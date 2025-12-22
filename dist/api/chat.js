@@ -33,7 +33,33 @@ router.post('/chat', async (req, res) => {
     let sessionId = null;
     try {
         console.log('\n[CHAT] ==================== NUEVA SOLICITUD ====================');
-        const { workspaceId = env_1.env.defaultWorkspaceId, userId, mode = env_1.env.defaultMode, sessionId: requestSessionId, messages, attachments } = req.body;
+        let { workspaceId = env_1.env.defaultWorkspaceId, userId, mode = env_1.env.defaultMode, sessionId: requestSessionId, messages } = req.body;
+        // ============================================
+        // A0) NORMALIZAR MODE + ALIAS
+        // ============================================
+        const allowedModes = new Set(['universal', 'legal', 'medico', 'seguros', 'contabilidad']);
+        // Alias legacy: "aleon" → "universal"
+        if (!mode || typeof mode !== 'string') {
+            mode = 'universal';
+        }
+        mode = mode.toLowerCase().trim();
+        if (mode === 'aleon') {
+            mode = 'universal';
+            console.log(`[CHAT] Modo 'aleon' mapeado a 'universal' (alias legacy)`);
+        }
+        if (!allowedModes.has(mode)) {
+            return res.status(400).json({
+                error: 'INVALID_MODE',
+                message: `Modo inválido: ${mode}. Modos válidos: ${Array.from(allowedModes).join(', ')}`,
+                session_id: null,
+                memories_to_add: []
+            });
+        }
+        // ============================================
+        // A1) PROCESAR ATTACHMENTS (soporta 'attachments' y 'files')
+        // ============================================
+        const attachmentsRaw = (req.body.attachments ?? req.body.files ?? []);
+        const safeAttachments = Array.isArray(attachmentsRaw) ? attachmentsRaw : [];
         // Validación básica
         if (!userId || typeof userId !== 'string') {
             return res.status(400).json({
@@ -60,14 +86,15 @@ router.post('/chat', async (req, res) => {
         const userContent = lastMessage.content;
         console.log(`[CHAT] userId: ${userId}, workspaceId: ${workspaceId}, mode: ${mode}`);
         console.log(`[CHAT] Mensaje: "${userContent.substring(0, 60)}..."`);
+        console.log(`[CHAT] Attachments: ${safeAttachments.length}`);
         // ============================================
-        // A1) PROCESAR ATTACHMENTS SI EXISTEN
+        // A2) PROCESAR ATTACHMENTS SI EXISTEN
         // ============================================
         let attachmentsContext = '';
         let imageUrls = [];
-        if (attachments && Array.isArray(attachments) && attachments.length > 0) {
-            console.log(`[ATTACHMENTS] Recibidos ${attachments.length} attachment(s)`);
-            const processed = await (0, attachments_1.processAttachments)(attachments);
+        if (safeAttachments.length > 0) {
+            console.log(`[ATTACHMENTS] Procesando ${safeAttachments.length} attachment(s)`);
+            const processed = await (0, attachments_1.processAttachments)(safeAttachments);
             // Log para debug
             processed.forEach(p => {
                 console.log(`[ATTACHMENTS] - ${p.name} (${p.type}): ${p.error ? 'ERROR' : 'OK'}`);
