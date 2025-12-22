@@ -1,0 +1,344 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = __importDefault(require("express"));
+const uuid_1 = require("uuid");
+const supabase_1 = require("../db/supabase");
+const env_1 = require("../config/env");
+const helpers_1 = require("../utils/helpers");
+const OpenAIAssistantProvider_1 = require("../ai/providers/OpenAIAssistantProvider");
+const attachments_1 = require("../utils/attachments");
+const router = express_1.default.Router();
+const openaiProvider = new OpenAIAssistantProvider_1.OpenAIAssistantProvider();
+/**
+ * =====================================================
+ * POST /api/ai/chat
+ * =====================================================
+ *
+ * OBJETIVO: Responder al usuario Y guardar SIEMPRE en Supabase
+ *
+ * FLUJO:
+ * 1. Resolver session_id (crear si no existe)
+ * 2. Insertar mensaje del usuario en ae_messages
+ * 3. Llamar a OpenAI
+ * 4. Insertar respuesta del assistant en ae_messages
+ * 5. Actualizar ae_sessions (last_message_at, total_messages, tokens, cost)
+ * 6. (Opcional) Log en ae_requests
+ * 7. Responder al frontend
+ */
+router.post('/chat', async (req, res) => {
+    const startTime = Date.now();
+    let sessionId = null;
+    try {
+        console.log('\n[CHAT] ==================== NUEVA SOLICITUD ====================');
+        const { workspaceId = env_1.env.defaultWorkspaceId, userId, mode = env_1.env.defaultMode, sessionId: requestSessionId, messages, attachments } = req.body;
+        // Validación básica
+        if (!userId || typeof userId !== 'string') {
+            return res.status(400).json({
+                answer: 'Error: userId es requerido y debe ser string',
+                session_id: null,
+                memories_to_add: []
+            });
+        }
+        if (!messages || !Array.isArray(messages) || messages.length === 0) {
+            return res.status(400).json({
+                answer: 'Error: messages debe ser un array no vacío',
+                session_id: null,
+                memories_to_add: []
+            });
+        }
+        const lastMessage = messages[messages.length - 1];
+        if (!lastMessage || lastMessage.role !== 'user') {
+            return res.status(400).json({
+                answer: 'Error: El último mensaje debe tener role="user"',
+                session_id: null,
+                memories_to_add: []
+            });
+        }
+        const userContent = lastMessage.content;
+        console.log(`[CHAT] userId: ${userId}, workspaceId: ${workspaceId}, mode: ${mode}`);
+        console.log(`[CHAT] Mensaje: "${userContent.substring(0, 60)}..."`);
+        // ============================================
+        // A1) PROCESAR ATTACHMENTS SI EXISTEN
+        // ============================================
+        let attachmentsContext = '';
+        let imageUrls = [];
+        if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+            console.log(`[ATTACHMENTS] Recibidos ${attachments.length} attachment(s)`);
+            const processed = await (0, attachments_1.processAttachments)(attachments);
+            // Log para debug
+            processed.forEach(p => {
+                console.log(`[ATTACHMENTS] - ${p.name} (${p.type}): ${p.error ? 'ERROR' : 'OK'}`);
+            });
+            // Extraer texto de documentos
+            attachmentsContext = (0, attachments_1.attachmentsToContext)(processed);
+            // Extraer URLs de imágenes para visión multimodal
+            imageUrls = (0, attachments_1.extractImageUrls)(processed);
+            if (imageUrls.length > 0) {
+                console.log(`[ATTACHMENTS] ${imageUrls.length} imagen(es) para visión multimodal`);
+            }
+        }
+        if (requestSessionId && (0, helpers_1.isUuid)(requestSessionId)) {
+            // Verificar que existe
+            const { data: existingSession } = await supabase_1.supabase
+                .from('ae_sessions')
+                .select('id')
+                .eq('id', requestSessionId)
+                .single();
+            if (existingSession) {
+                sessionId = requestSessionId;
+                console.log(`[CHAT] Usando sesión existente: ${sessionId}`);
+            }
+        }
+        if (!sessionId) {
+            // Crear nueva sesión
+            const newSessionId = (0, uuid_1.v4)();
+            const title = (0, helpers_1.makeTitleFromText)(userContent, 8);
+            const { data: newSession, error: sessionError } = await supabase_1.supabase
+                .from('ae_sessions')
+                .insert({
+                id: newSessionId,
+                assistant_id: env_1.env.assistantId,
+                workspace_id: workspaceId,
+                mode: mode,
+                user_id_old: userId, // Guardar userId string en user_id_old
+                user_id_uuid: null, // Por ahora null hasta tener auth real
+                title: title,
+                last_message_at: new Date().toISOString(),
+                total_messages: 0,
+                total_tokens: 0,
+                estimated_cost: 0,
+                metadata: { source: 'aleon' }
+            })
+                .select('id')
+                .single();
+            if (sessionError) {
+                console.error('[DB] ERROR creando sesión:', sessionError);
+                throw new Error('No se pudo crear la sesión');
+            }
+            sessionId = newSession.id;
+            console.log(`[CHAT] Nueva sesión creada: ${sessionId} - "${title}"`);
+        }
+        // ============================================
+        // B) INSERTAR MENSAJE DEL USUARIO
+        // ============================================
+        const userMessageId = (0, uuid_1.v4)();
+        const userTokens = (0, helpers_1.estimateTokens)(userContent);
+        const { error: userMessageError } = await supabase_1.supabase
+            .from('ae_messages')
+            .insert({
+            id: userMessageId,
+            session_id: sessionId,
+            role: 'user',
+            content: userContent,
+            tokens: userTokens,
+            cost: 0,
+            user_id_uuid: null, // Por ahora null
+            metadata: {
+                source: 'aleon',
+                workspaceId: workspaceId,
+                mode: mode,
+                userId: userId
+            }
+        });
+        if (userMessageError) {
+            console.error('[DB] ERROR guardando mensaje user:', userMessageError);
+            // NO romper el chat, continuar
+        }
+        else {
+            console.log(`[DB] ✓ Mensaje user guardado: ${userMessageId}`);
+        }
+        // ============================================
+        // C) LLAMAR A OPENAI (CON ATTACHMENTS SI HAY)
+        // ============================================
+        console.log('[OPENAI] Enviando request...');
+        let answer = '';
+        let assistantTokens = 0;
+        let modelUsed = 'gpt-4';
+        try {
+            // Preparar mensajes con contexto de attachments
+            let finalMessages = [...messages];
+            // Si hay documentos adjuntos, agregar contexto al último mensaje del usuario
+            if (attachmentsContext) {
+                const lastUserMsg = finalMessages[finalMessages.length - 1];
+                finalMessages[finalMessages.length - 1] = {
+                    ...lastUserMsg,
+                    content: lastUserMsg.content + attachmentsContext
+                };
+            }
+            // Si hay imágenes, usar formato multimodal (GPT-4 Vision)
+            if (imageUrls.length > 0) {
+                const lastUserMsg = finalMessages[finalMessages.length - 1];
+                finalMessages[finalMessages.length - 1] = {
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: lastUserMsg.content },
+                        ...imageUrls
+                    ]
+                };
+                modelUsed = 'gpt-4-vision-preview';
+            }
+            const assistantRequest = {
+                messages: finalMessages,
+                mode: mode,
+                workspaceId: workspaceId,
+                userId: userId
+            };
+            const response = await openaiProvider.chat(assistantRequest);
+            answer = response.content;
+            assistantTokens = (0, helpers_1.estimateTokens)(answer);
+            modelUsed = response.raw?.model || 'gpt-4';
+            console.log(`[OPENAI] ✓ Respuesta recibida (${assistantTokens} tokens aprox)`);
+        }
+        catch (openaiError) {
+            console.error('[OPENAI] ERROR:', openaiError);
+            // Intentar guardar el error en ae_requests
+            try {
+                await supabase_1.supabase.from('ae_requests').insert({
+                    session_id: sessionId,
+                    endpoint: '/api/ai/chat',
+                    method: 'POST',
+                    status_code: 500,
+                    response_time: Date.now() - startTime,
+                    tokens_used: userTokens,
+                    cost: 0,
+                    metadata: {
+                        error: openaiError.message || 'OpenAI error',
+                        userId: userId
+                    }
+                });
+            }
+            catch (logError) {
+                console.error('[DB] Error logging request:', logError);
+            }
+            return res.status(500).json({
+                answer: 'Error al comunicarse con OpenAI. Por favor intenta de nuevo.',
+                session_id: sessionId,
+                memories_to_add: []
+            });
+        }
+        // ============================================
+        // D) INSERTAR MENSAJE DEL ASSISTANT
+        // ============================================
+        const assistantMessageId = (0, uuid_1.v4)();
+        const totalTokens = userTokens + assistantTokens;
+        const estimatedCostValue = (0, helpers_1.estimateCost)(userTokens, assistantTokens, modelUsed);
+        const { error: assistantMessageError } = await supabase_1.supabase
+            .from('ae_messages')
+            .insert({
+            id: assistantMessageId,
+            session_id: sessionId,
+            role: 'assistant',
+            content: answer,
+            tokens: assistantTokens,
+            cost: estimatedCostValue,
+            user_id_uuid: null,
+            metadata: {
+                source: 'aleon',
+                model: modelUsed,
+                workspaceId: workspaceId,
+                mode: mode
+            }
+        });
+        if (assistantMessageError) {
+            console.error('[DB] ERROR guardando mensaje assistant:', assistantMessageError);
+            // NO romper el chat, continuar
+        }
+        else {
+            console.log(`[DB] ✓ Mensaje assistant guardado: ${assistantMessageId}`);
+        }
+        // ============================================
+        // E) ACTUALIZAR SESIÓN
+        // ============================================
+        try {
+            // Primero obtener valores actuales
+            const { data: currentSession } = await supabase_1.supabase
+                .from('ae_sessions')
+                .select('total_messages, total_tokens, estimated_cost')
+                .eq('id', sessionId)
+                .single();
+            const currentMessages = currentSession?.total_messages || 0;
+            const currentTokens = currentSession?.total_tokens || 0;
+            const currentCost = currentSession?.estimated_cost || 0;
+            const { error: updateError } = await supabase_1.supabase
+                .from('ae_sessions')
+                .update({
+                updated_at: new Date().toISOString(),
+                last_message_at: new Date().toISOString(),
+                total_messages: currentMessages + 2, // user + assistant
+                total_tokens: currentTokens + totalTokens,
+                estimated_cost: currentCost + estimatedCostValue
+            })
+                .eq('id', sessionId);
+            if (updateError) {
+                console.error('[DB] ERROR actualizando sesión:', updateError);
+            }
+            else {
+                console.log(`[DB] ✓ Sesión actualizada: +2 mensajes, +${totalTokens} tokens`);
+            }
+        }
+        catch (updateErr) {
+            console.error('[DB] Error actualizando sesión:', updateErr);
+            // NO romper el chat
+        }
+        // ============================================
+        // F) LOG DE REQUEST (RECOMENDADO)
+        // ============================================
+        try {
+            const responseTime = Date.now() - startTime;
+            await supabase_1.supabase.from('ae_requests').insert({
+                session_id: sessionId,
+                endpoint: '/api/ai/chat',
+                method: 'POST',
+                status_code: 200,
+                response_time: responseTime,
+                tokens_used: totalTokens,
+                cost: estimatedCostValue,
+                metadata: {
+                    model: modelUsed,
+                    userId: userId,
+                    workspaceId: workspaceId,
+                    mode: mode
+                }
+            });
+            console.log(`[DB] ✓ Request logged (${responseTime}ms)`);
+        }
+        catch (logError) {
+            console.error('[DB] Error logging request:', logError);
+            // NO romper el chat
+        }
+        // ============================================
+        // G) RESPUESTA AL FRONTEND
+        // ============================================
+        const totalTime = Date.now() - startTime;
+        console.log(`[CHAT] ✓ Completado en ${totalTime}ms`);
+        console.log('[CHAT] ==================== FIN SOLICITUD ====================\n');
+        res.json({
+            answer: answer,
+            session_id: sessionId,
+            memories_to_add: []
+        });
+    }
+    catch (error) {
+        console.error('[CHAT] ERROR CRÍTICO:', error);
+        res.status(500).json({
+            answer: 'Error interno del servidor',
+            session_id: sessionId,
+            memories_to_add: []
+        });
+    }
+});
+/**
+ * GET /api/ai/ping
+ * Health check
+ */
+router.get('/ping', (req, res) => {
+    res.json({
+        status: 'AL-E CORE ONLINE',
+        timestamp: new Date().toISOString(),
+        version: '2.0-SUPABASE-GUARANTEED'
+    });
+});
+exports.default = router;

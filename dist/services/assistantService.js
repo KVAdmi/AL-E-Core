@@ -19,7 +19,7 @@ class AssistantService {
             // Logs para debugging (sin mostrar contenido completo en producción)
             this.logRequest(payload);
             // PASO 1: Obtener memorias relevantes
-            const memories = await (0, memoryService_1.getRelevantMemories)(payload.workspaceId || 'default', payload.userId || 'anonymous', payload.mode || 'universal', 20);
+            const memories = await (0, memoryService_1.getRelevantMemories)(payload.workspaceId || 'default', payload.userId || 'anonymous', payload.mode || 'aleon', 20);
             // PASO 2: Inyectar memorias en los mensajes si hay memorias disponibles
             const messagesWithMemory = [...payload.messages];
             if (memories && memories.length > 0) {
@@ -77,12 +77,9 @@ class AssistantService {
                 throw new Error(`Mensaje ${index}: contenido inválido o vacío`);
             }
         });
-        // Validar modo si se especifica
-        if (payload.mode) {
-            const validModes = ['universal', 'legal', 'medico', 'seguros', 'contabilidad'];
-            if (!validModes.includes(payload.mode)) {
-                throw new Error(`Modo inválido: ${payload.mode}. Modos válidos: ${validModes.join(', ')}`);
-            }
+        // Validar modo si se especifica (sin restricciones duras)
+        if (payload.mode && typeof payload.mode !== 'string') {
+            throw new Error('Modo debe ser un string válido');
         }
     }
     /**
@@ -94,7 +91,7 @@ class AssistantService {
             timestamp: new Date().toISOString(),
             workspaceId: payload.workspaceId,
             userId: payload.userId,
-            mode: payload.mode || 'universal',
+            mode: payload.mode || 'aleon',
             messageCount: payload.messages.length,
             // En producción no loguear contenido completo
             messages: isProduction

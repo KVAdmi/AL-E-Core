@@ -23,7 +23,7 @@ export class AssistantService {
       const memories = await getRelevantMemories(
         payload.workspaceId || 'default',
         payload.userId || 'anonymous', 
-        payload.mode || 'universal',
+        payload.mode || 'aleon',
         20
       );
 
@@ -94,12 +94,9 @@ export class AssistantService {
       }
     });
 
-    // Validar modo si se especifica
-    if (payload.mode) {
-      const validModes = ['universal', 'legal', 'medico', 'seguros', 'contabilidad'];
-      if (!validModes.includes(payload.mode)) {
-        throw new Error(`Modo inválido: ${payload.mode}. Modos válidos: ${validModes.join(', ')}`);
-      }
+    // Validar modo si se especifica (sin restricciones duras)
+    if (payload.mode && typeof payload.mode !== 'string') {
+      throw new Error('Modo debe ser un string válido');
     }
   }
 
@@ -113,7 +110,7 @@ export class AssistantService {
       timestamp: new Date().toISOString(),
       workspaceId: payload.workspaceId,
       userId: payload.userId,
-      mode: payload.mode || 'universal',
+      mode: payload.mode || 'aleon',
       messageCount: payload.messages.length,
       // En producción no loguear contenido completo
       messages: isProduction 

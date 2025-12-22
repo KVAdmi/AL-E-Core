@@ -1,9 +1,13 @@
 import express from 'express';
+import { v4 as uuidv4 } from 'uuid';
 import { processAssistantRequest } from '../services/assistantService';
 import { AssistantRequest } from '../ai/IAssistantProvider';
 import { saveMemory } from '../memory/memoryService';
 import { detectExternalDataIntent } from '../integrations/intentDetector';
 import { getExchangeRateUSDToMXN } from '../integrations/externalData';
+import { detectLanguage, determineResponseLanguage, generateLanguageInstructions } from '../utils/language';
+import { ChatRequest, ChatResponse, AssistantMode } from '../types';
+import { db } from '../db/supabase';
 import * as os from 'os';
 
 const router = express.Router();
@@ -23,69 +27,141 @@ router.get('/ping', (req, res) => {
 /**
  * POST /api/ai/chat
  * Endpoint principal para interactuar con L.U.C.I / AL-E
+ * CONTRATO ESTANDARIZADO GPT PRO
  */
 router.post('/chat', async (req, res) => {
-  console.log("[AL-E CORE] Chat endpoint invocado");
-  console.log("[AL-E CHAT] Request recibido");
-  console.log("Headers:", req.headers);
-  console.log("Body:", req.body);
-  console.log("[AL-E CORE] Body recibido:", req.body);
+  console.log("[AL-E CORE] Chat endpoint invocado - GPT PRO");
+  const startTime = Date.now();
 
   try {
-    // Extraer y validar payload
-    const payload: AssistantRequest = {
-      workspaceId: req.body.workspaceId,
+    // Extraer y validar payload con soporte para sesiones
+    const chatRequest: ChatRequest = {
+      workspaceId: req.body.workspaceId || 'default',
       userId: req.body.userId,
-      mode: req.body.mode,
-      messages: req.body.messages
+      mode: req.body.mode || 'aleon',
+      sessionId: req.body.sessionId,
+      messages: req.body.messages,
+      meta: req.body.meta
     };
 
-    // Log del payload recibido antes de procesar
-    console.log("[AL-E CORE] /api/ai/chat payload recibido:", {
-      hasMessages: !!payload.messages,
-      messagesLength: Array.isArray(payload.messages) ? payload.messages.length : "n/a",
-      workspaceId: payload.workspaceId,
-      userId: payload.userId,
-      mode: payload.mode
-    });
+    // Validaciones básicas
+    if (!chatRequest.userId) {
+      return res.status(400).json({
+        error: "MISSING_USER_ID",
+        message: "userId is required"
+      });
+    }
 
-    // Validación básica de estructura
-    if (!payload.messages || !Array.isArray(payload.messages)) {
+    if (!chatRequest.messages || !Array.isArray(chatRequest.messages)) {
       return res.status(400).json({
         error: "INVALID_MESSAGES",
         message: "messages debe ser un array con al menos un mensaje de usuario"
       });
     }
 
-    // Validar que haya al menos un mensaje de usuario y que no esté vacío
-    const hasUserMessage = payload.messages.some(msg => msg.role === 'user');
-    if (payload.messages.length === 0 || !hasUserMessage) {
+    // Validar que haya al menos un mensaje de usuario
+    const hasUserMessage = chatRequest.messages.some(msg => msg.role === 'user');
+    if (chatRequest.messages.length === 0 || !hasUserMessage) {
       return res.status(400).json({
         error: "NO_USER_MESSAGE",
         message: "Debe incluir al menos un mensaje con role 'user'"
       });
     }
 
-    // GUARDAR MEMORIA: Último mensaje del usuario
-    const lastUserMessage = payload.messages
-      .filter((m: any) => m.role === 'user')
-      .slice(-1)[0]; // Usar slice(-1)[0] en lugar de .at(-1)
+    // ============================================
+    // GESTIÓN DE SESIÓN
+    // ============================================
+    let sessionId = chatRequest.sessionId;
+    
+    // Crear nueva sesión si no se proporciona
+    if (!sessionId) {
+      const session = await db.createSession({
+        workspaceId: chatRequest.workspaceId,
+        userId: chatRequest.userId,
+        mode: chatRequest.mode
+      });
+      sessionId = session.id;
+      console.log('[CHAT] Nueva sesión creada:', sessionId);
+    }
 
-    if (lastUserMessage && typeof lastUserMessage.content === 'string') {
-      // Por ahora, guardamos SIEMPRE el último mensaje del usuario como memoria
-      await saveMemory({
-        workspaceId: payload.workspaceId || 'default',
-        userId: payload.userId || 'anonymous',
-        mode: payload.mode || 'universal',
-        memory: lastUserMessage.content,
-        importance: 1,
+    // Guardar mensaje del usuario en la base de datos
+    const lastUserMessage = chatRequest.messages
+      .filter((m: any) => m.role === 'user')
+      .slice(-1)[0];
+
+    if (lastUserMessage) {
+      await db.addMessage({
+        sessionId,
+        role: 'user',
+        content: lastUserMessage.content,
+        meta: lastUserMessage.meta || {}
+      });
+    }
+
+    // ============================================
+    // DETECCIÓN Y CONFIGURACIÓN DE IDIOMA
+    // ============================================
+    const userText = lastUserMessage?.content || '';
+    const detectedLanguage = detectLanguage(userText);
+    const responseLanguage = determineResponseLanguage(
+      userText, 
+      chatRequest.meta?.responseLanguage
+    );
+    
+    console.log('[LANGUAGE] Detección de idioma:', {
+      userText: userText.substring(0, 50) + '...',
+      detectedLanguage: detectedLanguage.primaryLanguage,
+      confidence: detectedLanguage.confidence,
+      responseLanguage,
+      override: chatRequest.meta?.responseLanguage
+    });
+
+    // ============================================
+    // RECUPERAR MEMORIA RELEVANTE (RAG)
+    // ============================================
+    const relevantMemories = await db.getRelevantMemories(
+      chatRequest.workspaceId || 'default',
+      chatRequest.userId,
+      chatRequest.mode || 'aleon'
+    );
+
+    // ============================================
+    // PREPARAR CONTEXTO PARA OPENAI
+    // ============================================
+    const payload: AssistantRequest = {
+      workspaceId: chatRequest.workspaceId,
+      userId: chatRequest.userId,
+      mode: chatRequest.mode || 'aleon',
+      messages: chatRequest.messages
+    };
+
+    // Agregar instrucciones de idioma al contexto si no es inglés por defecto
+    if (responseLanguage !== 'en') {
+      const languageInstructions = generateLanguageInstructions(responseLanguage);
+      payload.messages = [
+        {
+          role: 'system',
+          content: languageInstructions
+        },
+        ...payload.messages
+      ];
+    }
+
+    // Agregar memoria relevante al contexto
+    if (relevantMemories.length > 0) {
+      const memoryContext = relevantMemories
+        .map(m => `[Memoria]: ${m.memory}`)
+        .join('\n');
+      
+      payload.messages.unshift({
+        role: 'system',
+        content: `Contexto de memorias del usuario:\n${memoryContext}`
       });
     }
 
     // ============================================
     // DETECCIÓN DE INTENTS PARA DATOS EXTERNOS
     // ============================================
-    const userText = lastUserMessage?.content || '';
     const externalIntent = detectExternalDataIntent(userText);
 
     // Si detectamos un intent de datos externos, intentamos resolverlo
@@ -194,7 +270,9 @@ router.post('/chat', async (req, res) => {
     }
 
     const userLastMsg = (payload.messages || []).filter(m => m.role === 'user').slice(-1)[0];
-    const userTextForActions = userLastMsg?.content || '';
+    const userTextForActions = typeof userLastMsg?.content === 'string' 
+      ? userLastMsg.content 
+      : '';
 
     // Extracción de detalles para citas
     function extractAppointmentDetails(userMessage: string) {
@@ -274,28 +352,107 @@ router.post('/chat', async (req, res) => {
 
     const memories_to_add = detectMemories(userTextForActions + '\n' + (response.content || ''));
 
+    // ============================================
+    // GUARDAR RESPUESTA DEL ASISTENTE
+    // ============================================
     const answerContent = response.content || '';
-
-    // Respuesta normalizada
-    res.json({
-      answer: answerContent,
-      displayText: answerContent, // Campo para UI - texto limpio sin JSON
-      actions,
-      memories_to_add
+    
+    await db.addMessage({
+      sessionId,
+      role: 'assistant',
+      content: answerContent,
+      meta: {
+        model: 'gpt-4',
+        tokensUsed: response.usage?.total_tokens || 0,
+        detectedLanguage: detectedLanguage.primaryLanguage,
+        responseLanguage
+      }
     });
 
-  } catch (error) {
-    // Log completo del error
-    if (error instanceof Error) {
-      console.error('[ASSISTANT_ERROR] /api/ai/chat:', error.stack || error);
-    } else {
-      console.error('[ASSISTANT_ERROR] /api/ai/chat:', error);
+    // ============================================
+    // GUARDAR MEMORIAS DETECTADAS
+    // ============================================
+    for (const memory of memories_to_add) {
+      await db.saveMemory({
+        workspaceId: chatRequest.workspaceId || 'default',
+        userId: chatRequest.userId,
+        mode: chatRequest.mode || 'aleon',
+        memory: `${memory.kind}: ${memory.value}`,
+        importance: memory.importance || 1,
+        memoryType: 'user_fact'
+      });
     }
 
-    // Respuesta de error más clara y controlada
+    // ============================================
+    // LOGGING DE REQUEST PARA OBSERVABILIDAD
+    // ============================================
+    const latencyMs = Date.now() - startTime;
+    await db.logRequest({
+      sessionId,
+      userId: chatRequest.userId,
+      endpoint: '/api/ai/chat',
+      model: 'gpt-4',
+      tokensIn: response.usage?.prompt_tokens || 0,
+      tokensOut: response.usage?.completion_tokens || 0,
+      latencyMs,
+      costUsd: (response.usage?.total_tokens || 0) * 0.00003, // Estimación
+      statusCode: 200
+    });
+
+    // ============================================
+    // RESPUESTA ESTANDARIZADA GPT PRO
+    // ============================================
+    const standardResponse: ChatResponse = {
+      answer: answerContent,
+      sessionId,
+      actions,
+      sources: [], // Se llenarán con web search, archivos, etc.
+      artifacts: [], // Documentos, imágenes generadas, etc.
+      memories_to_add,
+      meta: {
+        detectedLanguage: detectedLanguage.primaryLanguage,
+        responseLanguage,
+        model: 'gpt-4',
+        tokens: response.usage?.total_tokens || 0,
+        cost: (response.usage?.total_tokens || 0) * 0.00003,
+        ...(chatRequest.meta?.enableTTS && { audioUrl: null })
+      }
+    };
+
+    console.log('[CHAT] Respuesta enviada - sesión:', sessionId, 'tokens:', response.usage?.total_tokens);
+    
+    res.json(standardResponse);
+
+  } catch (error) {
+    // Logging de error
+    const latencyMs = Date.now() - startTime;
+    
+    // Intentar obtener sessionId y userId si están disponibles
+    let sessionId, userId;
+    try {
+      sessionId = req.body.sessionId;
+      userId = req.body.userId || 'unknown';
+    } catch {
+      sessionId = undefined;
+      userId = 'unknown';
+    }
+    
+    await db.logRequest({
+      sessionId,
+      userId,
+      endpoint: '/api/ai/chat',
+      latencyMs,
+      statusCode: 500,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error'
+    });
+
+    console.error('[CHAT_ERROR] Error en /api/ai/chat:', error);
+
+    // Respuesta de error estandarizada
     res.status(500).json({
-      error: 'ASSISTANT_ERROR',
-      message: error instanceof Error ? (error.message || 'Error interno en AL-E Core') : 'Error interno en AL-E Core',
+      error: 'CHAT_ERROR',
+      message: error instanceof Error ? error.message : 'Error interno en AL-E Core',
+      sessionId: sessionId || null,
       timestamp: new Date().toISOString()
     });
   }
@@ -323,7 +480,7 @@ router.get('/status', async (req, res) => {
       status: 'ok',
       service: 'AL-E Assistant',
       version: '1.0.0',
-      modes: ['universal', 'legal', 'medico', 'seguros', 'contabilidad'],
+      modes: ['aleon'],  // Solo AL-EON generalista
       provider: 'openai',
       memory: {
         enabled: true,
@@ -356,7 +513,7 @@ router.get('/memories', async (req, res) => {
     const memories = await getRelevantMemories(
       workspaceId as string || 'default',
       userId as string || 'anonymous',
-      mode as string || 'universal',
+      mode as string || 'aleon',
       parseInt(limit as string) || 10
     );
 

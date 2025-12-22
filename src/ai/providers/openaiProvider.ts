@@ -3,11 +3,14 @@ import OpenAI from 'openai';
 interface OpenAIChatRequest {
   messages: Array<{
     role: 'system' | 'user' | 'assistant';
-    content: string;
+    content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>;
   }>;
   model?: string;
   systemPrompt?: string;
   temperature?: number;
+  topP?: number;
+  presencePenalty?: number;
+  frequencyPenalty?: number;
 }
 
 interface OpenAIChatResponse {
@@ -19,7 +22,10 @@ export async function callOpenAIChat({
   messages,
   model = 'gpt-4-turbo',
   systemPrompt,
-  temperature = 0.7
+  temperature = 0.7,
+  topP = 1.0,
+  presencePenalty = 0.0,
+  frequencyPenalty = 0.0
 }: OpenAIChatRequest): Promise<OpenAIChatResponse> {
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -38,10 +44,13 @@ export async function callOpenAIChat({
   try {
     const completion = await openai.chat.completions.create({
       model,
-      messages: finalMessages,
+      messages: finalMessages as any, // Cast necesario para soportar multimodal
       temperature,
-      max_tokens: 4000,
-      response_format: { type: "json_object" }
+      top_p: topP,
+      presence_penalty: presencePenalty,
+      frequency_penalty: frequencyPenalty,
+      max_tokens: 4000
+      // NO usar response_format json_object para AL-EON (responde en texto natural)
     });
 
     const content = completion.choices[0]?.message?.content || '';

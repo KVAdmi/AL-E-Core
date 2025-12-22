@@ -59,4 +59,4 @@ temp/
 # SSL certificates (if any)
 *.pem
 *.key
-*.crt
+*.crt.env

@@ -39,9 +39,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.assistantRouter = void 0;
 const express_1 = __importDefault(require("express"));
 const assistantService_1 = require("../services/assistantService");
-const memoryService_1 = require("../memory/memoryService");
 const intentDetector_1 = require("../integrations/intentDetector");
 const externalData_1 = require("../integrations/externalData");
+const language_1 = require("../utils/language");
+const supabase_1 = require("../db/supabase");
 const os = __importStar(require("os"));
 const router = express_1.default.Router();
 exports.assistantRouter = router;
@@ -59,62 +60,118 @@ router.get('/ping', (req, res) => {
 /**
  * POST /api/ai/chat
  * Endpoint principal para interactuar con L.U.C.I / AL-E
+ * CONTRATO ESTANDARIZADO GPT PRO
  */
 router.post('/chat', async (req, res) => {
-    console.log("[AL-E CORE] Chat endpoint invocado");
-    console.log("[AL-E CHAT] Request recibido");
-    console.log("Headers:", req.headers);
-    console.log("Body:", req.body);
-    console.log("[AL-E CORE] Body recibido:", req.body);
+    console.log("[AL-E CORE] Chat endpoint invocado - GPT PRO");
+    const startTime = Date.now();
     try {
-        // Extraer y validar payload
-        const payload = {
-            workspaceId: req.body.workspaceId,
+        // Extraer y validar payload con soporte para sesiones
+        const chatRequest = {
+            workspaceId: req.body.workspaceId || 'default',
             userId: req.body.userId,
-            mode: req.body.mode,
-            messages: req.body.messages
+            mode: req.body.mode || 'aleon',
+            sessionId: req.body.sessionId,
+            messages: req.body.messages,
+            meta: req.body.meta
         };
-        // Log del payload recibido antes de procesar
-        console.log("[AL-E CORE] /api/ai/chat payload recibido:", {
-            hasMessages: !!payload.messages,
-            messagesLength: Array.isArray(payload.messages) ? payload.messages.length : "n/a",
-            workspaceId: payload.workspaceId,
-            userId: payload.userId,
-            mode: payload.mode
-        });
-        // Validación básica de estructura
-        if (!payload.messages || !Array.isArray(payload.messages)) {
+        // Validaciones básicas
+        if (!chatRequest.userId) {
+            return res.status(400).json({
+                error: "MISSING_USER_ID",
+                message: "userId is required"
+            });
+        }
+        if (!chatRequest.messages || !Array.isArray(chatRequest.messages)) {
             return res.status(400).json({
                 error: "INVALID_MESSAGES",
                 message: "messages debe ser un array con al menos un mensaje de usuario"
             });
         }
-        // Validar que haya al menos un mensaje de usuario y que no esté vacío
-        const hasUserMessage = payload.messages.some(msg => msg.role === 'user');
-        if (payload.messages.length === 0 || !hasUserMessage) {
+        // Validar que haya al menos un mensaje de usuario
+        const hasUserMessage = chatRequest.messages.some(msg => msg.role === 'user');
+        if (chatRequest.messages.length === 0 || !hasUserMessage) {
             return res.status(400).json({
                 error: "NO_USER_MESSAGE",
                 message: "Debe incluir al menos un mensaje con role 'user'"
             });
         }
-        // GUARDAR MEMORIA: Último mensaje del usuario
-        const lastUserMessage = payload.messages
+        // ============================================
+        // GESTIÓN DE SESIÓN
+        // ============================================
+        let sessionId = chatRequest.sessionId;
+        // Crear nueva sesión si no se proporciona
+        if (!sessionId) {
+            const session = await supabase_1.db.createSession({
+                workspaceId: chatRequest.workspaceId,
+                userId: chatRequest.userId,
+                mode: chatRequest.mode
+            });
+            sessionId = session.id;
+            console.log('[CHAT] Nueva sesión creada:', sessionId);
+        }
+        // Guardar mensaje del usuario en la base de datos
+        const lastUserMessage = chatRequest.messages
             .filter((m) => m.role === 'user')
-            .slice(-1)[0]; // Usar slice(-1)[0] en lugar de .at(-1)
-        if (lastUserMessage && typeof lastUserMessage.content === 'string') {
-            // Por ahora, guardamos SIEMPRE el último mensaje del usuario como memoria
-            await (0, memoryService_1.saveMemory)({
-                workspaceId: payload.workspaceId || 'default',
-                userId: payload.userId || 'anonymous',
-                mode: payload.mode || 'universal',
-                memory: lastUserMessage.content,
-                importance: 1,
+            .slice(-1)[0];
+        if (lastUserMessage) {
+            await supabase_1.db.addMessage({
+                sessionId,
+                role: 'user',
+                content: lastUserMessage.content,
+                meta: lastUserMessage.meta || {}
+            });
+        }
+        // ============================================
+        // DETECCIÓN Y CONFIGURACIÓN DE IDIOMA
+        // ============================================
+        const userText = lastUserMessage?.content || '';
+        const detectedLanguage = (0, language_1.detectLanguage)(userText);
+        const responseLanguage = (0, language_1.determineResponseLanguage)(userText, chatRequest.meta?.responseLanguage);
+        console.log('[LANGUAGE] Detección de idioma:', {
+            userText: userText.substring(0, 50) + '...',
+            detectedLanguage: detectedLanguage.primaryLanguage,
+            confidence: detectedLanguage.confidence,
+            responseLanguage,
+            override: chatRequest.meta?.responseLanguage
+        });
+        // ============================================
+        // RECUPERAR MEMORIA RELEVANTE (RAG)
+        // ============================================
+        const relevantMemories = await supabase_1.db.getRelevantMemories(chatRequest.workspaceId || 'default', chatRequest.userId, chatRequest.mode || 'aleon');
+        // ============================================
+        // PREPARAR CONTEXTO PARA OPENAI
+        // ============================================
+        const payload = {
+            workspaceId: chatRequest.workspaceId,
+            userId: chatRequest.userId,
+            mode: chatRequest.mode || 'aleon',
+            messages: chatRequest.messages
+        };
+        // Agregar instrucciones de idioma al contexto si no es inglés por defecto
+        if (responseLanguage !== 'en') {
+            const languageInstructions = (0, language_1.generateLanguageInstructions)(responseLanguage);
+            payload.messages = [
+                {
+                    role: 'system',
+                    content: languageInstructions
+                },
+                ...payload.messages
+            ];
+        }
+        // Agregar memoria relevante al contexto
+        if (relevantMemories.length > 0) {
+            const memoryContext = relevantMemories
+                .map(m => `[Memoria]: ${m.memory}`)
+                .join('\n');
+            payload.messages.unshift({
+                role: 'system',
+                content: `Contexto de memorias del usuario:\n${memoryContext}`
             });
         }
         // ============================================
         // DETECCIÓN DE INTENTS PARA DATOS EXTERNOS
         // ============================================
-        const userText = lastUserMessage?.content || '';
         const externalIntent = (0, intentDetector_1.detectExternalDataIntent)(userText);
         // Si detectamos un intent de datos externos, intentamos resolverlo
         if (externalIntent.type !== 'NONE') {
@@ -209,7 +266,9 @@ router.post('/chat', async (req, res) => {
             return memories;
         }
         const userLastMsg = (payload.messages || []).filter(m => m.role === 'user').slice(-1)[0];
-        const userTextForActions = userLastMsg?.content || '';
+        const userTextForActions = typeof userLastMsg?.content === 'string'
+            ? userLastMsg.content
+            : '';
         // Extracción de detalles para citas
         function extractAppointmentDetails(userMessage) {
             const text = userMessage || '';
@@ -286,27 +345,98 @@ router.post('/chat', async (req, res) => {
             genericActions.forEach(a => actions.push(a));
         }
         const memories_to_add = detectMemories(userTextForActions + '\n' + (response.content || ''));
+        // ============================================
+        // GUARDAR RESPUESTA DEL ASISTENTE
+        // ============================================
         const answerContent = response.content || '';
-        // Respuesta normalizada
-        res.json({
-            answer: answerContent,
-            displayText: answerContent, // Campo para UI - texto limpio sin JSON
-            actions,
-            memories_to_add
+        await supabase_1.db.addMessage({
+            sessionId,
+            role: 'assistant',
+            content: answerContent,
+            meta: {
+                model: 'gpt-4',
+                tokensUsed: response.usage?.total_tokens || 0,
+                detectedLanguage: detectedLanguage.primaryLanguage,
+                responseLanguage
+            }
         });
+        // ============================================
+        // GUARDAR MEMORIAS DETECTADAS
+        // ============================================
+        for (const memory of memories_to_add) {
+            await supabase_1.db.saveMemory({
+                workspaceId: chatRequest.workspaceId || 'default',
+                userId: chatRequest.userId,
+                mode: chatRequest.mode || 'aleon',
+                memory: `${memory.kind}: ${memory.value}`,
+                importance: memory.importance || 1,
+                memoryType: 'user_fact'
+            });
+        }
+        // ============================================
+        // LOGGING DE REQUEST PARA OBSERVABILIDAD
+        // ============================================
+        const latencyMs = Date.now() - startTime;
+        await supabase_1.db.logRequest({
+            sessionId,
+            userId: chatRequest.userId,
+            endpoint: '/api/ai/chat',
+            model: 'gpt-4',
+            tokensIn: response.usage?.prompt_tokens || 0,
+            tokensOut: response.usage?.completion_tokens || 0,
+            latencyMs,
+            costUsd: (response.usage?.total_tokens || 0) * 0.00003, // Estimación
+            statusCode: 200
+        });
+        // ============================================
+        // RESPUESTA ESTANDARIZADA GPT PRO
+        // ============================================
+        const standardResponse = {
+            answer: answerContent,
+            sessionId,
+            actions,
+            sources: [], // Se llenarán con web search, archivos, etc.
+            artifacts: [], // Documentos, imágenes generadas, etc.
+            memories_to_add,
+            meta: {
+                detectedLanguage: detectedLanguage.primaryLanguage,
+                responseLanguage,
+                model: 'gpt-4',
+                tokens: response.usage?.total_tokens || 0,
+                cost: (response.usage?.total_tokens || 0) * 0.00003,
+                ...(chatRequest.meta?.enableTTS && { audioUrl: null })
+            }
+        };
+        console.log('[CHAT] Respuesta enviada - sesión:', sessionId, 'tokens:', response.usage?.total_tokens);
+        res.json(standardResponse);
     }
     catch (error) {
-        // Log completo del error
-        if (error instanceof Error) {
-            console.error('[ASSISTANT_ERROR] /api/ai/chat:', error.stack || error);
+        // Logging de error
+        const latencyMs = Date.now() - startTime;
+        // Intentar obtener sessionId y userId si están disponibles
+        let sessionId, userId;
+        try {
+            sessionId = req.body.sessionId;
+            userId = req.body.userId || 'unknown';
         }
-        else {
-            console.error('[ASSISTANT_ERROR] /api/ai/chat:', error);
+        catch {
+            sessionId = undefined;
+            userId = 'unknown';
         }
-        // Respuesta de error más clara y controlada
+        await supabase_1.db.logRequest({
+            sessionId,
+            userId,
+            endpoint: '/api/ai/chat',
+            latencyMs,
+            statusCode: 500,
+            errorMessage: error instanceof Error ? error.message : 'Unknown error'
+        });
+        console.error('[CHAT_ERROR] Error en /api/ai/chat:', error);
+        // Respuesta de error estandarizada
         res.status(500).json({
-            error: 'ASSISTANT_ERROR',
-            message: error instanceof Error ? (error.message || 'Error interno en AL-E Core') : 'Error interno en AL-E Core',
+            error: 'CHAT_ERROR',
+            message: error instanceof Error ? error.message : 'Error interno en AL-E Core',
+            sessionId: sessionId || null,
             timestamp: new Date().toISOString()
         });
     }
@@ -332,7 +462,7 @@ router.get('/status', async (req, res) => {
             status: 'ok',
             service: 'AL-E Assistant',
             version: '1.0.0',
-            modes: ['universal', 'legal', 'medico', 'seguros', 'contabilidad'],
+            modes: ['aleon'], // Solo AL-EON generalista
             provider: 'openai',
             memory: {
                 enabled: true,
@@ -360,7 +490,7 @@ router.get('/memories', async (req, res) => {
     try {
         const { workspaceId, userId, mode, limit } = req.query;
         const { getRelevantMemories } = await Promise.resolve().then(() => __importStar(require('../memory/memoryService')));
-        const memories = await getRelevantMemories(workspaceId || 'default', userId || 'anonymous', mode || 'universal', parseInt(limit) || 10);
+        const memories = await getRelevantMemories(workspaceId || 'default', userId || 'anonymous', mode || 'aleon', parseInt(limit) || 10);
         res.json({
             memories,
             count: memories.length,

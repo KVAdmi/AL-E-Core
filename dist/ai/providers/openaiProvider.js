@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.callOpenAIChat = callOpenAIChat;
 const openai_1 = __importDefault(require("openai"));
-async function callOpenAIChat({ messages, model = 'gpt-4-turbo', systemPrompt, temperature = 0.7 }) {
+async function callOpenAIChat({ messages, model = 'gpt-4-turbo', systemPrompt, temperature = 0.7, topP = 1.0, presencePenalty = 0.0, frequencyPenalty = 0.0 }) {
     const openai = new openai_1.default({
         apiKey: process.env.OPENAI_API_KEY,
     });
@@ -20,10 +20,13 @@ async function callOpenAIChat({ messages, model = 'gpt-4-turbo', systemPrompt, t
     try {
         const completion = await openai.chat.completions.create({
             model,
-            messages: finalMessages,
+            messages: finalMessages, // Cast necesario para soportar multimodal
             temperature,
-            max_tokens: 4000,
-            response_format: { type: "json_object" }
+            top_p: topP,
+            presence_penalty: presencePenalty,
+            frequency_penalty: frequencyPenalty,
+            max_tokens: 4000
+            // NO usar response_format json_object para AL-EON (responde en texto natural)
         });
         const content = completion.choices[0]?.message?.content || '';
         return {

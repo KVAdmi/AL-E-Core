@@ -2,7 +2,7 @@ export interface MemoryRecord {
   id: string;
   workspaceId?: string | null;
   userId?: string | null;
-  mode: 'universal' | 'legal' | 'medico' | 'seguros' | 'contabilidad';
+  mode: string;
   type: 'profile' | 'preference' | 'project' | 'decision' | 'fact';
   summary: string;
   importance: number;
@@ -22,7 +22,7 @@ export interface MemoryQuery {
 export interface NewMemoryInput {
   workspaceId?: string;
   userId?: string;
-  mode: 'universal' | 'legal' | 'medico' | 'seguros' | 'contabilidad';
+  mode: string;
   type: 'profile' | 'preference' | 'project' | 'decision' | 'fact';
   summary: string;
   importance?: number;

@@ -13,4 +13,8 @@ export const env = {
 	openaiApiKey: ensure(process.env.OPENAI_API_KEY, "OPENAI_API_KEY"),
 	supabaseUrl: ensure(process.env.SUPABASE_URL, "SUPABASE_URL"),
 	supabaseAnonKey: ensure(process.env.SUPABASE_ANON_KEY, "SUPABASE_ANON_KEY"),
+	supabaseServiceRoleKey: ensure(process.env.SUPABASE_SERVICE_ROLE_KEY, "SUPABASE_SERVICE_ROLE_KEY"),
+	assistantId: process.env.ASSISTANT_ID || "al-e",
+	defaultWorkspaceId: process.env.DEFAULT_WORKSPACE_ID || "default",
+	defaultMode: process.env.DEFAULT_MODE || "aleon",
 };
