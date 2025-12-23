@@ -10,6 +10,7 @@ import multer from 'multer';
 import { ingestFiles, listIngestedFiles } from '../services/fileIngestService';
 import { getKnowledgeStats } from '../services/chunkRetrieval';
 import { UploadedFile } from '../utils/documentText';
+import { optionalAuth, getUserId } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -45,8 +46,9 @@ const upload = multer({
  * POST /api/files/ingest
  * 
  * Ingiere documentos completos para entrenamiento estructural
+ * Auth: Opcional (soporta guest mode)
  */
-router.post('/ingest', upload.array('files', 10), async (req, res) => {
+router.post('/ingest', optionalAuth, upload.array('files', 10), async (req, res) => {
   const startTime = Date.now();
 
   try {
@@ -62,8 +64,11 @@ router.post('/ingest', upload.array('files', 10), async (req, res) => {
 
     // Extraer parámetros (pueden venir como string en multipart)
     const workspaceId = String(req.body.workspace_id || req.body.workspaceId || '').trim();
-    const userId = req.body.user_id || req.body.userId || undefined;
+    const bodyUserId = req.body.user_id || req.body.userId || undefined;
     const projectId = req.body.project_id || req.body.projectId || undefined;
+
+    // Prioridad: usuario autenticado > userId del body
+    const userId = getUserId(req) || bodyUserId;
 
     // Validar workspace_id requerido
     if (!workspaceId) {
@@ -76,7 +81,7 @@ router.post('/ingest', upload.array('files', 10), async (req, res) => {
     console.log(`\n[FILES/INGEST] ==================== NUEVA INGESTA ====================`);
     console.log(`[FILES/INGEST] Archivos: ${files.length}`);
     console.log(`[FILES/INGEST] Workspace: ${workspaceId}`);
-    console.log(`[FILES/INGEST] User: ${userId || 'N/A'}`);
+    console.log(`[FILES/INGEST] User: ${userId || 'N/A'}${req.user ? ' (authenticated)' : ' (guest)'}`);
     console.log(`[FILES/INGEST] Project: ${projectId || 'N/A'}`);
 
     // Convertir a formato UploadedFile
@@ -129,13 +134,17 @@ router.post('/ingest', upload.array('files', 10), async (req, res) => {
  * GET /api/files/list
  * 
  * Lista archivos ingeridos
+ * Auth: Opcional
  */
-router.get('/list', async (req, res) => {
+router.get('/list', optionalAuth, async (req, res) => {
   try {
     const workspaceId = String(req.query.workspace_id || '').trim();
-    const userId = req.query.user_id as string | undefined;
+    const bodyUserId = req.query.user_id as string | undefined;
     const projectId = req.query.project_id as string | undefined;
     const limit = parseInt(String(req.query.limit || '50'));
+
+    // Prioridad: usuario autenticado > userId del query
+    const userId = getUserId(req) || bodyUserId;
 
     if (!workspaceId) {
       return res.status(400).json({
@@ -173,11 +182,15 @@ router.get('/list', async (req, res) => {
  * GET /api/files/stats
  * 
  * Estadísticas de conocimiento ingerido
+ * Auth: Opcional
  */
-router.get('/stats', async (req, res) => {
+router.get('/stats', optionalAuth, async (req, res) => {
   try {
     const workspaceId = String(req.query.workspace_id || '').trim();
-    const userId = req.query.user_id as string | undefined;
+    const bodyUserId = req.query.user_id as string | undefined;
+
+    // Prioridad: usuario autenticado > userId del query
+    const userId = getUserId(req) || bodyUserId;
 
     if (!workspaceId) {
       return res.status(400).json({

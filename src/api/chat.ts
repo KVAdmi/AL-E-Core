@@ -12,6 +12,7 @@ import {
   Attachment 
 } from '../utils/attachments';
 import { retrieveRelevantChunks, chunksToContext } from '../services/chunkRetrieval';
+import { optionalAuth, getUserId } from '../middleware/auth';
 
 const router = express.Router();
 const openaiProvider = new OpenAIAssistantProvider();
@@ -23,29 +24,47 @@ const openaiProvider = new OpenAIAssistantProvider();
  * 
  * OBJETIVO: Responder al usuario Y guardar SIEMPRE en Supabase
  * 
+ * AUTENTICACIÓN: Opcional (soporta guest mode)
+ * - Si hay token válido: usa req.user.id
+ * - Si NO hay token: usa userId del body
+ * - Si token inválido: 401 (manejado por middleware)
+ * 
  * FLUJO:
  * 1. Resolver session_id (crear si no existe)
  * 2. Insertar mensaje del usuario en ae_messages
- * 3. Llamar a OpenAI
- * 4. Insertar respuesta del assistant en ae_messages
- * 5. Actualizar ae_sessions (last_message_at, total_messages, tokens, cost)
- * 6. (Opcional) Log en ae_requests
- * 7. Responder al frontend
+ * 3. Recuperar conocimiento entrenable (chunks)
+ * 4. Llamar a OpenAI
+ * 5. Insertar respuesta del assistant en ae_messages
+ * 6. Actualizar ae_sessions (last_message_at, total_messages, tokens, cost)
+ * 7. (Opcional) Log en ae_requests
+ * 8. Responder al frontend
  */
-router.post('/chat', async (req, res) => {
+router.post('/chat', optionalAuth, async (req, res) => {
   const startTime = Date.now();
   let sessionId: string | null = null;
   
   try {
     console.log('\n[CHAT] ==================== NUEVA SOLICITUD ====================');
     
+    // Obtener userId (autenticado o del body)
+    const authenticatedUserId = getUserId(req);
+    
     let {
       workspaceId = env.defaultWorkspaceId,
-      userId,
+      userId: bodyUserId,
       mode = env.defaultMode,
       sessionId: requestSessionId,
       messages
     } = req.body;
+    
+    // Prioridad: usuario autenticado > userId del body
+    const userId = authenticatedUserId || bodyUserId;
+    
+    if (req.user) {
+      console.log(`[CHAT] Usuario autenticado: ${req.user.id} (${req.user.email})`);
+    } else {
+      console.log(`[CHAT] Modo guest - userId del body: ${userId || 'N/A'}`);
+    }
     
     // ============================================
     // A0) NORMALIZAR MODE + ALIAS
