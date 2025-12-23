@@ -4,14 +4,14 @@ exports.getRelevantMemories = getRelevantMemories;
 exports.saveMemory = saveMemory;
 // src/services/memoryService.ts
 const client_1 = require("../db/client");
-const TABLE = 'public.assistant_memories';
+const TABLE = 'public.ae_memory';
 async function getRelevantMemories(workspaceId, userId, mode, limit = 20) {
     try {
         const { rows } = await client_1.db.query(`
       SELECT memory
       FROM ${TABLE}
       WHERE workspace_id = $1
-        AND user_id = $2
+        AND user_id_uuid = $2
         AND mode = $3
       ORDER BY created_at DESC
       LIMIT $4;
@@ -27,7 +27,7 @@ async function saveMemory(memory) {
     const importance = memory.importance ?? 1;
     try {
         await client_1.db.query(`
-      INSERT INTO ${TABLE} (workspace_id, user_id, mode, memory, importance)
+      INSERT INTO ${TABLE} (workspace_id, user_id_uuid, mode, memory, importance)
       VALUES ($1, $2, $3, $4, $5);
       `, [
             memory.workspaceId,

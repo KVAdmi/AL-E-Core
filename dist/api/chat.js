@@ -10,6 +10,7 @@ const env_1 = require("../config/env");
 const helpers_1 = require("../utils/helpers");
 const OpenAIAssistantProvider_1 = require("../ai/providers/OpenAIAssistantProvider");
 const attachments_1 = require("../utils/attachments");
+const chunkRetrieval_1 = require("../services/chunkRetrieval");
 const router = express_1.default.Router();
 const openaiProvider = new OpenAIAssistantProvider_1.OpenAIAssistantProvider();
 /**
@@ -178,15 +179,62 @@ router.post('/chat', async (req, res) => {
             console.log(`[DB] ✓ Mensaje user guardado: ${userMessageId}`);
         }
         // ============================================
-        // C) LLAMAR A OPENAI (CON ATTACHMENTS SI HAY)
+        // C) RECUPERAR CONOCIMIENTO ENTRENABLE (CHUNKS)
+        // ============================================
+        console.log('[CHUNKS] Recuperando conocimiento entrenable...');
+        let knowledgeContext = '';
+        try {
+            const chunks = await (0, chunkRetrieval_1.retrieveRelevantChunks)({
+                workspaceId,
+                userId,
+                projectId: req.body.projectId || req.body.project_id,
+                limit: 5, // Top 5 fragmentos más relevantes
+                minImportance: 0.5,
+            });
+            if (chunks.length > 0) {
+                knowledgeContext = (0, chunkRetrieval_1.chunksToContext)(chunks);
+                console.log(`[CHUNKS] ✓ ${chunks.length} fragmento(s) recuperado(s)`);
+            }
+            else {
+                console.log('[CHUNKS] No se encontró conocimiento entrenable');
+            }
+        }
+        catch (chunkError) {
+            console.error('[CHUNKS] Error recuperando chunks:', chunkError);
+            // No romper el chat si falla la recuperación
+        }
+        // ============================================
+        // D) LLAMAR A OPENAI (CON ATTACHMENTS + CHUNKS)
         // ============================================
         console.log('[OPENAI] Enviando request...');
         let answer = '';
         let assistantTokens = 0;
         let modelUsed = 'gpt-4';
         try {
-            // Preparar mensajes con contexto de attachments
+            // Preparar mensajes con contexto de attachments Y chunks
             let finalMessages = [...messages];
+            // Si hay conocimiento entrenable, inyectarlo como contexto del sistema
+            if (knowledgeContext) {
+                // Buscar si ya hay un mensaje system
+                const systemMsgIndex = finalMessages.findIndex(m => m.role === 'system');
+                if (systemMsgIndex >= 0) {
+                    // Agregar al mensaje system existente
+                    finalMessages[systemMsgIndex] = {
+                        ...finalMessages[systemMsgIndex],
+                        content: finalMessages[systemMsgIndex].content + '\n\n' + knowledgeContext
+                    };
+                }
+                else {
+                    // Crear nuevo mensaje system al inicio
+                    finalMessages = [
+                        {
+                            role: 'system',
+                            content: knowledgeContext
+                        },
+                        ...finalMessages
+                    ];
+                }
+            }
             // Si hay documentos adjuntos, agregar contexto al último mensaje del usuario
             if (attachmentsContext) {
                 const lastUserMsg = finalMessages[finalMessages.length - 1];

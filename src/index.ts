@@ -1,11 +1,23 @@
 import express from "express";
 import cors from "cors";
+import multer from "multer";
 import { env } from "./config/env";
 import chatRouter from "./api/chat"; // NUEVO endpoint con guardado garantizado
+import filesRouter from "./api/files"; // Endpoint de ingesta estructural
 import { voiceRouter } from "./api/voice";
 import { sessionsRouter } from "./api/sessions";
+import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
 
 const app = express();
+
+// Configurar multer para subida de archivos en memoria
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { 
+    fileSize: 15 * 1024 * 1024, // 15MB por archivo
+    files: 5 // Máximo 5 archivos
+  },
+});
 
 // CORS configurado usando ALE_ALLOWED_ORIGINS
 const allowedOrigins = process.env.ALE_ALLOWED_ORIGINS
@@ -75,6 +87,61 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '10mb' }));
 
+// Middleware para procesar archivos en /api/ai/chat
+app.use('/api/ai/chat', upload.array('files', 5), async (req, res, next) => {
+  try {
+    const files = (req.files as Express.Multer.File[]) || [];
+    
+    if (files.length > 0) {
+      console.log(`[UPLOAD] ${files.length} archivo(s) recibido(s)`);
+      
+      // Extraer texto de los archivos
+      const docs = await extractTextFromFiles(files);
+      
+      // Parsear messages si viene como string (multipart/form-data)
+      let messages = req.body.messages;
+      if (typeof messages === 'string') {
+        messages = JSON.parse(messages);
+      }
+      
+      // Inyectar documentos como contexto en el primer mensaje del sistema
+      if (docs.length && Array.isArray(messages)) {
+        const docsBlock = documentsToContext(docs);
+        
+        messages = [
+          {
+            role: "system",
+            content:
+              "Tienes documentos adjuntos. Analízalos y responde basándote en su contenido.\n" +
+              docsBlock,
+          },
+          ...messages,
+        ];
+        
+        req.body.messages = messages;
+        console.log(`[UPLOAD] ${docs.length} documento(s) procesado(s) e inyectados en el contexto`);
+      }
+    }
+    
+    // Normalizar campos que pueden venir como string en multipart
+    if (req.body.workspaceId) req.body.workspaceId = String(req.body.workspaceId);
+    if (req.body.workspace_id) req.body.workspace_id = String(req.body.workspace_id);
+    if (req.body.userId) req.body.userId = String(req.body.userId);
+    if (req.body.user_id) req.body.user_id = String(req.body.user_id);
+    if (req.body.mode) req.body.mode = String(req.body.mode);
+    if (req.body.sessionId) req.body.sessionId = String(req.body.sessionId);
+    if (req.body.session_id) req.body.session_id = String(req.body.session_id);
+    
+    next();
+  } catch (err) {
+    console.error('[UPLOAD] Error procesando archivos:', err);
+    res.status(500).json({ 
+      error: 'FILE_PROCESSING_ERROR', 
+      detail: err instanceof Error ? err.message : String(err) 
+    });
+  }
+});
+
 app.get("/health", async (req, res) => {
 	try {
 		const status: any = { 
@@ -109,11 +176,13 @@ app.get("/health", async (req, res) => {
 
 // app.use("/lia", liaRouter);
 app.use("/api/ai", chatRouter); // Nuevo endpoint con guardado garantizado en Supabase
+app.use("/api/files", filesRouter); // Endpoint de ingesta estructural de documentos
 app.use("/api/voice", voiceRouter);
 app.use("/api/sessions", sessionsRouter);
 
 // Log simple de verificación
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
+console.log("[DEBUG] filesRouter (ingest) montado en /api/files");
 console.log("[DEBUG] voiceRouter montado en /api/voice");
 console.log("[DEBUG] sessionsRouter montado en /api/sessions");
 

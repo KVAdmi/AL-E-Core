@@ -5,11 +5,22 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
+const multer_1 = __importDefault(require("multer"));
 const env_1 = require("./config/env");
 const chat_1 = __importDefault(require("./api/chat")); // NUEVO endpoint con guardado garantizado
+const files_1 = __importDefault(require("./api/files")); // Endpoint de ingesta estructural
 const voice_1 = require("./api/voice");
 const sessions_1 = require("./api/sessions");
+const documentText_1 = require("./utils/documentText");
 const app = (0, express_1.default)();
+// Configurar multer para subida de archivos en memoria
+const upload = (0, multer_1.default)({
+    storage: multer_1.default.memoryStorage(),
+    limits: {
+        fileSize: 15 * 1024 * 1024, // 15MB por archivo
+        files: 5 // Máximo 5 archivos
+    },
+});
 // CORS configurado usando ALE_ALLOWED_ORIGINS
 const allowedOrigins = process.env.ALE_ALLOWED_ORIGINS
     ? process.env.ALE_ALLOWED_ORIGINS.split(',').map(o => o.trim())
@@ -66,6 +77,59 @@ app.use((req, res, next) => {
     next();
 });
 app.use(express_1.default.json({ limit: '10mb' }));
+// Middleware para procesar archivos en /api/ai/chat
+app.use('/api/ai/chat', upload.array('files', 5), async (req, res, next) => {
+    try {
+        const files = req.files || [];
+        if (files.length > 0) {
+            console.log(`[UPLOAD] ${files.length} archivo(s) recibido(s)`);
+            // Extraer texto de los archivos
+            const docs = await (0, documentText_1.extractTextFromFiles)(files);
+            // Parsear messages si viene como string (multipart/form-data)
+            let messages = req.body.messages;
+            if (typeof messages === 'string') {
+                messages = JSON.parse(messages);
+            }
+            // Inyectar documentos como contexto en el primer mensaje del sistema
+            if (docs.length && Array.isArray(messages)) {
+                const docsBlock = (0, documentText_1.documentsToContext)(docs);
+                messages = [
+                    {
+                        role: "system",
+                        content: "Tienes documentos adjuntos. Analízalos y responde basándote en su contenido.\n" +
+                            docsBlock,
+                    },
+                    ...messages,
+                ];
+                req.body.messages = messages;
+                console.log(`[UPLOAD] ${docs.length} documento(s) procesado(s) e inyectados en el contexto`);
+            }
+        }
+        // Normalizar campos que pueden venir como string en multipart
+        if (req.body.workspaceId)
+            req.body.workspaceId = String(req.body.workspaceId);
+        if (req.body.workspace_id)
+            req.body.workspace_id = String(req.body.workspace_id);
+        if (req.body.userId)
+            req.body.userId = String(req.body.userId);
+        if (req.body.user_id)
+            req.body.user_id = String(req.body.user_id);
+        if (req.body.mode)
+            req.body.mode = String(req.body.mode);
+        if (req.body.sessionId)
+            req.body.sessionId = String(req.body.sessionId);
+        if (req.body.session_id)
+            req.body.session_id = String(req.body.session_id);
+        next();
+    }
+    catch (err) {
+        console.error('[UPLOAD] Error procesando archivos:', err);
+        res.status(500).json({
+            error: 'FILE_PROCESSING_ERROR',
+            detail: err instanceof Error ? err.message : String(err)
+        });
+    }
+});
 app.get("/health", async (req, res) => {
     try {
         const status = {
@@ -98,10 +162,12 @@ app.get("/health", async (req, res) => {
 });
 // app.use("/lia", liaRouter);
 app.use("/api/ai", chat_1.default); // Nuevo endpoint con guardado garantizado en Supabase
+app.use("/api/files", files_1.default); // Endpoint de ingesta estructural de documentos
 app.use("/api/voice", voice_1.voiceRouter);
 app.use("/api/sessions", sessions_1.sessionsRouter);
 // Log simple de verificación
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
+console.log("[DEBUG] filesRouter (ingest) montado en /api/files");
 console.log("[DEBUG] voiceRouter montado en /api/voice");
 console.log("[DEBUG] sessionsRouter montado en /api/sessions");
 const PORT = env_1.env.port || 4000;

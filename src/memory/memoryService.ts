@@ -9,7 +9,7 @@ export type AssistantMemory = {
   importance?: number;
 };
 
-const TABLE = 'public.assistant_memories';
+const TABLE = 'public.ae_memory';
 
 export async function getRelevantMemories(
   workspaceId: string,
@@ -23,7 +23,7 @@ export async function getRelevantMemories(
       SELECT memory
       FROM ${TABLE}
       WHERE workspace_id = $1
-        AND user_id = $2
+        AND user_id_uuid = $2
         AND mode = $3
       ORDER BY created_at DESC
       LIMIT $4;
@@ -44,7 +44,7 @@ export async function saveMemory(memory: AssistantMemory): Promise<void> {
   try {
     await pool.query(
       `
-      INSERT INTO ${TABLE} (workspace_id, user_id, mode, memory, importance)
+      INSERT INTO ${TABLE} (workspace_id, user_id_uuid, mode, memory, importance)
       VALUES ($1, $2, $3, $4, $5);
       `,
       [
