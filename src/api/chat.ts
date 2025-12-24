@@ -13,6 +13,12 @@ import {
 } from '../utils/attachments';
 import { retrieveRelevantChunks, chunksToContext } from '../services/chunkRetrieval';
 import { optionalAuth, getUserId } from '../middleware/auth';
+import { 
+  downloadAttachments, 
+  validateAttachment, 
+  type AttachmentMetadata 
+} from '../services/attachmentDownload';
+import { extractTextFromFiles, type UploadedFile } from '../utils/documentText';
 
 const router = express.Router();
 const openaiProvider = new OpenAIAssistantProvider();
@@ -92,8 +98,11 @@ router.post('/chat', optionalAuth, async (req, res) => {
     }
     
     // ============================================
-    // A1) PROCESAR ATTACHMENTS (soporta 'attachments' y 'files')
+    // A1) PROCESAR ATTACHMENTS
     // ============================================
+    // Soporta DOS modos:
+    // 1. Attachments JSON (URLs de Supabase Storage) - desde AL-EON
+    // 2. Attachments legacy (array de URLs directas) - compatibilidad
     
     const attachmentsRaw = (req.body.attachments ?? req.body.files ?? []) as any[];
     const safeAttachments = Array.isArray(attachmentsRaw) ? attachmentsRaw : [];
@@ -127,35 +136,86 @@ router.post('/chat', optionalAuth, async (req, res) => {
     const userContent = lastMessage.content;
     console.log(`[CHAT] userId: ${userId}, workspaceId: ${workspaceId}, mode: ${mode}`);
     console.log(`[CHAT] Mensaje: "${userContent.substring(0, 60)}..."`);
-    console.log(`[CHAT] Attachments: ${safeAttachments.length}`);
+    console.log(`[CHAT] Attachments recibidos: ${safeAttachments.length}`);
     
     // ============================================
-    // A2) PROCESAR ATTACHMENTS SI EXISTEN
+    // A2) DETECTAR TIPO DE ATTACHMENTS Y PROCESAR
     // ============================================
     
     let attachmentsContext = '';
     let imageUrls: any[] = [];
     
     if (safeAttachments.length > 0) {
-      console.log(`[ATTACHMENTS] Procesando ${safeAttachments.length} attachment(s)`);
+      // Detectar si son attachments de Supabase Storage (con bucket/path) o legacy (URLs)
+      const firstAttachment = safeAttachments[0];
+      const isSupabaseStorage = validateAttachment(firstAttachment);
       
-      const processed = await processAttachments(safeAttachments);
-      
-      // Log para debug
-      processed.forEach(p => {
-        console.log(`[ATTACHMENTS] - ${p.name} (${p.type}): ${p.error ? 'ERROR' : 'OK'}`);
-      });
-      
-      // Extraer texto de documentos
-      attachmentsContext = attachmentsToContext(processed);
-      
-      // Extraer URLs de imágenes para visión multimodal
-      imageUrls = extractImageUrls(processed);
-      
-      if (imageUrls.length > 0) {
-        console.log(`[ATTACHMENTS] ${imageUrls.length} imagen(es) para visión multimodal`);
+      if (isSupabaseStorage) {
+        // MODO NUEVO: Attachments desde Supabase Storage
+        console.log(`[ATTACHMENTS] Modo: Supabase Storage (${safeAttachments.length} archivo(s))`);
+        
+        try {
+          // 1. Validar todos los attachments
+          const validAttachments: AttachmentMetadata[] = safeAttachments.filter(validateAttachment);
+          
+          if (validAttachments.length < safeAttachments.length) {
+            console.warn(`[ATTACHMENTS] ${safeAttachments.length - validAttachments.length} attachment(s) inválido(s) ignorados`);
+          }
+          
+          // 2. Descargar archivos desde Supabase Storage
+          const downloadedFiles = await downloadAttachments(validAttachments);
+          
+          if (downloadedFiles.length === 0) {
+            console.error('[ATTACHMENTS] No se pudo descargar ningún archivo');
+          } else {
+            // 3. Extraer texto de los archivos descargados
+            console.log(`[ATTACHMENTS] Extrayendo texto de ${downloadedFiles.length} archivo(s)...`);
+            const extractedDocs = await extractTextFromFiles(downloadedFiles);
+            
+            // 4. Construir contexto
+            if (extractedDocs.length > 0) {
+              const docsBlock = extractedDocs
+                .map((doc, i) => {
+                  const text = (doc.text || '').slice(0, 30000); // Límite 30k chars
+                  return `\n[DOCUMENTO ${i + 1}] ${doc.name} (${doc.type})\n${text}\n`;
+                })
+                .join('\n');
+              
+              attachmentsContext = `\n\n=== DOCUMENTOS ADJUNTOS ===\n${docsBlock}\n=== FIN DOCUMENTOS ===\n`;
+              
+              console.log(`[ATTACHMENTS] ✓ Procesados ${extractedDocs.length} documento(s), ${attachmentsContext.length} caracteres de contexto`);
+            }
+          }
+        } catch (err) {
+          console.error('[ATTACHMENTS] Error procesando attachments de Supabase Storage:', err);
+        }
+        
+      } else {
+        // MODO LEGACY: Attachments con URLs directas (compatibilidad)
+        console.log(`[ATTACHMENTS] Modo: Legacy URLs (${safeAttachments.length} attachment(s))`);
+        
+        const processed = await processAttachments(safeAttachments);
+        
+        // Log para debug
+        processed.forEach(p => {
+          console.log(`[ATTACHMENTS] - ${p.name} (${p.type}): ${p.error ? 'ERROR' : 'OK'}`);
+        });
+        
+        // Extraer texto de documentos
+        attachmentsContext = attachmentsToContext(processed);
+        
+        // Extraer URLs de imágenes para visión multimodal
+        imageUrls = extractImageUrls(processed);
+        
+        if (imageUrls.length > 0) {
+          console.log(`[ATTACHMENTS] ${imageUrls.length} imagen(es) para visión multimodal`);
+        }
       }
     }
+    
+    // ============================================
+    // A3) RESOLVER SESSION_ID
+    // ============================================
     
     if (requestSessionId && isUuid(requestSessionId)) {
       // Verificar que existe

@@ -84,6 +84,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_ae_files_updated_at ON public.ae_files;
+
 CREATE TRIGGER trigger_ae_files_updated_at
   BEFORE UPDATE ON public.ae_files
   FOR EACH ROW
