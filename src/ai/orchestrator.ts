@@ -297,6 +297,7 @@ export class Orchestrator {
   
   /**
    * STEP 7: Construir system prompt completo
+   * CRÍTICO: Tool result va PRIMERO para máxima visibilidad
    */
   private buildSystemPrompt(
     userIdentity: UserIdentity | null,
@@ -307,21 +308,21 @@ export class Orchestrator {
   ): string {
     let systemPrompt = basePrompt;
     
-    // 1. Brand context (SIEMPRE)
+    // 1. Tool result (si se ejecutó alguna herramienta) - VA PRIMERO
+    if (toolResult) {
+      systemPrompt += toolResult;
+      console.log('[ORCH] ✓ Tool result injected (PRIORITY POSITION)');
+    }
+    
+    // 2. Brand context (SIEMPRE)
     const brandContext = buildBrandContext();
     systemPrompt += brandContext;
     console.log('[ORCH] ✓ Brand context injected');
     
-    // 2. Identity block (usuario)
+    // 3. Identity block (usuario)
     const identityBlock = buildIdentityBlock(userIdentity);
     systemPrompt += identityBlock;
     console.log('[ORCH] ✓ Identity block injected');
-    
-    // 3. Tool result (si se ejecutó alguna herramienta)
-    if (toolResult) {
-      systemPrompt += toolResult;
-      console.log('[ORCH] ✓ Tool result injected');
-    }
     
     // 4. Memory block (memorias explícitas)
     if (memories.length > 0) {

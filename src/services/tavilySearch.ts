@@ -111,34 +111,78 @@ export async function webSearch(options: TavilySearchOptions): Promise<TavilySea
 
 /**
  * Formatear resultados de Tavily para inyección en contexto
+ * CRÍTICO: Formato AGRESIVO para que el modelo NO pueda ignorar los resultados
  */
 export function formatTavilyResults(searchResponse: TavilySearchResponse): string {
   if (!searchResponse.success || searchResponse.results.length === 0) {
-    return `\n[WEB SEARCH] No se encontraron resultados para: "${searchResponse.query}"\n`;
+    return `
+
+⚠️⚠️⚠️ ATENCIÓN CRÍTICA ⚠️⚠️⚠️
+La búsqueda web se ejecutó pero NO encontró resultados para: "${searchResponse.query}"
+
+INSTRUCCIÓN OBLIGATORIA:
+Debes informar al usuario que:
+1. La búsqueda web se ejecutó correctamente
+2. No se encontraron resultados públicos para "${searchResponse.query}"
+3. NO inventes información ni uses memoria interna como sustituto
+4. Sugiere que el usuario verifique la ortografía o proporcione más detalles
+
+PROHIBIDO: Inventar que "no tienes acceso" o "no puedes buscar"
+LA BÚSQUEDA YA SE EJECUTÓ. Solo no encontró resultados.
+`;
   }
 
-  let formatted = `\n═══════════════════════════════════════════════════════════════\n`;
-  formatted += `RESULTADOS DE BÚSQUEDA WEB (Tavily)\n`;
-  formatted += `═══════════════════════════════════════════════════════════════\n\n`;
-  formatted += `Query: "${searchResponse.query}"\n`;
-  formatted += `Resultados encontrados: ${searchResponse.results.length}\n`;
-  formatted += `Tiempo de respuesta: ${searchResponse.responseTime}ms\n\n`;
+  let formatted = `
+
+╔════════════════════════════════════════════════════════════════╗
+║  🌐 RESULTADOS DE BÚSQUEDA WEB (Tavily)                        ║
+║  ESTOS SON DATOS REALES DE INTERNET - ÚSALOS OBLIGATORIAMENTE ║
+╚════════════════════════════════════════════════════════════════╝
+
+🔍 Query ejecutada: "${searchResponse.query}"
+✅ Resultados encontrados: ${searchResponse.results.length}
+⏱️ Tiempo de respuesta: ${searchResponse.responseTime}ms
+
+`;
 
   searchResponse.results.forEach((result, idx) => {
-    formatted += `--- Resultado ${idx + 1} ---\n`;
-    formatted += `Título: ${result.title}\n`;
-    formatted += `URL: ${result.url}\n`;
-    formatted += `Relevancia: ${(result.score * 100).toFixed(0)}%\n`;
-    if (result.publishedDate) {
-      formatted += `Fecha: ${result.publishedDate}\n`;
-    }
-    formatted += `\nContenido:\n${result.content}\n\n`;
+    formatted += `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📄 RESULTADO ${idx + 1} de ${searchResponse.results.length}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📌 Título: ${result.title}
+🔗 URL: ${result.url}
+⭐ Relevancia: ${(result.score * 100).toFixed(0)}%${result.publishedDate ? `\n📅 Fecha: ${result.publishedDate}` : ''}
+
+📝 Contenido verificado:
+${result.content}
+
+`;
   });
 
-  formatted += `═══════════════════════════════════════════════════════════════\n`;
-  formatted += `INSTRUCCIÓN: Usa esta información web para fundamentar tu respuesta.\n`;
-  formatted += `Cita las fuentes cuando sea relevante (URL + título).\n`;
-  formatted += `═══════════════════════════════════════════════════════════════\n`;
+  formatted += `
+╔════════════════════════════════════════════════════════════════╗
+║  ⚠️ INSTRUCCIONES OBLIGATORIAS (NO NEGOCIABLES)                ║
+╚════════════════════════════════════════════════════════════════╝
+
+✅ DEBES usar ESTOS resultados para responder al usuario
+✅ DEBES citar las fuentes con formato: [Título](URL)
+✅ DEBES priorizar el Resultado #1 (mayor relevancia)
+❌ PROHIBIDO inventar información que no esté en estos resultados
+❌ PROHIBIDO decir "buscando..." o "*buscando*" (la búsqueda YA se ejecutó)
+❌ PROHIBIDO mezclar memoria interna con estos facts externos
+❌ PROHIBIDO sugerir "alternativas" si los resultados son claros
+
+EJEMPLO DE RESPUESTA CORRECTA:
+"Encontré información sobre [tema]:
+
+Según [Título del Resultado 1]([URL]), [contenido del resultado].
+
+Fuente: ${searchResponse.results[0]?.url || '[URL del resultado 1]'}"
+
+AHORA RESPONDE USANDO ESTOS DATOS REALES.
+`;
 
   return formatted;
 }
