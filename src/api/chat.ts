@@ -19,6 +19,7 @@ import {
   type AttachmentMetadata 
 } from '../services/attachmentDownload';
 import { extractTextFromFiles, type UploadedFile } from '../utils/documentText';
+import { getUserIdentity } from '../services/userProfile';
 
 const router = express.Router();
 const openaiProvider = new OpenAIAssistantProvider();
@@ -382,11 +383,28 @@ router.post('/chat', optionalAuth, async (req, res) => {
         modelUsed = 'gpt-4-vision-preview';
       }
       
+      // HOTFIX: Obtener identidad del usuario si está autenticado
+      let userIdentity = null;
+      let identitySource = 'none';
+      if (req.user?.id) {
+        try {
+          userIdentity = await getUserIdentity(req.user.id);
+          identitySource = userIdentity ? 'db' : 'fallback';
+        } catch (err) {
+          console.error('[USER PROFILE] Error loading profile:', err);
+          identitySource = 'fallback';
+        }
+      }
+      
+      // Logs mínimos (sin PII)
+      console.log(`[IDENTITY] hasAuthHeader=${!!req.headers.authorization}, user_uuid=${req.user?.id || 'N/A'}, identity_injected=${!!req.user?.id}, identity_source=${identitySource}`);
+      
       const assistantRequest: AssistantRequest = {
         messages: finalMessages,
         mode: mode as any,
         workspaceId: workspaceId,
-        userId: userId
+        userId: userId,
+        userIdentity: userIdentity
       };
       
       const response = await openaiProvider.chat(assistantRequest);

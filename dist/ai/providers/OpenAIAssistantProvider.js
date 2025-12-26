@@ -4,6 +4,7 @@ exports.OpenAIAssistantProvider = void 0;
 const openaiProvider_1 = require("./openaiProvider");
 const aleon_1 = require("../prompts/aleon");
 const lucy_1 = require("../prompts/lucy");
+const userProfile_1 = require("../../services/userProfile");
 /**
  * OpenAI Assistant Provider
  * Enruta entre AL-EON (generalista) y L.U.C.I (verticales)
@@ -34,7 +35,18 @@ class OpenAIAssistantProvider {
     async chat(request) {
         try {
             const mode = request.mode || 'universal';
-            const systemPrompt = this.getSystemPrompt(mode);
+            let systemPrompt = this.getSystemPrompt(mode);
+            // HOTFIX: Inyección de identidad
+            if (request.userIdentity) {
+                const identityBlock = (0, userProfile_1.buildIdentityBlock)(request.userIdentity);
+                systemPrompt = systemPrompt + identityBlock;
+                console.log(`[PROVIDER] ✓ Identity injected: ${request.userIdentity.name || 'Usuario'}`);
+            }
+            else if (request.userId) {
+                const identityBlock = (0, userProfile_1.buildIdentityBlock)(null);
+                systemPrompt = systemPrompt + identityBlock;
+                console.log(`[PROVIDER] ✓ Identity injected (fallback): userId=${request.userId}`);
+            }
             const response = await (0, openaiProvider_1.callOpenAIChat)({
                 messages: request.messages,
                 systemPrompt,

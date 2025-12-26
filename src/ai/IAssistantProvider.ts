@@ -3,9 +3,15 @@ export interface AssistantMessage {
   content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>;
 }
 
+export interface UserIdentity {
+  name?: string;
+  role?: string;
+}
+
 export interface AssistantRequest {
   workspaceId?: string;
   userId?: string;
+  userIdentity?: UserIdentity | null;
   mode?: string;
   messages: AssistantMessage[];
 }

@@ -1,4 +1,4 @@
-import { IAssistantProvider, AssistantRequest, AssistantResponse } from '../IAssistantProvider';
+import { IAssistantProvider, AssistantRequest, AssistantResponse, UserIdentity } from '../IAssistantProvider';
 import { callOpenAIChat } from './openaiProvider';
 import { ALEON_SYSTEM_PROMPT } from '../prompts/aleon';
 import { 
@@ -7,6 +7,7 @@ import {
   LUCY_INSURANCE_PROMPT, 
   LUCY_ACCOUNTING_PROMPT 
 } from '../prompts/lucy';
+import { buildIdentityBlock } from '../../services/userProfile';
 
 /**
  * OpenAI Assistant Provider
@@ -45,7 +46,18 @@ export class OpenAIAssistantProvider implements IAssistantProvider {
   async chat(request: AssistantRequest): Promise<AssistantResponse> {
     try {
       const mode = request.mode || 'universal';
-      const systemPrompt = this.getSystemPrompt(mode);
+      let systemPrompt = this.getSystemPrompt(mode);
+      
+      // HOTFIX: Inyección de identidad
+      if (request.userIdentity) {
+        const identityBlock = buildIdentityBlock(request.userIdentity);
+        systemPrompt = systemPrompt + identityBlock;
+        console.log(`[PROVIDER] ✓ Identity injected: ${request.userIdentity.name || 'Usuario'}`);
+      } else if (request.userId) {
+        const identityBlock = buildIdentityBlock(null);
+        systemPrompt = systemPrompt + identityBlock;
+        console.log(`[PROVIDER] ✓ Identity injected (fallback): userId=${request.userId}`);
+      }
       
       const response = await callOpenAIChat({
         messages: request.messages,

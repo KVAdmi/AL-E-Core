@@ -14,6 +14,7 @@ const chunkRetrieval_1 = require("../services/chunkRetrieval");
 const auth_1 = require("../middleware/auth");
 const attachmentDownload_1 = require("../services/attachmentDownload");
 const documentText_1 = require("../utils/documentText");
+const userProfile_1 = require("../services/userProfile");
 const router = express_1.default.Router();
 const openaiProvider = new OpenAIAssistantProvider_1.OpenAIAssistantProvider();
 /**
@@ -321,11 +322,27 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                 };
                 modelUsed = 'gpt-4-vision-preview';
             }
+            // HOTFIX: Obtener identidad del usuario si está autenticado
+            let userIdentity = null;
+            let identitySource = 'none';
+            if (req.user?.id) {
+                try {
+                    userIdentity = await (0, userProfile_1.getUserIdentity)(req.user.id);
+                    identitySource = userIdentity ? 'db' : 'fallback';
+                }
+                catch (err) {
+                    console.error('[USER PROFILE] Error loading profile:', err);
+                    identitySource = 'fallback';
+                }
+            }
+            // Logs mínimos (sin PII)
+            console.log(`[IDENTITY] hasAuthHeader=${!!req.headers.authorization}, user_uuid=${req.user?.id || 'N/A'}, identity_injected=${!!req.user?.id}, identity_source=${identitySource}`);
             const assistantRequest = {
                 messages: finalMessages,
                 mode: mode,
                 workspaceId: workspaceId,
-                userId: userId
+                userId: userId,
+                userIdentity: userIdentity
             };
             const response = await openaiProvider.chat(assistantRequest);
             answer = response.content;
