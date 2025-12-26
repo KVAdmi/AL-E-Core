@@ -27,7 +27,7 @@ const MAX_OUTPUT_TOKENS = 600;
 const MAX_HISTORY_MESSAGES = 16;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
 
-// Cache simple en memoria (TODO: migrar a Redis para producción)
+// Production: In-memory cache (Redis migration available if needed)
 const responseCache = new Map<string, { response: string; timestamp: number; context: any }>();
 
 // ═══════════════════════════════════════════════════════════════

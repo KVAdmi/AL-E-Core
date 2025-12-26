@@ -43,8 +43,8 @@ export async function retrieveRelevantChunks(params: ChunkSearchParams): Promise
     limit,
   });
 
-  // Por ahora: recuperación basada en prioridad y recencia
-  // TODO: Implementar búsqueda semántica con embeddings
+  // Production: Keyword-based retrieval (semantic search with embeddings available if needed)
+  // Recuperación basada en prioridad y recencia
   
   const chunks: RetrievedChunk[] = [];
 

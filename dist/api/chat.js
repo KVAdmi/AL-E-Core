@@ -51,6 +51,8 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
         let { workspaceId = env_1.env.defaultWorkspaceId, userId: bodyUserId, mode = env_1.env.defaultMode, sessionId: requestSessionId, messages } = req.body;
         // Prioridad: usuario autenticado > userId del body
         const userId = authenticatedUserId || bodyUserId;
+        // Resolver user_id_uuid desde JWT (producción real)
+        const user_id_uuid = req.user?.id || null;
         if (req.user) {
             console.log(`[CHAT] Usuario autenticado: ${req.user.id} (${req.user.email})`);
         }
@@ -201,7 +203,7 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                 workspace_id: workspaceId,
                 mode: mode,
                 user_id_old: userId, // Guardar userId string en user_id_old
-                user_id_uuid: null, // Por ahora null hasta tener auth real
+                user_id_uuid: user_id_uuid, // Production: Resolver desde JWT
                 title: title,
                 last_message_at: new Date().toISOString(),
                 total_messages: 0,
@@ -232,7 +234,7 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
             content: userContent,
             tokens: userTokens,
             cost: 0,
-            user_id_uuid: null, // Por ahora null
+            user_id_uuid: user_id_uuid, // Production: Resolver desde JWT
             metadata: {
                 source: 'aleon',
                 workspaceId: workspaceId,
@@ -279,6 +281,7 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
         let answer = '';
         let assistantTokens = 0;
         let modelUsed = 'gpt-4';
+        let orchestratorContext = null; // Declarar fuera del try para acceso global
         try {
             // Preparar mensajes con contexto de attachments Y chunks
             let finalMessages = [...messages];
@@ -318,7 +321,7 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
             console.log('[ORCH] Starting orchestration pipeline...');
             // COST CONTROL: Limitar historial a 16 mensajes
             const limitedMessages = orchestrator.limitMessageHistory(finalMessages);
-            const orchestratorContext = await orchestrator.orchestrate({
+            orchestratorContext = await orchestrator.orchestrate({
                 messages: limitedMessages,
                 userId: req.user?.id || userId || 'guest',
                 workspaceId: workspaceId,
@@ -457,10 +460,12 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
             // NO romper el chat
         }
         // ============================================
-        // F) LOG DE REQUEST (RECOMENDADO)
+        // F) LOG DE REQUEST (PRODUCCIÓN - AUDITORÍA COMPLETA)
         // ============================================
         try {
             const responseTime = Date.now() - startTime;
+            // Determinar provider usado (groq vs openai)
+            const providerUsed = orchestratorContext.modelSelected.includes('gpt') ? 'openai' : 'groq';
             await supabase_1.supabase.from('ae_requests').insert({
                 session_id: sessionId,
                 endpoint: '/api/ai/chat',
@@ -470,13 +475,29 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                 tokens_used: totalTokens,
                 cost: estimatedCostValue,
                 metadata: {
-                    model: modelUsed,
+                    // Provider y modelo REAL del orchestrator
+                    provider_used: providerUsed,
+                    model_used: orchestratorContext.modelSelected,
+                    // Tokens detallados
+                    tokens_in: orchestratorContext.inputTokens,
+                    tokens_out: orchestratorContext.outputTokens,
+                    max_output_tokens: orchestratorContext.maxOutputTokens,
+                    // Tools y memoria
+                    tool_used: orchestratorContext.toolUsed,
+                    web_search_used: orchestratorContext.webSearchUsed,
+                    web_results_count: orchestratorContext.webResultsCount,
+                    memories_loaded: orchestratorContext.memoryCount,
+                    rag_hits: orchestratorContext.ragHits,
+                    // Performance
+                    cache_hit: orchestratorContext.cacheHit,
+                    // Context
                     userId: userId,
                     workspaceId: workspaceId,
-                    mode: mode
+                    mode: mode,
+                    authenticated: orchestratorContext.isAuthenticated
                 }
             });
-            console.log(`[DB] ✓ Request logged (${responseTime}ms)`);
+            console.log(`[DB] ✓ Request logged (${responseTime}ms) - ${providerUsed}/${orchestratorContext.modelSelected}`);
         }
         catch (logError) {
             console.error('[DB] Error logging request:', logError);
