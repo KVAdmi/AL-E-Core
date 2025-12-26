@@ -20,9 +20,12 @@ import {
 } from '../services/attachmentDownload';
 import { extractTextFromFiles, type UploadedFile } from '../utils/documentText';
 import { getUserIdentity } from '../services/userProfile';
+import { Orchestrator } from '../ai/orchestrator';
+import { ALEON_SYSTEM_PROMPT } from '../ai/prompts/aleon';
 
 const router = express.Router();
 const openaiProvider = new OpenAIAssistantProvider();
+const orchestrator = new Orchestrator();
 
 /**
  * =====================================================
@@ -370,49 +373,63 @@ router.post('/chat', optionalAuth, async (req, res) => {
         };
       }
       
+      // ============================================
+      // C2) ORCHESTRATOR: Pipeline completo
+      // ============================================
+      
+      console.log('[ORCH] Starting orchestration pipeline...');
+      
+      const orchestratorContext = await orchestrator.orchestrate({
+        messages: finalMessages,
+        userId: req.user?.id || userId || 'guest',
+        workspaceId: workspaceId,
+        projectId: workspaceId, // Usar workspaceId como projectId por ahora
+        sessionId: sessionId || undefined,
+        mode: mode
+      }, ALEON_SYSTEM_PROMPT);
+      
+      // Usar el system prompt generado por el orchestrator
+      const finalMessagesWithSystem = [
+        {
+          role: 'system',
+          content: orchestratorContext.systemPrompt
+        },
+        ...finalMessages.filter(m => m.role !== 'system')
+      ];
+      
       // Si hay imágenes, usar formato multimodal (GPT-4 Vision)
       if (imageUrls.length > 0) {
-        const lastUserMsg = finalMessages[finalMessages.length - 1];
-        finalMessages[finalMessages.length - 1] = {
+        const lastUserMsg = finalMessagesWithSystem[finalMessagesWithSystem.length - 1];
+        finalMessagesWithSystem[finalMessagesWithSystem.length - 1] = {
           role: 'user',
           content: [
-            { type: 'text', text: lastUserMsg.content },
+            { type: 'text', text: typeof lastUserMsg.content === 'string' ? lastUserMsg.content : JSON.stringify(lastUserMsg.content) },
             ...imageUrls
           ]
         };
         modelUsed = 'gpt-4-vision-preview';
+      } else {
+        // Usar modelo decidido por el orchestrator
+        modelUsed = orchestratorContext.modelSelected;
       }
-      
-      // HOTFIX: Obtener identidad del usuario si está autenticado
-      let userIdentity = null;
-      let identitySource = 'none';
-      if (req.user?.id) {
-        try {
-          userIdentity = await getUserIdentity(req.user.id);
-          identitySource = userIdentity ? 'db' : 'fallback';
-        } catch (err) {
-          console.error('[USER PROFILE] Error loading profile:', err);
-          identitySource = 'fallback';
-        }
-      }
-      
-      // Logs mínimos (sin PII)
-      console.log(`[IDENTITY] hasAuthHeader=${!!req.headers.authorization}, user_uuid=${req.user?.id || 'N/A'}, identity_injected=${!!req.user?.id}, identity_source=${identitySource}`);
       
       const assistantRequest: AssistantRequest = {
-        messages: finalMessages,
+        messages: finalMessagesWithSystem,
         mode: mode as any,
         workspaceId: workspaceId,
         userId: userId,
-        userIdentity: userIdentity
+        userIdentity: orchestratorContext.userIdentity
       };
       
       const response = await openaiProvider.chat(assistantRequest);
       answer = response.content;
       assistantTokens = estimateTokens(answer);
-      modelUsed = response.raw?.model || 'gpt-4';
       
-      console.log(`[OPENAI] ✓ Respuesta recibida (${assistantTokens} tokens aprox)`);
+      // Actualizar output tokens en context
+      orchestratorContext.outputTokens = assistantTokens;
+      
+      console.log(`[ORCH] ✓ Response received (${assistantTokens} tokens)`);
+      console.log(`[ORCH] Final metrics: auth=${orchestratorContext.isAuthenticated} tool=${orchestratorContext.toolUsed} model=${orchestratorContext.modelSelected} mem=${orchestratorContext.memoryCount} rag=${orchestratorContext.ragHits} in_tokens=${orchestratorContext.inputTokens} out_tokens=${orchestratorContext.outputTokens}`);
     } catch (openaiError: any) {
       console.error('[OPENAI] ERROR:', openaiError);
       
