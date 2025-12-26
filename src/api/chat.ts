@@ -480,7 +480,8 @@ router.post('/chat', optionalAuth, async (req, res) => {
         messages: finalMessages,
         mode: mode as any,
         workspaceId: workspaceId,
-        userId: userId
+        userId: userId,
+        userEmail: req.user?.email
       };
       
       const response = await openaiProvider.chat(assistantRequest);

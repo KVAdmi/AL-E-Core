@@ -6,6 +6,7 @@ export interface AssistantMessage {
 export interface AssistantRequest {
   workspaceId?: string;
   userId?: string;
+  userEmail?: string;
   mode?: string;
   messages: AssistantMessage[];
 }

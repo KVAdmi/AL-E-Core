@@ -45,7 +45,29 @@ export class OpenAIAssistantProvider implements IAssistantProvider {
   async chat(request: AssistantRequest): Promise<AssistantResponse> {
     try {
       const mode = request.mode || 'universal';
-      const systemPrompt = this.getSystemPrompt(mode);
+      let systemPrompt = this.getSystemPrompt(mode);
+      
+      // 🔒 INYECCIÓN DE IDENTIDAD OBLIGATORIA
+      // Si hay userId, SIEMPRE agregar bloque de identidad al system prompt
+      if (request.userId) {
+        const identityBlock = `
+
+---
+INFORMACIÓN DEL USUARIO AUTENTICADO:
+- User ID: ${request.userId}
+${request.userEmail ? `- Email: ${request.userEmail}` : ''}
+- Estado: Usuario registrado y autenticado
+
+IMPORTANTE: Este usuario está autenticado. Reconoce su identidad en tus respuestas.
+NO digas "no tengo capacidad de recordar" o "no sé quién eres".
+Trata al usuario como alguien conocido del sistema.
+---
+`;
+        systemPrompt = systemPrompt + identityBlock;
+        console.log(`[PROVIDER] ✓ Identity injected: userId=${request.userId}, email=${request.userEmail || 'N/A'}`);
+      } else {
+        console.log('[PROVIDER] ⚠️ No userId provided - guest mode');
+      }
       
       const response = await callOpenAIChat({
         messages: request.messages,
