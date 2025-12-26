@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../db/supabase';
 import { env } from '../config/env';
 import { isUuid, makeTitleFromText, safeJson, estimateTokens, estimateCost } from '../utils/helpers';
-import { OpenAIAssistantProvider } from '../ai/providers/OpenAIAssistantProvider';
+import { GroqAssistantProvider } from '../ai/providers/GroqAssistantProvider';
 import { AssistantRequest } from '../ai/IAssistantProvider';
 import { 
   processAttachments, 
@@ -24,7 +24,7 @@ import { Orchestrator } from '../ai/orchestrator';
 import { ALEON_SYSTEM_PROMPT } from '../ai/prompts/aleon';
 
 const router = express.Router();
-const openaiProvider = new OpenAIAssistantProvider();
+const groqProvider = new GroqAssistantProvider();
 const orchestrator = new Orchestrator();
 
 /**
@@ -374,13 +374,16 @@ router.post('/chat', optionalAuth, async (req, res) => {
       }
       
       // ============================================
-      // C2) ORCHESTRATOR: Pipeline completo
+      // C2) ORCHESTRATOR: Pipeline completo + Cost Control
       // ============================================
       
       console.log('[ORCH] Starting orchestration pipeline...');
       
+      // COST CONTROL: Limitar historial a 16 mensajes
+      const limitedMessages = orchestrator.limitMessageHistory(finalMessages);
+      
       const orchestratorContext = await orchestrator.orchestrate({
-        messages: finalMessages,
+        messages: limitedMessages,
         userId: req.user?.id || userId || 'guest',
         workspaceId: workspaceId,
         projectId: workspaceId, // Usar workspaceId como projectId por ahora
@@ -421,7 +424,7 @@ router.post('/chat', optionalAuth, async (req, res) => {
         userIdentity: orchestratorContext.userIdentity
       };
       
-      const response = await openaiProvider.chat(assistantRequest);
+      const response = await groqProvider.chat(assistantRequest);
       answer = response.content;
       assistantTokens = estimateTokens(answer);
       
@@ -429,9 +432,9 @@ router.post('/chat', optionalAuth, async (req, res) => {
       orchestratorContext.outputTokens = assistantTokens;
       
       console.log(`[ORCH] ✓ Response received (${assistantTokens} tokens)`);
-      console.log(`[ORCH] Final metrics: auth=${orchestratorContext.isAuthenticated} tool=${orchestratorContext.toolUsed} model=${orchestratorContext.modelSelected} mem=${orchestratorContext.memoryCount} rag=${orchestratorContext.ragHits} in_tokens=${orchestratorContext.inputTokens} out_tokens=${orchestratorContext.outputTokens}`);
-    } catch (openaiError: any) {
-      console.error('[OPENAI] ERROR:', openaiError);
+      console.log(`[ORCH] Final metrics: auth=${orchestratorContext.isAuthenticated} tool=${orchestratorContext.toolUsed} model=${orchestratorContext.modelSelected} mem=${orchestratorContext.memoryCount} rag=${orchestratorContext.ragHits} web=${orchestratorContext.webSearchUsed} in_tokens=${orchestratorContext.inputTokens} out_tokens=${orchestratorContext.outputTokens}`);
+    } catch (llmError: any) {
+      console.error('[LLM] ERROR:', llmError);
       
       // Intentar guardar el error en ae_requests
       try {
@@ -444,7 +447,7 @@ router.post('/chat', optionalAuth, async (req, res) => {
           tokens_used: userTokens,
           cost: 0,
           metadata: {
-            error: openaiError.message || 'OpenAI error',
+            error: llmError.message || 'LLM error',
             userId: userId
           }
         });
@@ -453,7 +456,7 @@ router.post('/chat', optionalAuth, async (req, res) => {
       }
       
       return res.status(500).json({
-        answer: 'Error al comunicarse con OpenAI. Por favor intenta de nuevo.',
+        answer: 'Error al comunicarse con el modelo de IA. Por favor intenta de nuevo.',
         session_id: sessionId,
         memories_to_add: []
       });

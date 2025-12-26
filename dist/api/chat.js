@@ -8,7 +8,7 @@ const uuid_1 = require("uuid");
 const supabase_1 = require("../db/supabase");
 const env_1 = require("../config/env");
 const helpers_1 = require("../utils/helpers");
-const OpenAIAssistantProvider_1 = require("../ai/providers/OpenAIAssistantProvider");
+const GroqAssistantProvider_1 = require("../ai/providers/GroqAssistantProvider");
 const attachments_1 = require("../utils/attachments");
 const chunkRetrieval_1 = require("../services/chunkRetrieval");
 const auth_1 = require("../middleware/auth");
@@ -17,7 +17,7 @@ const documentText_1 = require("../utils/documentText");
 const orchestrator_1 = require("../ai/orchestrator");
 const aleon_1 = require("../ai/prompts/aleon");
 const router = express_1.default.Router();
-const openaiProvider = new OpenAIAssistantProvider_1.OpenAIAssistantProvider();
+const groqProvider = new GroqAssistantProvider_1.GroqAssistantProvider();
 const orchestrator = new orchestrator_1.Orchestrator();
 /**
  * =====================================================
@@ -313,11 +313,13 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                 };
             }
             // ============================================
-            // C2) ORCHESTRATOR: Pipeline completo
+            // C2) ORCHESTRATOR: Pipeline completo + Cost Control
             // ============================================
             console.log('[ORCH] Starting orchestration pipeline...');
+            // COST CONTROL: Limitar historial a 16 mensajes
+            const limitedMessages = orchestrator.limitMessageHistory(finalMessages);
             const orchestratorContext = await orchestrator.orchestrate({
-                messages: finalMessages,
+                messages: limitedMessages,
                 userId: req.user?.id || userId || 'guest',
                 workspaceId: workspaceId,
                 projectId: workspaceId, // Usar workspaceId como projectId por ahora
@@ -355,16 +357,16 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                 userId: userId,
                 userIdentity: orchestratorContext.userIdentity
             };
-            const response = await openaiProvider.chat(assistantRequest);
+            const response = await groqProvider.chat(assistantRequest);
             answer = response.content;
             assistantTokens = (0, helpers_1.estimateTokens)(answer);
             // Actualizar output tokens en context
             orchestratorContext.outputTokens = assistantTokens;
             console.log(`[ORCH] ✓ Response received (${assistantTokens} tokens)`);
-            console.log(`[ORCH] Final metrics: auth=${orchestratorContext.isAuthenticated} tool=${orchestratorContext.toolUsed} model=${orchestratorContext.modelSelected} mem=${orchestratorContext.memoryCount} rag=${orchestratorContext.ragHits} in_tokens=${orchestratorContext.inputTokens} out_tokens=${orchestratorContext.outputTokens}`);
+            console.log(`[ORCH] Final metrics: auth=${orchestratorContext.isAuthenticated} tool=${orchestratorContext.toolUsed} model=${orchestratorContext.modelSelected} mem=${orchestratorContext.memoryCount} rag=${orchestratorContext.ragHits} web=${orchestratorContext.webSearchUsed} in_tokens=${orchestratorContext.inputTokens} out_tokens=${orchestratorContext.outputTokens}`);
         }
-        catch (openaiError) {
-            console.error('[OPENAI] ERROR:', openaiError);
+        catch (llmError) {
+            console.error('[LLM] ERROR:', llmError);
             // Intentar guardar el error en ae_requests
             try {
                 await supabase_1.supabase.from('ae_requests').insert({
@@ -376,7 +378,7 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                     tokens_used: userTokens,
                     cost: 0,
                     metadata: {
-                        error: openaiError.message || 'OpenAI error',
+                        error: llmError.message || 'LLM error',
                         userId: userId
                     }
                 });
@@ -385,7 +387,7 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                 console.error('[DB] Error logging request:', logError);
             }
             return res.status(500).json({
-                answer: 'Error al comunicarse con OpenAI. Por favor intenta de nuevo.',
+                answer: 'Error al comunicarse con el modelo de IA. Por favor intenta de nuevo.',
                 session_id: sessionId,
                 memories_to_add: []
             });

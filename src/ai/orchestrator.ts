@@ -5,12 +5,30 @@
  * Ejecuta pipeline completo: auth → profile → memories → RAG → tools → model selection → provider
  * 
  * CRÍTICO: NO es un chatbot. Es un sistema orquestado con contexto completo.
+ * 
+ * COST CONTROL:
+ * - Max output tokens: 600
+ * - Max history: 16 messages
+ * - Cache: 10 min para requests repetidos
  */
 
 import { Request } from 'express';
 import { getUserIdentity, buildBrandContext, buildIdentityBlock, UserIdentity } from '../services/userProfile';
 import { supabase } from '../db/supabase';
 import { retrieveRelevantChunks } from '../services/chunkRetrieval';
+import { webSearch, formatTavilyResults, shouldUseWebSearch, TavilySearchResponse } from '../services/tavilySearch';
+import crypto from 'crypto';
+
+// ═══════════════════════════════════════════════════════════════
+// COST CONTROL CONSTANTS
+// ═══════════════════════════════════════════════════════════════
+
+const MAX_OUTPUT_TOKENS = 600;
+const MAX_HISTORY_MESSAGES = 16;
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
+
+// Cache simple en memoria (TODO: migrar a Redis para producción)
+const responseCache = new Map<string, { response: string; timestamp: number; context: any }>();
 
 // ═══════════════════════════════════════════════════════════════
 // TIPOS
@@ -50,6 +68,8 @@ export interface OrchestratorContext {
   // Tools
   toolUsed: string;
   toolReason?: string;
+  toolResult?: string;
+  tavilyResponse?: TavilySearchResponse;
   
   // Model
   modelSelected: string;
@@ -61,8 +81,11 @@ export interface OrchestratorContext {
   // Metrics
   memoryCount: number;
   ragHits: number;
+  webSearchUsed: boolean;
+  cacheHit: boolean;
   inputTokens: number;
   outputTokens: number;
+  maxOutputTokens: number;
 }
 
 export interface OrchestratorResponse {
@@ -178,34 +201,56 @@ export class Orchestrator {
   }
   
   /**
-   * STEP 5: Decidir herramienta (tool decision)
+   * STEP 5: Decidir herramienta (tool decision) y ejecutarla
    */
-  private decideToolUsage(userMessage: string): { toolUsed: string; toolReason?: string } {
-    const lowerMsg = userMessage.toLowerCase();
-    
-    // Detectar intención de búsqueda web
-    if (lowerMsg.includes('buscar en internet') || 
-        lowerMsg.includes('busca en google') || 
-        lowerMsg.includes('web search') ||
-        lowerMsg.includes('búsqueda online')) {
-      return { 
-        toolUsed: 'web_search', 
-        toolReason: 'User requested web search explicitly' 
-      };
+  private async decideAndExecuteTool(userMessage: string): Promise<{ 
+    toolUsed: string; 
+    toolReason?: string;
+    toolResult?: string;
+    tavilyResponse?: TavilySearchResponse;
+  }> {
+    // Primero detectar con función de Tavily
+    if (shouldUseWebSearch(userMessage)) {
+      try {
+        console.log('[ORCH] Tool: web_search (Tavily) - Executing...');
+        const searchResponse = await webSearch({
+          query: userMessage,
+          searchDepth: 'basic',
+          maxResults: 5
+        });
+        
+        const formattedResults = formatTavilyResults(searchResponse);
+        
+        return {
+          toolUsed: 'web_search',
+          toolReason: 'Web search required for current information',
+          toolResult: formattedResults,
+          tavilyResponse: searchResponse
+        };
+      } catch (error: any) {
+        console.error('[ORCH] Tavily error:', error.message);
+        return {
+          toolUsed: 'web_search',
+          toolReason: 'Web search attempted but failed',
+          toolResult: `[ERROR] No se pudo realizar la búsqueda web: ${error.message}`
+        };
+      }
     }
+    
+    const lowerMsg = userMessage.toLowerCase();
     
     // Detectar Gmail/Calendar
     if (lowerMsg.includes('gmail') || lowerMsg.includes('email') || lowerMsg.includes('correo')) {
       return { 
         toolUsed: 'gmail', 
-        toolReason: 'Gmail/email operation detected' 
+        toolReason: 'Gmail/email operation detected (not yet implemented)' 
       };
     }
     
     if (lowerMsg.includes('calendar') || lowerMsg.includes('calendario') || lowerMsg.includes('evento')) {
       return { 
         toolUsed: 'calendar', 
-        toolReason: 'Calendar operation detected' 
+        toolReason: 'Calendar operation detected (not yet implemented)' 
       };
     }
     
@@ -215,45 +260,25 @@ export class Orchestrator {
   
   /**
    * STEP 6: Decidir modelo (model decision)
+   * Default: Groq (llama3-70b) - rápido y económico
+   * Pro: Groq (mixtral) para large context
+   * Fallback: OpenAI si Groq falla
    */
   private decideModel(userMessage: string, chunks: Array<any>, memories: Array<any>): { modelSelected: string; modelReason?: string } {
     const lowerMsg = userMessage.toLowerCase();
     
-    // Code-heavy: usa modelo pro
-    if (lowerMsg.includes('código') || 
-        lowerMsg.includes('code') || 
-        lowerMsg.includes('programming') ||
-        lowerMsg.includes('debug') ||
-        lowerMsg.includes('refactor')) {
+    // Large context: usa Mixtral (32k context window)
+    if (chunks.length > 3 || memories.length > 7) {
       return {
-        modelSelected: 'gpt-4-turbo',
-        modelReason: 'Code-heavy task detected'
+        modelSelected: 'mixtral-8x7b-32768',
+        modelReason: 'Large context detected (Groq Mixtral 32k)'
       };
     }
     
-    // Razonamiento largo: usa modelo pro
-    if (lowerMsg.includes('explicar') || 
-        lowerMsg.includes('analiza') || 
-        lowerMsg.includes('reasoning') ||
-        lowerMsg.includes('estrategia')) {
-      return {
-        modelSelected: 'gpt-4-turbo',
-        modelReason: 'Long reasoning task'
-      };
-    }
-    
-    // Contexto grande (chunks + memories): usa modelo pro
-    if (chunks.length > 2 || memories.length > 5) {
-      return {
-        modelSelected: 'gpt-4-turbo',
-        modelReason: 'Large context (chunks + memories)'
-      };
-    }
-    
-    // Default: modelo barato
+    // Default: Llama3 70B (más rápido y capaz)
     return {
-      modelSelected: 'gpt-3.5-turbo',
-      modelReason: 'Standard conversation'
+      modelSelected: 'llama-3.3-70b-versatile',
+      modelReason: 'Standard conversation (Groq Llama3 70B)'
     };
   }
   
@@ -264,7 +289,8 @@ export class Orchestrator {
     userIdentity: UserIdentity | null,
     memories: Array<any>,
     chunks: Array<any>,
-    basePrompt: string
+    basePrompt: string,
+    toolResult?: string
   ): string {
     let systemPrompt = basePrompt;
     
@@ -278,7 +304,13 @@ export class Orchestrator {
     systemPrompt += identityBlock;
     console.log('[ORCH] ✓ Identity block injected');
     
-    // 3. Memory block (memorias explícitas)
+    // 3. Tool result (si se ejecutó alguna herramienta)
+    if (toolResult) {
+      systemPrompt += toolResult;
+      console.log('[ORCH] ✓ Tool result injected');
+    }
+    
+    // 4. Memory block (memorias explícitas)
     if (memories.length > 0) {
       systemPrompt += `
 
@@ -362,6 +394,20 @@ AL-E: "No tengo capacidad de acceder a internet..."
   async orchestrate(request: OrchestratorRequest, basePrompt: string): Promise<OrchestratorContext> {
     const startTime = Date.now();
     
+    // STEP 0: Check cache
+    const lastUserMessage = request.messages[request.messages.length - 1]?.content || '';
+    const cacheKey = this.generateCacheKey(request.workspaceId, request.userId, lastUserMessage);
+    
+    const cached = responseCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < CACHE_TTL_MS)) {
+      console.log('[ORCH] ✓ Cache HIT - Returning cached response');
+      return {
+        ...cached.context,
+        cacheHit: true,
+        outputTokens: cached.context.outputTokens || 0
+      };
+    }
+    
     // STEP 1: Auth
     const { isAuthenticated, userId } = await this.checkAuth(request);
     
@@ -374,28 +420,28 @@ AL-E: "No tengo capacidad de acceder a internet..."
       : [];
     
     // STEP 4: RAG
-    const lastUserMessage = request.messages[request.messages.length - 1]?.content || '';
     const chunks = await this.ragRetrieve(userId, request.workspaceId, request.projectId || 'N/A', lastUserMessage);
     
-    // STEP 5: Tool decision
-    const { toolUsed, toolReason } = this.decideToolUsage(lastUserMessage);
+    // STEP 5: Tool decision & execution
+    const { toolUsed, toolReason, toolResult, tavilyResponse } = await this.decideAndExecuteTool(lastUserMessage);
     
-    // STEP 6: Model decision
+    // STEP 6: Model decision (ahora Groq by default)
     const { modelSelected, modelReason } = this.decideModel(lastUserMessage, chunks, memories);
     
-    // STEP 7: Build system prompt
-    const systemPrompt = this.buildSystemPrompt(userIdentity, memories, chunks, basePrompt);
+    // STEP 7: Build system prompt (incluye tool result si existe)
+    const systemPrompt = this.buildSystemPrompt(userIdentity, memories, chunks, basePrompt, toolResult);
     
     // Métricas
     const inputTokens = Math.ceil(systemPrompt.length / 4); // Aproximación
+    const webSearchUsed = toolUsed === 'web_search';
     
     // Log obligatorio
-    console.log(`[ORCH] auth=${isAuthenticated} user_uuid=${userId} tool_used=${toolUsed} model=${modelSelected} mem_count=${memories.length} rag_hits=${chunks.length} input_tokens=${inputTokens}`);
+    console.log(`[ORCH] auth=${isAuthenticated} user_uuid=${userId} tool_used=${toolUsed} model=${modelSelected} mem_count=${memories.length} rag_hits=${chunks.length} web_search=${webSearchUsed} cache_hit=false input_tokens=${inputTokens} max_output=${MAX_OUTPUT_TOKENS}`);
     
     const elapsed = Date.now() - startTime;
     console.log(`[ORCH] ✓ Orchestration completed in ${elapsed}ms`);
     
-    return {
+    const context: OrchestratorContext = {
       isAuthenticated,
       userId,
       userIdentity,
@@ -403,13 +449,61 @@ AL-E: "No tengo capacidad de acceder a internet..."
       chunks,
       toolUsed,
       toolReason,
+      toolResult,
+      tavilyResponse,
       modelSelected,
       modelReason,
       systemPrompt,
       memoryCount: memories.length,
       ragHits: chunks.length,
+      webSearchUsed,
+      cacheHit: false,
       inputTokens,
-      outputTokens: 0 // Se actualiza después de la llamada al modelo
+      outputTokens: 0, // Se actualiza después de la llamada al modelo
+      maxOutputTokens: MAX_OUTPUT_TOKENS
     };
+    
+    return context;
+  }
+  
+  /**
+   * Generar cache key
+   */
+  private generateCacheKey(workspaceId: string, userId: string, message: string): string {
+    const data = `${workspaceId}:${userId}:${message}`;
+    return crypto.createHash('md5').update(data).digest('hex');
+  }
+  
+  /**
+   * Guardar respuesta en cache
+   */
+  saveCacheResponse(cacheKey: string, context: OrchestratorContext): void {
+    responseCache.set(cacheKey, {
+      response: context.systemPrompt,
+      timestamp: Date.now(),
+      context
+    });
+    
+    // Cleanup: eliminar entradas viejas (> 30 min)
+    const now = Date.now();
+    for (const [key, value] of responseCache.entries()) {
+      if (now - value.timestamp > 30 * 60 * 1000) {
+        responseCache.delete(key);
+      }
+    }
+  }
+  
+  /**
+   * Limitar historial de mensajes (cost control)
+   */
+  limitMessageHistory(messages: Array<any>): Array<any> {
+    if (messages.length <= MAX_HISTORY_MESSAGES) {
+      return messages;
+    }
+    
+    // Mantener los últimos MAX_HISTORY_MESSAGES mensajes
+    const limited = messages.slice(-MAX_HISTORY_MESSAGES);
+    console.log(`[ORCH] Message history limited: ${messages.length} → ${limited.length}`);
+    return limited;
   }
 }
