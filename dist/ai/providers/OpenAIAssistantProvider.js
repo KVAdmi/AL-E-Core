@@ -34,6 +34,8 @@ class OpenAIAssistantProvider {
     }
     async chat(request) {
         try {
+            console.log('[PROVIDER] 🔍 OpenAIAssistantProvider.chat() CALLED');
+            console.log(`[PROVIDER] Request details: userId=${request.userId}, mode=${request.mode}, hasIdentity=${!!request.userIdentity}`);
             const mode = request.mode || 'universal';
             let systemPrompt = this.getSystemPrompt(mode);
             // 🔒 INYECCIÓN DE IDENTIDAD OBLIGATORIA
@@ -42,12 +44,14 @@ class OpenAIAssistantProvider {
                 const identityBlock = (0, userProfileService_1.buildIdentityBlock)(request.userIdentity);
                 systemPrompt = systemPrompt + identityBlock;
                 console.log(`[PROVIDER] ✓ Identity injected: name=${request.userIdentity.name || 'N/A'}, role=${request.userIdentity.role || 'N/A'}`);
+                console.log(`[DEBUG PROMPT] System prompt length: ${systemPrompt.length} chars, contains identity: ${systemPrompt.includes('CONTEXTO DE USUARIO')}`);
             }
             else if (request.userId) {
                 // Fallback: tenemos userId pero no se pasó identidad (usuario autenticado sin perfil)
                 const identityBlock = (0, userProfileService_1.buildIdentityBlock)(null);
                 systemPrompt = systemPrompt + identityBlock;
                 console.log(`[PROVIDER] ✓ Identity injected (authenticated user without profile): userId=${request.userId}`);
+                console.log(`[DEBUG PROMPT] System prompt length: ${systemPrompt.length} chars, contains identity: ${systemPrompt.includes('CONTEXTO DE USUARIO')}`);
             }
             else {
                 console.log('[PROVIDER] ⚠️ No userId provided - guest mode');
