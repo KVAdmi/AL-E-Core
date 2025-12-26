@@ -11,6 +11,7 @@ const chat_1 = __importDefault(require("./api/chat")); // NUEVO endpoint con gua
 const files_1 = __importDefault(require("./api/files")); // Endpoint de ingesta estructural
 const voice_1 = require("./api/voice");
 const sessions_1 = require("./api/sessions");
+const memory_1 = __importDefault(require("./api/memory")); // Memoria explícita
 const documentText_1 = require("./utils/documentText");
 const app = (0, express_1.default)();
 // Configurar multer para subida de archivos en memoria
@@ -165,11 +166,13 @@ app.use("/api/ai", chat_1.default); // Nuevo endpoint con guardado garantizado e
 app.use("/api/files", files_1.default); // Endpoint de ingesta estructural de documentos
 app.use("/api/voice", voice_1.voiceRouter);
 app.use("/api/sessions", sessions_1.sessionsRouter);
+app.use("/api/memory", memory_1.default); // Memoria explícita (acuerdos/decisiones/hechos)
 // Log simple de verificación
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
 console.log("[DEBUG] filesRouter (ingest) montado en /api/files");
 console.log("[DEBUG] voiceRouter montado en /api/voice");
 console.log("[DEBUG] sessionsRouter montado en /api/sessions");
+console.log("[DEBUG] memoryRouter montado en /api/memory");
 const PORT = env_1.env.port || 4000;
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`[AL-E CORE] Servidor iniciado en puerto ${PORT}`);

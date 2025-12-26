@@ -6,6 +6,7 @@ import chatRouter from "./api/chat"; // NUEVO endpoint con guardado garantizado
 import filesRouter from "./api/files"; // Endpoint de ingesta estructural
 import { voiceRouter } from "./api/voice";
 import { sessionsRouter } from "./api/sessions";
+import memoryRouter from "./api/memory"; // Memoria explícita
 import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
 
 const app = express();
@@ -179,12 +180,14 @@ app.use("/api/ai", chatRouter); // Nuevo endpoint con guardado garantizado en Su
 app.use("/api/files", filesRouter); // Endpoint de ingesta estructural de documentos
 app.use("/api/voice", voiceRouter);
 app.use("/api/sessions", sessionsRouter);
+app.use("/api/memory", memoryRouter); // Memoria explícita (acuerdos/decisiones/hechos)
 
 // Log simple de verificación
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
 console.log("[DEBUG] filesRouter (ingest) montado en /api/files");
 console.log("[DEBUG] voiceRouter montado en /api/voice");
 console.log("[DEBUG] sessionsRouter montado en /api/sessions");
+console.log("[DEBUG] memoryRouter montado en /api/memory");
 
 const PORT = env.port || 4000;
 
