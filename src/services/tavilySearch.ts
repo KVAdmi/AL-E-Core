@@ -217,17 +217,21 @@ export function shouldUseWebSearch(userMessage: string): boolean {
     'qué es', 'quién es', 'dónde está',
     'cuándo', 'fecha', 'año',
     // Financiero/Verificación de datos
-    'tipo de cambio', 'tasa', 'cotización', 'valor actual'
+    'tipo de cambio', 'tasa', 'cotización', 'valor actual',
+    // Clima (SIEMPRE requiere datos actuales)
+    'clima', 'temperatura', 'pronóstico', 'pronostico', 'weather', 'forecast'
   ];
   
-  // TIER 3: Keywords de entidades externas (EMPRESAS, PRODUCTOS, FINANCIERO)
+  // TIER 3: Keywords de entidades externas (EMPRESAS, PRODUCTOS, FINANCIERO, LUGARES)
   const entityKeywords = [
     'empresa', 'compañía', 'startup', 'corporación', 'organización',
     'producto', 'servicio', 'plataforma', 'software', 'app',
     'marca', 'brand', 'negocio', 'comercio',
     // Financiero
     'moneda', 'divisa', 'dólar', 'peso', 'euro', 'bitcoin', 'cripto',
-    'bolsa', 'acción', 'mercado', 'índice'
+    'bolsa', 'acción', 'mercado', 'índice',
+    // Lugares (para clima y noticias locales)
+    'guadalajara', 'méxico', 'cdmx', 'monterrey', 'ciudad', 'estado', 'país'
   ];
   
   // TIER 4: Keywords de información actual (TEMPORAL)
@@ -235,7 +239,9 @@ export function shouldUseWebSearch(userMessage: string): boolean {
     '2024', '2025', 'hoy', 'ahora', 'actual', 'actualidad',
     'reciente', 'recientemente', 'últimamente',
     'precio', 'costo', 'valor', 'cotización',
-    'noticia', 'noticias', 'nota', 'artículo', 'reporte'
+    'noticia', 'noticias', 'nota', 'artículo', 'reporte',
+    // Temporales de clima
+    'mañana', 'próximos días', 'proximos dias', 'esta semana', 'fin de semana'
   ];
   
   // TIER 5: Patrones de pregunta sobre facts externos
