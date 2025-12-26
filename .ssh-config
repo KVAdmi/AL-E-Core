@@ -1,0 +1,17 @@
+# EC2 Connection Info for AL-E Core Production
+# 
+# SSH Command:
+ssh -i ~/Downloads/mercado-pago.pem ubuntu@13.220.60.13
+
+# Working Directory:
+cd /home/ubuntu/AL-E-Core
+
+# Common Deployment Commands:
+# git pull origin main
+# npm run build
+# pm2 restart ale-core
+# pm2 logs ale-core --lines 30
+# pm2 status
+
+# Full Deploy:
+ssh -i ~/Downloads/mercado-pago.pem ubuntu@13.220.60.13 "cd /home/ubuntu/AL-E-Core && git pull origin main && npm run build && pm2 restart ale-core && pm2 logs ale-core --lines 30"

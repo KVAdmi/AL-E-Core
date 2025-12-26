@@ -8,6 +8,8 @@ const userProfile_1 = require("../../services/userProfile");
 /**
  * OpenAI Assistant Provider
  * Enruta entre AL-EON (generalista) y L.U.C.I (verticales)
+ *
+ * CRÍTICO: SIEMPRE inyecta contexto de marca Infinity Kode
  */
 class OpenAIAssistantProvider {
     getSystemPrompt(mode) {
@@ -36,7 +38,11 @@ class OpenAIAssistantProvider {
         try {
             const mode = request.mode || 'universal';
             let systemPrompt = this.getSystemPrompt(mode);
-            // HOTFIX: Inyección de identidad
+            // CRÍTICO: SIEMPRE inyectar contexto de marca (HARDCODEADO)
+            const brandContext = (0, userProfile_1.buildBrandContext)();
+            systemPrompt = systemPrompt + brandContext;
+            console.log('[IDENTITY] ✓ Brand context injected: Infinity Kode');
+            // Inyección de identidad del usuario
             if (request.userIdentity) {
                 const identityBlock = (0, userProfile_1.buildIdentityBlock)(request.userIdentity);
                 systemPrompt = systemPrompt + identityBlock;

@@ -7,11 +7,13 @@ import {
   LUCY_INSURANCE_PROMPT, 
   LUCY_ACCOUNTING_PROMPT 
 } from '../prompts/lucy';
-import { buildIdentityBlock } from '../../services/userProfile';
+import { buildIdentityBlock, buildBrandContext } from '../../services/userProfile';
 
 /**
  * OpenAI Assistant Provider
  * Enruta entre AL-EON (generalista) y L.U.C.I (verticales)
+ * 
+ * CRÍTICO: SIEMPRE inyecta contexto de marca Infinity Kode
  */
 export class OpenAIAssistantProvider implements IAssistantProvider {
   
@@ -48,7 +50,12 @@ export class OpenAIAssistantProvider implements IAssistantProvider {
       const mode = request.mode || 'universal';
       let systemPrompt = this.getSystemPrompt(mode);
       
-      // HOTFIX: Inyección de identidad
+      // CRÍTICO: SIEMPRE inyectar contexto de marca (HARDCODEADO)
+      const brandContext = buildBrandContext();
+      systemPrompt = systemPrompt + brandContext;
+      console.log('[IDENTITY] ✓ Brand context injected: Infinity Kode');
+      
+      // Inyección de identidad del usuario
       if (request.userIdentity) {
         const identityBlock = buildIdentityBlock(request.userIdentity);
         systemPrompt = systemPrompt + identityBlock;
