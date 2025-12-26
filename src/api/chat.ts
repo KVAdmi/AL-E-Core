@@ -20,6 +20,7 @@ import {
   type AttachmentMetadata 
 } from '../services/attachmentDownload';
 import { extractTextFromFiles, type UploadedFile } from '../utils/documentText';
+import { getUserIdentity } from '../services/userProfileService';
 
 const router = express.Router();
 const openaiProvider = new OpenAIAssistantProvider();
@@ -401,6 +402,18 @@ router.post('/chat', optionalAuth, async (req, res) => {
       ? (chunksRetrieved > 0 ? 'auth-full' : 'auth-minimal')
       : 'guest-minimal';
     
+    // Obtener perfil del usuario si está autenticado
+    let userIdentity = null;
+    if (req.user?.id) {
+      try {
+        userIdentity = await getUserIdentity(req.user.id);
+        console.log(`[USER PROFILE] ${userIdentity ? `✓ Profile loaded: ${userIdentity.name || 'N/A'}` : '⚠️ No profile found'}`);
+      } catch (err) {
+        console.error('[USER PROFILE] Error loading profile:', err);
+        // Continuar sin perfil (fallback a usuario autenticado genérico)
+      }
+    }
+    
     // Aplicar context guard ANTES de enviar a OpenAI
     const guardResult = guardContextWindow(
       messages,
@@ -481,7 +494,7 @@ router.post('/chat', optionalAuth, async (req, res) => {
         mode: mode as any,
         workspaceId: workspaceId,
         userId: userId,
-        userEmail: req.user?.email
+        userIdentity: userIdentity
       };
       
       const response = await openaiProvider.chat(assistantRequest);

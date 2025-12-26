@@ -7,6 +7,7 @@ import {
   LUCY_INSURANCE_PROMPT, 
   LUCY_ACCOUNTING_PROMPT 
 } from '../prompts/lucy';
+import { buildIdentityBlock } from '../../services/userProfileService';
 
 /**
  * OpenAI Assistant Provider
@@ -48,23 +49,16 @@ export class OpenAIAssistantProvider implements IAssistantProvider {
       let systemPrompt = this.getSystemPrompt(mode);
       
       // 🔒 INYECCIÓN DE IDENTIDAD OBLIGATORIA
-      // Si hay userId, SIEMPRE agregar bloque de identidad al system prompt
-      if (request.userId) {
-        const identityBlock = `
-
----
-INFORMACIÓN DEL USUARIO AUTENTICADO:
-- User ID: ${request.userId}
-${request.userEmail ? `- Email: ${request.userEmail}` : ''}
-- Estado: Usuario registrado y autenticado
-
-IMPORTANTE: Este usuario está autenticado. Reconoce su identidad en tus respuestas.
-NO digas "no tengo capacidad de recordar" o "no sé quién eres".
-Trata al usuario como alguien conocido del sistema.
----
-`;
+      // Si hay userIdentity, SIEMPRE agregar bloque de identidad al system prompt
+      if (request.userIdentity) {
+        const identityBlock = buildIdentityBlock(request.userIdentity);
         systemPrompt = systemPrompt + identityBlock;
-        console.log(`[PROVIDER] ✓ Identity injected: userId=${request.userId}, email=${request.userEmail || 'N/A'}`);
+        console.log(`[PROVIDER] ✓ Identity injected: name=${request.userIdentity.name || 'N/A'}, role=${request.userIdentity.role || 'N/A'}`);
+      } else if (request.userId) {
+        // Fallback: tenemos userId pero no se pasó identidad (usuario autenticado sin perfil)
+        const identityBlock = buildIdentityBlock(null);
+        systemPrompt = systemPrompt + identityBlock;
+        console.log(`[PROVIDER] ✓ Identity injected (authenticated user without profile): userId=${request.userId}`);
       } else {
         console.log('[PROVIDER] ⚠️ No userId provided - guest mode');
       }

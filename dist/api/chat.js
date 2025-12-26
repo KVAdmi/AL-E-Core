@@ -15,6 +15,7 @@ const auth_1 = require("../middleware/auth");
 const contextGuard_1 = require("../utils/contextGuard");
 const attachmentDownload_1 = require("../services/attachmentDownload");
 const documentText_1 = require("../utils/documentText");
+const userProfileService_1 = require("../services/userProfileService");
 const router = express_1.default.Router();
 const openaiProvider = new OpenAIAssistantProvider_1.OpenAIAssistantProvider();
 /**
@@ -334,6 +335,18 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
         const memoryMode = identityInjected
             ? (chunksRetrieved > 0 ? 'auth-full' : 'auth-minimal')
             : 'guest-minimal';
+        // Obtener perfil del usuario si está autenticado
+        let userIdentity = null;
+        if (req.user?.id) {
+            try {
+                userIdentity = await (0, userProfileService_1.getUserIdentity)(req.user.id);
+                console.log(`[USER PROFILE] ${userIdentity ? `✓ Profile loaded: ${userIdentity.name || 'N/A'}` : '⚠️ No profile found'}`);
+            }
+            catch (err) {
+                console.error('[USER PROFILE] Error loading profile:', err);
+                // Continuar sin perfil (fallback a usuario autenticado genérico)
+            }
+        }
         // Aplicar context guard ANTES de enviar a OpenAI
         const guardResult = (0, contextGuard_1.guardContextWindow)(messages, '', // System prompt manejado por provider
         knowledgeContext, identityInjected);
@@ -403,7 +416,7 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                 mode: mode,
                 workspaceId: workspaceId,
                 userId: userId,
-                userEmail: req.user?.email
+                userIdentity: userIdentity
             };
             const response = await openaiProvider.chat(assistantRequest);
             answer = response.content;

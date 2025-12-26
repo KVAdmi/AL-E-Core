@@ -4,6 +4,7 @@ exports.OpenAIAssistantProvider = void 0;
 const openaiProvider_1 = require("./openaiProvider");
 const aleon_1 = require("../prompts/aleon");
 const lucy_1 = require("../prompts/lucy");
+const userProfileService_1 = require("../../services/userProfileService");
 /**
  * OpenAI Assistant Provider
  * Enruta entre AL-EON (generalista) y L.U.C.I (verticales)
@@ -36,23 +37,17 @@ class OpenAIAssistantProvider {
             const mode = request.mode || 'universal';
             let systemPrompt = this.getSystemPrompt(mode);
             // 🔒 INYECCIÓN DE IDENTIDAD OBLIGATORIA
-            // Si hay userId, SIEMPRE agregar bloque de identidad al system prompt
-            if (request.userId) {
-                const identityBlock = `
-
----
-INFORMACIÓN DEL USUARIO AUTENTICADO:
-- User ID: ${request.userId}
-${request.userEmail ? `- Email: ${request.userEmail}` : ''}
-- Estado: Usuario registrado y autenticado
-
-IMPORTANTE: Este usuario está autenticado. Reconoce su identidad en tus respuestas.
-NO digas "no tengo capacidad de recordar" o "no sé quién eres".
-Trata al usuario como alguien conocido del sistema.
----
-`;
+            // Si hay userIdentity, SIEMPRE agregar bloque de identidad al system prompt
+            if (request.userIdentity) {
+                const identityBlock = (0, userProfileService_1.buildIdentityBlock)(request.userIdentity);
                 systemPrompt = systemPrompt + identityBlock;
-                console.log(`[PROVIDER] ✓ Identity injected: userId=${request.userId}, email=${request.userEmail || 'N/A'}`);
+                console.log(`[PROVIDER] ✓ Identity injected: name=${request.userIdentity.name || 'N/A'}, role=${request.userIdentity.role || 'N/A'}`);
+            }
+            else if (request.userId) {
+                // Fallback: tenemos userId pero no se pasó identidad (usuario autenticado sin perfil)
+                const identityBlock = (0, userProfileService_1.buildIdentityBlock)(null);
+                systemPrompt = systemPrompt + identityBlock;
+                console.log(`[PROVIDER] ✓ Identity injected (authenticated user without profile): userId=${request.userId}`);
             }
             else {
                 console.log('[PROVIDER] ⚠️ No userId provided - guest mode');
