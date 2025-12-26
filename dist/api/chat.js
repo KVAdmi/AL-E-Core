@@ -12,6 +12,7 @@ const OpenAIAssistantProvider_1 = require("../ai/providers/OpenAIAssistantProvid
 const attachments_1 = require("../utils/attachments");
 const chunkRetrieval_1 = require("../services/chunkRetrieval");
 const auth_1 = require("../middleware/auth");
+const contextGuard_1 = require("../utils/contextGuard");
 const attachmentDownload_1 = require("../services/attachmentDownload");
 const documentText_1 = require("../utils/documentText");
 const router = express_1.default.Router();
@@ -43,9 +44,48 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
     let sessionId = null;
     try {
         console.log('\n[CHAT] ==================== NUEVA SOLICITUD ====================');
+        // 🔒 GUARDRAIL: Calcular tamaño del request
+        const requestContentLength = JSON.stringify(req.body).length;
+        const MAX_REQUEST_SIZE = 50000; // 50KB
+        console.log(`[GUARDRAIL] Request size: ${requestContentLength} bytes`);
         // Obtener userId (autenticado o del body)
         const authenticatedUserId = (0, auth_1.getUserId)(req);
         let { workspaceId = env_1.env.defaultWorkspaceId, userId: bodyUserId, mode = env_1.env.defaultMode, sessionId: requestSessionId, messages } = req.body;
+        // 🔒 GUARDRAIL 1: Validar que messages existe y es array
+        if (!Array.isArray(messages)) {
+            console.error('[GUARDRAIL] ⚠️ messages no es un array válido');
+            return res.status(400).json({
+                error: 'INVALID_REQUEST',
+                message: 'messages debe ser un array',
+                session_id: null,
+                memories_to_add: []
+            });
+        }
+        // 🔒 GUARDRAIL 2: Límite estricto de mensajes (protección backend)
+        const originalMessagesCount = messages.length;
+        let wasTrimmed = false;
+        const MAX_MESSAGES = 12;
+        if (messages.length > MAX_MESSAGES) {
+            console.warn(`[GUARDRAIL] ⚠️ Demasiados mensajes: ${messages.length} → recortando a últimos ${MAX_MESSAGES}`);
+            messages = messages.slice(-MAX_MESSAGES); // Últimos 12 mensajes
+            wasTrimmed = true;
+        }
+        // 🔒 GUARDRAIL 3: Si request es muy grande, recortar contenido de mensajes
+        if (requestContentLength > MAX_REQUEST_SIZE) {
+            console.warn(`[GUARDRAIL] ⚠️ Request muy grande: ${requestContentLength} bytes → recortando contenido`);
+            messages = messages.map((msg) => {
+                if (typeof msg.content === 'string' && msg.content.length > 2000) {
+                    wasTrimmed = true;
+                    return {
+                        ...msg,
+                        content: msg.content.substring(0, 2000) + '... [truncado por backend]'
+                    };
+                }
+                return msg;
+            });
+        }
+        // LOG OBLIGATORIO
+        console.log(`[GUARDRAIL] messages_in_request=${originalMessagesCount}, was_trimmed=${wasTrimmed}, final_messages=${messages.length}, request_size=${requestContentLength}`);
         // Prioridad: usuario autenticado > userId del body
         const userId = authenticatedUserId || bodyUserId;
         if (req.user) {
@@ -172,18 +212,30 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
             }
         }
         // ============================================
-        // A3) RESOLVER SESSION_ID
+        // A3) RESOLVER SESSION_ID + VALIDAR OWNERSHIP
         // ============================================
         if (requestSessionId && (0, helpers_1.isUuid)(requestSessionId)) {
-            // Verificar que existe
+            // Verificar que existe Y validar ownership si hay JWT
             const { data: existingSession } = await supabase_1.supabase
                 .from('ae_sessions')
-                .select('id')
+                .select('id, user_id_uuid')
                 .eq('id', requestSessionId)
                 .single();
             if (existingSession) {
+                // 🚨 GUARDRAIL DE SEGURIDAD: Validar ownership
+                if (req.user?.id && existingSession.user_id_uuid) {
+                    if (existingSession.user_id_uuid !== req.user.id) {
+                        console.error(`[SECURITY] ⚠️ Usuario ${req.user.id} intentó acceder a sesión de ${existingSession.user_id_uuid}`);
+                        return res.status(403).json({
+                            error: 'FORBIDDEN',
+                            message: 'No tienes acceso a esta sesión',
+                            session_id: null,
+                            memories_to_add: []
+                        });
+                    }
+                }
                 sessionId = requestSessionId;
-                console.log(`[CHAT] Usando sesión existente: ${sessionId}`);
+                console.log(`[CHAT] Usando sesión existente: ${sessionId} (ownership validado)`);
             }
         }
         if (!sessionId) {
@@ -249,14 +301,16 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
         // ============================================
         console.log('[CHUNKS] Recuperando conocimiento entrenable...');
         let knowledgeContext = '';
+        let chunksRetrieved = 0;
         try {
             const chunks = await (0, chunkRetrieval_1.retrieveRelevantChunks)({
                 workspaceId,
                 userId,
                 projectId: req.body.projectId || req.body.project_id,
-                limit: 5, // Top 5 fragmentos más relevantes
+                limit: 3, // 🔒 LÍMITE: máximo 3 chunks
                 minImportance: 0.5,
             });
+            chunksRetrieved = chunks.length;
             if (chunks.length > 0) {
                 knowledgeContext = (0, chunkRetrieval_1.chunksToContext)(chunks);
                 console.log(`[CHUNKS] ✓ ${chunks.length} fragmento(s) recuperado(s)`);
@@ -266,28 +320,51 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
             }
         }
         catch (chunkError) {
-            console.error('[CHUNKS] Error recuperando chunks:', chunkError);
-            // No romper el chat si falla la recuperación
+            console.error('[CHUNKS] ⚠️ FAIL-SAFE: Error recuperando chunks, continuando sin ellos:', chunkError);
+            // 🛡️ FALLBACK: NO abortar - continuar con chunks = []
+            knowledgeContext = '';
+            chunksRetrieved = 0;
         }
         // ============================================
-        // D) LLAMAR A OPENAI (CON ATTACHMENTS + CHUNKS)
+        // D) APLICAR CONTEXT GUARD + PREPARAR REQUEST
         // ============================================
-        console.log('[OPENAI] Enviando request...');
+        console.log('[OPENAI] Preparando request con context guard...');
+        // Determinar si hay identidad inyectada (con JWT)
+        const identityInjected = !!req.user?.id;
+        const memoryMode = identityInjected
+            ? (chunksRetrieved > 0 ? 'auth-full' : 'auth-minimal')
+            : 'guest-minimal';
+        // Aplicar context guard ANTES de enviar a OpenAI
+        const guardResult = (0, contextGuard_1.guardContextWindow)(messages, '', // System prompt manejado por provider
+        knowledgeContext, identityInjected);
+        // 🔒 LOGS OBLIGATORIOS
+        console.log(`[REQUEST CONTEXT] {
+  hasAuthHeader: ${!!req.headers.authorization},
+  user_uuid: ${req.user?.id || 'N/A'},
+  session_id: ${sessionId},
+  history_loaded_count: ${guardResult.messages.length},
+  chunks_count: ${chunksRetrieved},
+  memory_mode: ${memoryMode},
+  identity_injected: ${identityInjected},
+  model_used: gpt-3.5-turbo-1106,
+  output_cap: ${(0, contextGuard_1.getMaxOutputTokens)()},
+  context_truncated: ${guardResult.wasTruncated}
+}`);
         let answer = '';
         let assistantTokens = 0;
-        let modelUsed = 'gpt-4';
+        let modelUsed = 'gpt-3.5-turbo-1106'; // Default
         try {
-            // Preparar mensajes con contexto de attachments Y chunks
-            let finalMessages = [...messages];
-            // Si hay conocimiento entrenable, inyectarlo como contexto del sistema
-            if (knowledgeContext) {
+            // Preparar mensajes finales con context guard aplicado
+            let finalMessages = guardResult.messages;
+            // Si hay conocimiento entrenable (ya filtrado por context guard), inyectarlo
+            if (guardResult.chunks) {
                 // Buscar si ya hay un mensaje system
                 const systemMsgIndex = finalMessages.findIndex(m => m.role === 'system');
                 if (systemMsgIndex >= 0) {
                     // Agregar al mensaje system existente
                     finalMessages[systemMsgIndex] = {
                         ...finalMessages[systemMsgIndex],
-                        content: finalMessages[systemMsgIndex].content + '\n\n' + knowledgeContext
+                        content: finalMessages[systemMsgIndex].content + '\n\n' + guardResult.chunks
                     };
                 }
                 else {
@@ -295,7 +372,7 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                     finalMessages = [
                         {
                             role: 'system',
-                            content: knowledgeContext
+                            content: guardResult.chunks
                         },
                         ...finalMessages
                     ];
@@ -331,7 +408,17 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
             answer = response.content;
             assistantTokens = (0, helpers_1.estimateTokens)(answer);
             modelUsed = response.raw?.model || 'gpt-4';
-            console.log(`[OPENAI] ✓ Respuesta recibida (${assistantTokens} tokens aprox)`);
+            // 🔒 LOG OBLIGATORIO: tokens reales de OpenAI
+            const realInputTokens = response.raw?.usage?.prompt_tokens || 0;
+            const realOutputTokens = response.raw?.usage?.completion_tokens || 0;
+            const realTotalTokens = response.raw?.usage?.total_tokens || 0;
+            console.log(`[REQUEST COMPLETE] {
+  input_tokens: ${realInputTokens},
+  output_tokens: ${realOutputTokens},
+  total_tokens: ${realTotalTokens},
+  model_used: ${modelUsed},
+  response_length: ${answer.length} chars
+}`);
         }
         catch (openaiError) {
             console.error('[OPENAI] ERROR:', openaiError);
