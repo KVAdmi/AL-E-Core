@@ -478,12 +478,14 @@ router.post('/chat', optionalAuth, async (req, res) => {
       console.log(`[CHAT] ✓ LLM response received from ${providerUsed}${fallbackUsed ? ` (fallback from ${fallbackChain.join(' → ')})` : ''}`);
       
       // ============================================
-      // C4) APLICAR GUARDRAIL ANTI-MENTIRAS
+      // C4) APLICAR GUARDRAIL ANTI-MENTIRAS (MEJORADO)
       // ============================================
       
       guardrailResult = applyAntiLieGuardrail(
         llmResponse.response.text,
-        orchestratorContext.webSearchUsed
+        orchestratorContext.webSearchUsed,
+        orchestratorContext.intent,
+        orchestratorContext.toolFailed
       );
       
       if (guardrailResult.sanitized) {
@@ -616,6 +618,11 @@ router.post('/chat', optionalAuth, async (req, res) => {
           // Request tracking
           request_id: request_id,
           
+          // Intent Classification (NUEVO)
+          intent_type: orchestratorContext.intent.intent_type,
+          intent_confidence: orchestratorContext.intent.confidence,
+          answer_mode: orchestratorContext.answerMode,
+          
           // Provider y modelo REAL del router
           provider_used: providerUsed,
           model_used: llmResponse.response.model_used,
@@ -630,6 +637,8 @@ router.post('/chat', optionalAuth, async (req, res) => {
           
           // Tools y memoria
           tool_used: orchestratorContext.toolUsed,
+          tool_failed: orchestratorContext.toolFailed,
+          tool_error: orchestratorContext.toolError || null,
           web_search_used: orchestratorContext.webSearchUsed,
           web_results_count: orchestratorContext.webResultsCount,
           memories_loaded: orchestratorContext.memoryCount,

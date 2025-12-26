@@ -17,6 +17,7 @@ import { getUserIdentity, buildBrandContext, buildIdentityBlock, UserIdentity } 
 import { supabase } from '../db/supabase';
 import { retrieveRelevantChunks } from '../services/chunkRetrieval';
 import { webSearch, formatTavilyResults, shouldUseWebSearch, TavilySearchResponse } from '../services/tavilySearch';
+import { classifyIntent, generateFallbackContext, IntentClassification } from '../services/intentClassifier';
 import crypto from 'crypto';
 
 // ═══════════════════════════════════════════════════════════════
@@ -65,10 +66,15 @@ export interface OrchestratorContext {
     source: string;
   }>;
   
+  // Intent Classification (NUEVO)
+  intent: IntentClassification;
+  
   // Tools
   toolUsed: string;
   toolReason?: string;
   toolResult?: string;
+  toolFailed: boolean;
+  toolError?: string;
   tavilyResponse?: TavilySearchResponse;
   
   // Model
@@ -87,6 +93,9 @@ export interface OrchestratorContext {
   inputTokens: number;
   outputTokens: number;
   maxOutputTokens: number;
+  
+  // Answer Mode (NUEVO)
+  answerMode: 'verified' | 'offline_general' | 'offline_with_estimate' | 'stable_knowledge';
 }
 
 export interface OrchestratorResponse {
@@ -202,19 +211,43 @@ export class Orchestrator {
   }
   
   /**
-   * STEP 5: Decidir herramienta (tool decision) y ejecutarla
-   * CRÍTICO: Si detecta necesidad de web search, ejecuta SIEMPRE (no pregunta al modelo)
+   * STEP 4.5: Clasificar intención (NUEVO)
+   * Determina el tipo de conocimiento requerido y la estrategia de respuesta
    */
-  private async decideAndExecuteTool(userMessage: string): Promise<{ 
+  private classifyUserIntent(userMessage: string): IntentClassification {
+    return classifyIntent(userMessage);
+  }
+  
+  /**
+   * STEP 5: Decidir herramienta (tool decision) y ejecutarla
+   * CRÍTICO: Intent-driven tool execution con fallback resiliente
+   */
+  private async decideAndExecuteTool(
+    userMessage: string,
+    intent: IntentClassification
+  ): Promise<{ 
     toolUsed: string; 
     toolReason?: string;
     toolResult?: string;
+    toolFailed: boolean;
+    toolError?: string;
     tavilyResponse?: TavilySearchResponse;
   }> {
-    // TIER 1: Web Search (Tavily) - DETECCIÓN AGRESIVA
-    if (shouldUseWebSearch(userMessage)) {
+    
+    // Si el intent NO requiere tools, skip
+    if (intent.tools_required.length === 0) {
+      console.log('[ORCH] ℹ️ Intent: stable knowledge - no tools required');
+      return {
+        toolUsed: 'none',
+        toolReason: 'Stable knowledge query',
+        toolFailed: false
+      };
+    }
+    
+    // EJECUTAR TOOLS REQUERIDOS
+    if (intent.tools_required.includes('web_search')) {
       try {
-        console.log('[ORCH] 🔍 Tool: web_search (Tavily) - FORZANDO ejecución...');
+        console.log('[ORCH] 🔍 Tool: web_search (Tavily) - Intent-driven execution...');
         const searchResponse = await webSearch({
           query: userMessage,
           searchDepth: 'basic',
@@ -229,46 +262,55 @@ export class Orchestrator {
             toolUsed: 'web_search',
             toolReason: 'Web search executed successfully',
             toolResult: formattedResults,
+            toolFailed: false,
             tavilyResponse: searchResponse
           };
+          
         } else {
+          // Tavily respondió pero sin resultados
           console.warn('[ORCH] ⚠️ Tavily: búsqueda sin resultados');
+          
+          const fallbackContext = generateFallbackContext(
+            intent,
+            userMessage,
+            'No results found'
+          );
+          
           return {
             toolUsed: 'web_search',
             toolReason: 'Web search executed but no results found',
-            toolResult: `\n[WEB SEARCH] No se encontraron resultados para: "${userMessage}"\n`
+            toolResult: fallbackContext,
+            toolFailed: true,
+            toolError: 'No results found'
           };
         }
+        
       } catch (error: any) {
+        // Tavily falló completamente (timeout, rate limit, etc.)
         console.error('[ORCH] ❌ Tavily error:', error.message);
+        
+        const fallbackContext = generateFallbackContext(
+          intent,
+          userMessage,
+          error.message
+        );
+        
         return {
           toolUsed: 'web_search',
           toolReason: 'Web search attempted but failed',
-          toolResult: `\n[WEB SEARCH ERROR] No se pudo completar la búsqueda: ${error.message}\nINSTRUCCIÓN: Informa al usuario que la búsqueda web falló temporalmente.\n`
+          toolResult: fallbackContext,
+          toolFailed: true,
+          toolError: error.message
         };
       }
     }
     
-    // TIER 2: Gmail/Calendar (placeholder - no implementado)
-    const lowerMsg = userMessage.toLowerCase();
-    
-    if (lowerMsg.includes('gmail') || lowerMsg.includes('email') || lowerMsg.includes('correo')) {
-      return { 
-        toolUsed: 'gmail', 
-        toolReason: 'Gmail/email operation detected (not yet implemented)' 
-      };
-    }
-    
-    if (lowerMsg.includes('calendar') || lowerMsg.includes('calendario') || lowerMsg.includes('evento')) {
-      return { 
-        toolUsed: 'calendar', 
-        toolReason: 'Calendar operation detected (not yet implemented)' 
-      };
-    }
-    
-    // TIER 3: Sin herramienta
-    console.log('[ORCH] ✗ No tool required');
-    return { toolUsed: 'none' };
+    // Default: no tool executed
+    return {
+      toolUsed: 'none',
+      toolReason: 'No tool execution required',
+      toolFailed: false
+    };
   }
   
   /**
@@ -436,8 +478,12 @@ AL-E: "No tengo capacidad de acceder a internet..."
     // STEP 4: RAG
     const chunks = await this.ragRetrieve(userId, request.workspaceId, request.projectId || 'N/A', lastUserMessage);
     
-    // STEP 5: Tool decision & execution
-    const { toolUsed, toolReason, toolResult, tavilyResponse } = await this.decideAndExecuteTool(lastUserMessage);
+    // STEP 4.5: Intent Classification (NUEVO)
+    const intent = this.classifyUserIntent(lastUserMessage);
+    
+    // STEP 5: Tool decision & execution (intent-driven)
+    const { toolUsed, toolReason, toolResult, toolFailed, toolError, tavilyResponse } = 
+      await this.decideAndExecuteTool(lastUserMessage, intent);
     
     // STEP 6: Model decision (ahora Groq by default)
     const { modelSelected, modelReason } = this.decideModel(lastUserMessage, chunks, memories);
@@ -448,15 +494,32 @@ AL-E: "No tengo capacidad de acceder a internet..."
     // Métricas
     const inputTokens = Math.ceil(systemPrompt.length / 4); // Aproximación
     const webSearchUsed = toolUsed === 'web_search';
-    const webSearchSuccess = webSearchUsed && tavilyResponse?.success === true;
+    const webSearchSuccess = webSearchUsed && tavilyResponse?.success === true && !toolFailed;
     const webResultsCount = webSearchUsed ? (tavilyResponse?.results.length || 0) : 0;
     
-    // Log obligatorio (incluye web_results_count para detectar alucinaciones)
-    console.log(`[ORCH] auth=${isAuthenticated} user_uuid=${userId} tool_used=${toolUsed} web_search=${webSearchUsed} web_results=${webResultsCount} model=${modelSelected} mem_count=${memories.length} rag_hits=${chunks.length} cache_hit=false input_tokens=${inputTokens} max_output=${MAX_OUTPUT_TOKENS}`);
+    // Determinar answer mode
+    let answerMode: OrchestratorContext['answerMode'];
+    if (intent.intent_type === 'stable') {
+      answerMode = 'stable_knowledge';
+    } else if (webSearchSuccess) {
+      answerMode = 'verified';
+    } else if (toolFailed && intent.fallback_strategy === 'historical_ranges') {
+      answerMode = 'offline_with_estimate';
+    } else {
+      answerMode = 'offline_general';
+    }
     
-    // ALERTA: Si web_search=true pero web_results=0, el modelo puede alucinar
-    if (webSearchUsed && webResultsCount === 0) {
+    // Log obligatorio (incluye intent y answer mode)
+    console.log(`[ORCH] auth=${isAuthenticated} intent=${intent.intent_type} answer_mode=${answerMode} tool_used=${toolUsed} tool_failed=${toolFailed} web_search=${webSearchUsed} web_results=${webResultsCount} model=${modelSelected} mem_count=${memories.length} rag_hits=${chunks.length} cache_hit=false input_tokens=${inputTokens} max_output=${MAX_OUTPUT_TOKENS}`);
+    
+    // ALERTA: Si web_search=true pero web_results=0 Y no es time_sensitive, puede alucinar
+    if (webSearchUsed && webResultsCount === 0 && !toolFailed) {
       console.warn('[ORCH] ⚠️ WEB SEARCH SIN RESULTADOS - Alto riesgo de alucinación');
+    }
+    
+    // ALERTA: Si tool falló en time_sensitive, el modelo debe usar fallback strategy
+    if (toolFailed && intent.intent_type === 'time_sensitive') {
+      console.warn(`[ORCH] ⚠️ TOOL FAILED en time_sensitive - Fallback strategy: ${intent.fallback_strategy}`);
     }
     
     const elapsed = Date.now() - startTime;
@@ -468,9 +531,12 @@ AL-E: "No tengo capacidad de acceder a internet..."
       userIdentity,
       memories,
       chunks,
+      intent,
       toolUsed,
       toolReason,
       toolResult,
+      toolFailed,
+      toolError,
       tavilyResponse,
       modelSelected,
       modelReason,
@@ -482,7 +548,8 @@ AL-E: "No tengo capacidad de acceder a internet..."
       cacheHit: false,
       inputTokens,
       outputTokens: 0, // Se actualiza después de la llamada al modelo
-      maxOutputTokens: MAX_OUTPUT_TOKENS
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      answerMode
     };
     
     return context;

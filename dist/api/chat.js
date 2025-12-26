@@ -398,9 +398,9 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
             fallbackChain = llmResponse.fallbackChain.attempted;
             console.log(`[CHAT] ✓ LLM response received from ${providerUsed}${fallbackUsed ? ` (fallback from ${fallbackChain.join(' → ')})` : ''}`);
             // ============================================
-            // C4) APLICAR GUARDRAIL ANTI-MENTIRAS
+            // C4) APLICAR GUARDRAIL ANTI-MENTIRAS (MEJORADO)
             // ============================================
-            guardrailResult = (0, noFakeTools_1.applyAntiLieGuardrail)(llmResponse.response.text, orchestratorContext.webSearchUsed);
+            guardrailResult = (0, noFakeTools_1.applyAntiLieGuardrail)(llmResponse.response.text, orchestratorContext.webSearchUsed, orchestratorContext.intent, orchestratorContext.toolFailed);
             if (guardrailResult.sanitized) {
                 console.log(`[GUARDRAIL] 🛡️ Response sanitized: ${guardrailResult.reason}`);
             }
@@ -518,6 +518,10 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                 metadata: {
                     // Request tracking
                     request_id: request_id,
+                    // Intent Classification (NUEVO)
+                    intent_type: orchestratorContext.intent.intent_type,
+                    intent_confidence: orchestratorContext.intent.confidence,
+                    answer_mode: orchestratorContext.answerMode,
                     // Provider y modelo REAL del router
                     provider_used: providerUsed,
                     model_used: llmResponse.response.model_used,
@@ -530,6 +534,8 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                     max_output_tokens: orchestratorContext.maxOutputTokens,
                     // Tools y memoria
                     tool_used: orchestratorContext.toolUsed,
+                    tool_failed: orchestratorContext.toolFailed,
+                    tool_error: orchestratorContext.toolError || null,
                     web_search_used: orchestratorContext.webSearchUsed,
                     web_results_count: orchestratorContext.webResultsCount,
                     memories_loaded: orchestratorContext.memoryCount,
