@@ -198,7 +198,7 @@ export function shouldUseWebSearch(userMessage: string): boolean {
   const explicitSearchCommands = [
     'busca', 'buscar', 'búsqueda', 'search',
     'investiga', 'averigua', 'encuentra',
-    'verifica', 'checa', 'confirma',
+    'verifica', 'checa', 'confirma', 'valida', 'validar',
     've a', 'accede a', 'mira en',
     'consulta', 'revisa en'
   ];
@@ -210,14 +210,19 @@ export function shouldUseWebSearch(userMessage: string): boolean {
     'oficial', 'público', 'publicado',
     'información sobre', 'info sobre', 'datos sobre',
     'qué es', 'quién es', 'dónde está',
-    'cuándo', 'fecha', 'año'
+    'cuándo', 'fecha', 'año',
+    // Financiero/Verificación de datos
+    'tipo de cambio', 'tasa', 'cotización', 'valor actual'
   ];
   
-  // TIER 3: Keywords de entidades externas (EMPRESAS, PRODUCTOS)
+  // TIER 3: Keywords de entidades externas (EMPRESAS, PRODUCTOS, FINANCIERO)
   const entityKeywords = [
     'empresa', 'compañía', 'startup', 'corporación', 'organización',
     'producto', 'servicio', 'plataforma', 'software', 'app',
-    'marca', 'brand', 'negocio', 'comercio'
+    'marca', 'brand', 'negocio', 'comercio',
+    // Financiero
+    'moneda', 'divisa', 'dólar', 'peso', 'euro', 'bitcoin', 'cripto',
+    'bolsa', 'acción', 'mercado', 'índice'
   ];
   
   // TIER 4: Keywords de información actual (TEMPORAL)
