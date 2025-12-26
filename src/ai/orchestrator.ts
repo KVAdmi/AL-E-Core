@@ -82,6 +82,7 @@ export interface OrchestratorContext {
   memoryCount: number;
   ragHits: number;
   webSearchUsed: boolean;
+  webResultsCount: number;
   cacheHit: boolean;
   inputTokens: number;
   outputTokens: number;
@@ -202,6 +203,7 @@ export class Orchestrator {
   
   /**
    * STEP 5: Decidir herramienta (tool decision) y ejecutarla
+   * CRÍTICO: Si detecta necesidad de web search, ejecuta SIEMPRE (no pregunta al modelo)
    */
   private async decideAndExecuteTool(userMessage: string): Promise<{ 
     toolUsed: string; 
@@ -209,37 +211,47 @@ export class Orchestrator {
     toolResult?: string;
     tavilyResponse?: TavilySearchResponse;
   }> {
-    // Primero detectar con función de Tavily
+    // TIER 1: Web Search (Tavily) - DETECCIÓN AGRESIVA
     if (shouldUseWebSearch(userMessage)) {
       try {
-        console.log('[ORCH] Tool: web_search (Tavily) - Executing...');
+        console.log('[ORCH] 🔍 Tool: web_search (Tavily) - FORZANDO ejecución...');
         const searchResponse = await webSearch({
           query: userMessage,
           searchDepth: 'basic',
           maxResults: 5
         });
         
-        const formattedResults = formatTavilyResults(searchResponse);
-        
-        return {
-          toolUsed: 'web_search',
-          toolReason: 'Web search required for current information',
-          toolResult: formattedResults,
-          tavilyResponse: searchResponse
-        };
+        if (searchResponse.success && searchResponse.results.length > 0) {
+          const formattedResults = formatTavilyResults(searchResponse);
+          console.log(`[ORCH] ✓ Tavily: ${searchResponse.results.length} resultados obtenidos`);
+          
+          return {
+            toolUsed: 'web_search',
+            toolReason: 'Web search executed successfully',
+            toolResult: formattedResults,
+            tavilyResponse: searchResponse
+          };
+        } else {
+          console.warn('[ORCH] ⚠️ Tavily: búsqueda sin resultados');
+          return {
+            toolUsed: 'web_search',
+            toolReason: 'Web search executed but no results found',
+            toolResult: `\n[WEB SEARCH] No se encontraron resultados para: "${userMessage}"\n`
+          };
+        }
       } catch (error: any) {
-        console.error('[ORCH] Tavily error:', error.message);
+        console.error('[ORCH] ❌ Tavily error:', error.message);
         return {
           toolUsed: 'web_search',
           toolReason: 'Web search attempted but failed',
-          toolResult: `[ERROR] No se pudo realizar la búsqueda web: ${error.message}`
+          toolResult: `\n[WEB SEARCH ERROR] No se pudo completar la búsqueda: ${error.message}\nINSTRUCCIÓN: Informa al usuario que la búsqueda web falló temporalmente.\n`
         };
       }
     }
     
+    // TIER 2: Gmail/Calendar (placeholder - no implementado)
     const lowerMsg = userMessage.toLowerCase();
     
-    // Detectar Gmail/Calendar
     if (lowerMsg.includes('gmail') || lowerMsg.includes('email') || lowerMsg.includes('correo')) {
       return { 
         toolUsed: 'gmail', 
@@ -254,7 +266,8 @@ export class Orchestrator {
       };
     }
     
-    // Sin herramienta
+    // TIER 3: Sin herramienta
+    console.log('[ORCH] ✗ No tool required');
     return { toolUsed: 'none' };
   }
   
@@ -434,9 +447,16 @@ AL-E: "No tengo capacidad de acceder a internet..."
     // Métricas
     const inputTokens = Math.ceil(systemPrompt.length / 4); // Aproximación
     const webSearchUsed = toolUsed === 'web_search';
+    const webSearchSuccess = webSearchUsed && tavilyResponse?.success === true;
+    const webResultsCount = webSearchUsed ? (tavilyResponse?.results.length || 0) : 0;
     
-    // Log obligatorio
-    console.log(`[ORCH] auth=${isAuthenticated} user_uuid=${userId} tool_used=${toolUsed} model=${modelSelected} mem_count=${memories.length} rag_hits=${chunks.length} web_search=${webSearchUsed} cache_hit=false input_tokens=${inputTokens} max_output=${MAX_OUTPUT_TOKENS}`);
+    // Log obligatorio (incluye web_results_count para detectar alucinaciones)
+    console.log(`[ORCH] auth=${isAuthenticated} user_uuid=${userId} tool_used=${toolUsed} web_search=${webSearchUsed} web_results=${webResultsCount} model=${modelSelected} mem_count=${memories.length} rag_hits=${chunks.length} cache_hit=false input_tokens=${inputTokens} max_output=${MAX_OUTPUT_TOKENS}`);
+    
+    // ALERTA: Si web_search=true pero web_results=0, el modelo puede alucinar
+    if (webSearchUsed && webResultsCount === 0) {
+      console.warn('[ORCH] ⚠️ WEB SEARCH SIN RESULTADOS - Alto riesgo de alucinación');
+    }
     
     const elapsed = Date.now() - startTime;
     console.log(`[ORCH] ✓ Orchestration completed in ${elapsed}ms`);
@@ -457,6 +477,7 @@ AL-E: "No tengo capacidad de acceder a internet..."
       memoryCount: memories.length,
       ragHits: chunks.length,
       webSearchUsed,
+      webResultsCount,
       cacheHit: false,
       inputTokens,
       outputTokens: 0, // Se actualiza después de la llamada al modelo

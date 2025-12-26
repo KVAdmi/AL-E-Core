@@ -145,40 +145,88 @@ export function formatTavilyResults(searchResponse: TavilySearchResponse): strin
 
 /**
  * Detectar si una query requiere búsqueda web
+ * REGLA: Detectar agresivamente para evitar alucinaciones
  */
 export function shouldUseWebSearch(userMessage: string): boolean {
   const lowerMsg = userMessage.toLowerCase();
   
-  // Keywords que indican búsqueda web necesaria
-  const webSearchKeywords = [
+  // TIER 1: Comandos EXPLÍCITOS de búsqueda (FORZAR SIEMPRE)
+  const explicitSearchCommands = [
     'busca', 'buscar', 'búsqueda', 'search',
+    'investiga', 'averigua', 'encuentra',
+    'verifica', 'checa', 'confirma',
+    've a', 'accede a', 'mira en',
+    'consulta', 'revisa en'
+  ];
+  
+  // TIER 2: Keywords de verificación externa (ALTA PRIORIDAD)
+  const verificationKeywords = [
+    'existe', 'existencia', 'tiene página', 'tiene web', 'tiene sitio',
+    'url', 'dominio', 'website', 'sitio web', 'página web',
+    'oficial', 'público', 'publicado',
     'información sobre', 'info sobre', 'datos sobre',
     'qué es', 'quién es', 'dónde está',
-    'cómo se hace', 'cuándo ocurrió',
-    'precio de', 'costo de',
-    'última noticia', 'noticias sobre',
-    'actualización sobre',
-    'web', 'internet', 'online',
-    'investiga', 'averigua', 'encuentra'
+    'cuándo', 'fecha', 'año'
   ];
   
-  // Keywords de empresas/marcas que probablemente requieran búsqueda
-  const brandKeywords = [
-    'empresa', 'compañía', 'startup',
-    'producto', 'servicio',
-    'mercado', 'industria'
+  // TIER 3: Keywords de entidades externas (EMPRESAS, PRODUCTOS)
+  const entityKeywords = [
+    'empresa', 'compañía', 'startup', 'corporación', 'organización',
+    'producto', 'servicio', 'plataforma', 'software', 'app',
+    'marca', 'brand', 'negocio', 'comercio'
   ];
   
-  // Verificar keywords de búsqueda directa
-  const hasWebKeyword = webSearchKeywords.some(keyword => lowerMsg.includes(keyword));
+  // TIER 4: Keywords de información actual (TEMPORAL)
+  const temporalKeywords = [
+    '2024', '2025', 'hoy', 'ahora', 'actual', 'actualidad',
+    'reciente', 'recientemente', 'últimamente',
+    'precio', 'costo', 'valor', 'cotización',
+    'noticia', 'noticias', 'nota', 'artículo', 'reporte'
+  ];
   
-  // Verificar keywords de marca (menos prioritario)
-  const hasBrandKeyword = brandKeywords.some(keyword => lowerMsg.includes(keyword));
+  // TIER 5: Patrones de pregunta sobre facts externos
+  const questionPatterns = [
+    /puedes\s+(buscar|verificar|confirmar|checar)/,
+    /(tiene|hay|existe)\s+(página|web|sitio|url)/,
+    /información\s+(actual|reciente|sobre)/,
+    /qué\s+(es|son|significa)/,
+    /dónde\s+(está|están|se encuentra)/
+  ];
   
-  // Detectar preguntas sobre información actual (fechas, eventos recientes)
-  const hasTemporalKeyword = lowerMsg.includes('2024') || lowerMsg.includes('2025') || 
-                             lowerMsg.includes('hoy') || lowerMsg.includes('ahora') ||
-                             lowerMsg.includes('actual') || lowerMsg.includes('reciente');
+  // VERIFICACIÓN TIER 1: Comandos explícitos (RETURN INMEDIATO)
+  if (explicitSearchCommands.some(cmd => lowerMsg.includes(cmd))) {
+    console.log('[TAVILY] ✓ Tier 1: Comando explícito de búsqueda detectado');
+    return true;
+  }
   
-  return hasWebKeyword || (hasBrandKeyword && hasTemporalKeyword);
+  // VERIFICACIÓN TIER 2: Verificación + Entidad (ALTA CONFIANZA)
+  const hasVerification = verificationKeywords.some(kw => lowerMsg.includes(kw));
+  const hasEntity = entityKeywords.some(kw => lowerMsg.includes(kw));
+  if (hasVerification && hasEntity) {
+    console.log('[TAVILY] ✓ Tier 2: Verificación de entidad externa detectada');
+    return true;
+  }
+  
+  // VERIFICACIÓN TIER 3: Patterns de pregunta (REGEX)
+  if (questionPatterns.some(pattern => pattern.test(lowerMsg))) {
+    console.log('[TAVILY] ✓ Tier 3: Patrón de pregunta sobre facts externos');
+    return true;
+  }
+  
+  // VERIFICACIÓN TIER 4: Temporal + Entidad (INFORMACIÓN ACTUAL)
+  const hasTemporal = temporalKeywords.some(kw => lowerMsg.includes(kw));
+  if (hasTemporal && hasEntity) {
+    console.log('[TAVILY] ✓ Tier 4: Información actual sobre entidad');
+    return true;
+  }
+  
+  // VERIFICACIÓN TIER 5: Solo verificación fuerte (sin entidad)
+  const strongVerification = ['existe', 'url', 'página web', 'sitio web', 'dominio', 'oficial'];
+  if (strongVerification.some(kw => lowerMsg.includes(kw))) {
+    console.log('[TAVILY] ✓ Tier 5: Verificación fuerte de existencia/URL');
+    return true;
+  }
+  
+  console.log('[TAVILY] ✗ No se detectó necesidad de búsqueda web');
+  return false;
 }

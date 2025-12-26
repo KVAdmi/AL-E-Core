@@ -432,7 +432,7 @@ router.post('/chat', optionalAuth, async (req, res) => {
       orchestratorContext.outputTokens = assistantTokens;
       
       console.log(`[ORCH] ✓ Response received (${assistantTokens} tokens)`);
-      console.log(`[ORCH] Final metrics: auth=${orchestratorContext.isAuthenticated} tool=${orchestratorContext.toolUsed} model=${orchestratorContext.modelSelected} mem=${orchestratorContext.memoryCount} rag=${orchestratorContext.ragHits} web=${orchestratorContext.webSearchUsed} in_tokens=${orchestratorContext.inputTokens} out_tokens=${orchestratorContext.outputTokens}`);
+      console.log(`[ORCH] Final metrics: auth=${orchestratorContext.isAuthenticated} tool=${orchestratorContext.toolUsed} model=${orchestratorContext.modelSelected} mem=${orchestratorContext.memoryCount} rag=${orchestratorContext.ragHits} web=${orchestratorContext.webSearchUsed} web_results=${orchestratorContext.webResultsCount} in_tokens=${orchestratorContext.inputTokens} out_tokens=${orchestratorContext.outputTokens}`);
     } catch (llmError: any) {
       console.error('[LLM] ERROR:', llmError);
       
