@@ -200,7 +200,12 @@ export function shouldUseWebSearch(userMessage: string): boolean {
     'investiga', 'averigua', 'encuentra',
     'verifica', 'checa', 'confirma', 'valida', 'validar',
     've a', 'accede a', 'mira en',
-    'consulta', 'revisa en'
+    'consulta', 'revisa en',
+    // Conjugaciones futuras y progresivas (CRÍTICO para "voy a buscar")
+    'voy a buscar', 'voy a validar', 'voy a verificar', 'voy a consultar',
+    'vamos a buscar', 'vamos a validar', 'vamos a verificar',
+    'déjame buscar', 'déjame verificar', 'déjame validar',
+    'puedes buscar', 'puedes verificar', 'puedes validar'
   ];
   
   // TIER 2: Keywords de verificación externa (ALTA PRIORIDAD)
@@ -251,8 +256,17 @@ export function shouldUseWebSearch(userMessage: string): boolean {
   // VERIFICACIÓN TIER 2: Verificación + Entidad (ALTA CONFIANZA)
   const hasVerification = verificationKeywords.some(kw => lowerMsg.includes(kw));
   const hasEntity = entityKeywords.some(kw => lowerMsg.includes(kw));
+  const hasTemporal = temporalKeywords.some(kw => lowerMsg.includes(kw));
+  
   if (hasVerification && hasEntity) {
     console.log('[TAVILY] ✓ Tier 2: Verificación de entidad externa detectada');
+    return true;
+  }
+  
+  // TIER 2.5 CRÍTICO: Verificación + Temporal (DATOS FINANCIEROS/ACTUALIDAD)
+  // Ejemplo: "tipo de cambio actual" → tiene verificación (tipo de cambio) + temporal (actual)
+  if (hasVerification && hasTemporal) {
+    console.log('[TAVILY] ✓ Tier 2.5: Verificación de datos actuales (financiero/temporal)');
     return true;
   }
   
@@ -263,7 +277,6 @@ export function shouldUseWebSearch(userMessage: string): boolean {
   }
   
   // VERIFICACIÓN TIER 4: Temporal + Entidad (INFORMACIÓN ACTUAL)
-  const hasTemporal = temporalKeywords.some(kw => lowerMsg.includes(kw));
   if (hasTemporal && hasEntity) {
     console.log('[TAVILY] ✓ Tier 4: Información actual sobre entidad');
     return true;
