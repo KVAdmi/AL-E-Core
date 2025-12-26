@@ -8,6 +8,7 @@ import { voiceRouter } from "./api/voice";
 import { sessionsRouter } from "./api/sessions";
 import memoryRouter from "./api/memory"; // Memoria explícita
 import profileRouter from "./api/profile"; // Personalización de usuario
+import healthRouter from "./api/health"; // Health checks
 import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
 
 const app = express();
@@ -177,6 +178,7 @@ app.get("/health", async (req, res) => {
 });
 
 // app.use("/lia", liaRouter);
+app.use("/_health", healthRouter); // Health checks protegidos
 app.use("/api/ai", chatRouter); // Nuevo endpoint con guardado garantizado en Supabase
 app.use("/api/files", filesRouter); // Endpoint de ingesta estructural de documentos
 app.use("/api/voice", voiceRouter);
@@ -185,6 +187,7 @@ app.use("/api/memory", memoryRouter); // Memoria explícita (acuerdos/decisiones
 app.use("/api/profile", profileRouter); // Personalización de usuario
 
 // Log simple de verificación
+console.log("[DEBUG] healthRouter montado en /_health");
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
 console.log("[DEBUG] filesRouter (ingest) montado en /api/files");
 console.log("[DEBUG] voiceRouter montado en /api/voice");

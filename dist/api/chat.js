@@ -8,7 +8,6 @@ const uuid_1 = require("uuid");
 const supabase_1 = require("../db/supabase");
 const env_1 = require("../config/env");
 const helpers_1 = require("../utils/helpers");
-const GroqAssistantProvider_1 = require("../ai/providers/GroqAssistantProvider");
 const attachments_1 = require("../utils/attachments");
 const chunkRetrieval_1 = require("../services/chunkRetrieval");
 const auth_1 = require("../middleware/auth");
@@ -16,9 +15,12 @@ const attachmentDownload_1 = require("../services/attachmentDownload");
 const documentText_1 = require("../utils/documentText");
 const orchestrator_1 = require("../ai/orchestrator");
 const aleon_1 = require("../ai/prompts/aleon");
+const router_1 = require("../llm/router");
+const noFakeTools_1 = require("../guards/noFakeTools");
 const router = express_1.default.Router();
-const groqProvider = new GroqAssistantProvider_1.GroqAssistantProvider();
 const orchestrator = new orchestrator_1.Orchestrator();
+// Anti-duplicado: request_id tracking (30s TTL)
+const recentRequests = new Map();
 /**
  * =====================================================
  * POST /api/ai/chat
@@ -46,6 +48,32 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
     let sessionId = null;
     try {
         console.log('\n[CHAT] ==================== NUEVA SOLICITUD ====================');
+        // CRITICAL: Verificar que OpenAI está bloqueado
+        const openaiCheck = (0, router_1.verifyOpenAIBlocked)();
+        console.log(`[CHAT] OpenAI Status: ${openaiCheck.message}`);
+        // Anti-duplicado: request_id
+        const request_id = req.body.request_id || (0, uuid_1.v4)();
+        const now = Date.now();
+        if (recentRequests.has(request_id)) {
+            const timestamp = recentRequests.get(request_id);
+            if (now - timestamp < 30000) { // 30s
+                console.warn(`[CHAT] ⚠️ Duplicate request detected: ${request_id}`);
+                return res.status(409).json({
+                    error: 'DUPLICATE_REQUEST',
+                    message: 'Request already processed recently',
+                    request_id,
+                    session_id: null,
+                    memories_to_add: []
+                });
+            }
+        }
+        recentRequests.set(request_id, now);
+        // Cleanup old entries (> 2min)
+        for (const [rid, timestamp] of recentRequests.entries()) {
+            if (now - timestamp > 120000) {
+                recentRequests.delete(rid);
+            }
+        }
         // Obtener userId (autenticado o del body)
         const authenticatedUserId = (0, auth_1.getUserId)(req);
         let { workspaceId = env_1.env.defaultWorkspaceId, userId: bodyUserId, mode = env_1.env.defaultMode, sessionId: requestSessionId, messages } = req.body;
@@ -282,6 +310,11 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
         let assistantTokens = 0;
         let modelUsed = 'gpt-4';
         let orchestratorContext = null; // Declarar fuera del try para acceso global
+        let llmResponse = null; // Router response
+        let providerUsed = 'groq'; // Default
+        let fallbackUsed = false;
+        let fallbackChain = [];
+        let guardrailResult = null; // Guardrail result
         try {
             // Preparar mensajes con contexto de attachments Y chunks
             let finalMessages = [...messages];
@@ -339,30 +372,40 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
             ];
             // Si hay imágenes, usar formato multimodal (GPT-4 Vision)
             if (imageUrls.length > 0) {
-                const lastUserMsg = finalMessagesWithSystem[finalMessagesWithSystem.length - 1];
-                finalMessagesWithSystem[finalMessagesWithSystem.length - 1] = {
-                    role: 'user',
-                    content: [
-                        { type: 'text', text: typeof lastUserMsg.content === 'string' ? lastUserMsg.content : JSON.stringify(lastUserMsg.content) },
-                        ...imageUrls
-                    ]
-                };
-                modelUsed = 'gpt-4-vision-preview';
+                console.warn('[CHAT] ⚠️ Image URLs detected - multimodal NOT supported in new router yet');
+                // TODO: Implementar soporte multimodal en router si se necesita
             }
-            else {
-                // Usar modelo decidido por el orchestrator
-                modelUsed = orchestratorContext.modelSelected;
+            // Usar modelo decidido por el orchestrator
+            modelUsed = orchestratorContext.modelSelected;
+            // ============================================
+            // C3) LLAMAR AL ROUTER LLM (SIN OPENAI)
+            // ============================================
+            console.log(`[CHAT] Calling LLM router with model: ${modelUsed}`);
+            llmResponse = await (0, router_1.generate)({
+                messages: [
+                    { role: 'system', content: orchestratorContext.systemPrompt },
+                    ...finalMessages.filter(m => m.role !== 'system').map(m => ({
+                        role: m.role,
+                        content: m.content
+                    }))
+                ],
+                temperature: 0.7,
+                maxTokens: 600, // COST CONTROL
+                model: modelUsed
+            });
+            providerUsed = llmResponse.response.provider_used;
+            fallbackUsed = llmResponse.fallbackChain.fallback_used;
+            fallbackChain = llmResponse.fallbackChain.attempted;
+            console.log(`[CHAT] ✓ LLM response received from ${providerUsed}${fallbackUsed ? ` (fallback from ${fallbackChain.join(' → ')})` : ''}`);
+            // ============================================
+            // C4) APLICAR GUARDRAIL ANTI-MENTIRAS
+            // ============================================
+            guardrailResult = (0, noFakeTools_1.applyAntiLieGuardrail)(llmResponse.response.text, orchestratorContext.webSearchUsed);
+            if (guardrailResult.sanitized) {
+                console.log(`[GUARDRAIL] 🛡️ Response sanitized: ${guardrailResult.reason}`);
             }
-            const assistantRequest = {
-                messages: finalMessagesWithSystem,
-                mode: mode,
-                workspaceId: workspaceId,
-                userId: userId,
-                userIdentity: orchestratorContext.userIdentity
-            };
-            const response = await groqProvider.chat(assistantRequest);
-            answer = response.content;
-            assistantTokens = (0, helpers_1.estimateTokens)(answer);
+            answer = guardrailResult.text;
+            assistantTokens = llmResponse.response.tokens_out || (0, helpers_1.estimateTokens)(answer);
             // Actualizar output tokens en context
             orchestratorContext.outputTokens = assistantTokens;
             console.log(`[ORCH] ✓ Response received (${assistantTokens} tokens)`);
@@ -464,8 +507,6 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
         // ============================================
         try {
             const responseTime = Date.now() - startTime;
-            // Determinar provider usado (groq vs openai)
-            const providerUsed = orchestratorContext.modelSelected.includes('gpt') ? 'openai' : 'groq';
             await supabase_1.supabase.from('ae_requests').insert({
                 session_id: sessionId,
                 endpoint: '/api/ai/chat',
@@ -475,12 +516,17 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                 tokens_used: totalTokens,
                 cost: estimatedCostValue,
                 metadata: {
-                    // Provider y modelo REAL del orchestrator
+                    // Request tracking
+                    request_id: request_id,
+                    // Provider y modelo REAL del router
                     provider_used: providerUsed,
-                    model_used: orchestratorContext.modelSelected,
+                    model_used: llmResponse.response.model_used,
+                    fallback_used: fallbackUsed,
+                    fallback_chain: fallbackChain,
+                    fallback_reason: fallbackUsed ? llmResponse.fallbackChain.errors[fallbackChain[0]] : null,
                     // Tokens detallados
-                    tokens_in: orchestratorContext.inputTokens,
-                    tokens_out: orchestratorContext.outputTokens,
+                    tokens_in: llmResponse.response.tokens_in || orchestratorContext.inputTokens,
+                    tokens_out: llmResponse.response.tokens_out || orchestratorContext.outputTokens,
                     max_output_tokens: orchestratorContext.maxOutputTokens,
                     // Tools y memoria
                     tool_used: orchestratorContext.toolUsed,
@@ -488,8 +534,12 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                     web_results_count: orchestratorContext.webResultsCount,
                     memories_loaded: orchestratorContext.memoryCount,
                     rag_hits: orchestratorContext.ragHits,
+                    // Guardrail
+                    guardrail_sanitized: guardrailResult.sanitized,
+                    guardrail_reason: guardrailResult.reason || null,
                     // Performance
                     cache_hit: orchestratorContext.cacheHit,
+                    latency_ms: responseTime,
                     // Context
                     userId: userId,
                     workspaceId: workspaceId,
@@ -497,7 +547,7 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                     authenticated: orchestratorContext.isAuthenticated
                 }
             });
-            console.log(`[DB] ✓ Request logged (${responseTime}ms) - ${providerUsed}/${orchestratorContext.modelSelected}`);
+            console.log(`[DB] ✓ Request logged (${responseTime}ms) - ${providerUsed}/${llmResponse.response.model_used}`);
         }
         catch (logError) {
             console.error('[DB] Error logging request:', logError);

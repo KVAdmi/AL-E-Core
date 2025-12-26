@@ -13,6 +13,7 @@ const voice_1 = require("./api/voice");
 const sessions_1 = require("./api/sessions");
 const memory_1 = __importDefault(require("./api/memory")); // Memoria explícita
 const profile_1 = __importDefault(require("./api/profile")); // Personalización de usuario
+const health_1 = __importDefault(require("./api/health")); // Health checks
 const documentText_1 = require("./utils/documentText");
 const app = (0, express_1.default)();
 // Configurar multer para subida de archivos en memoria
@@ -163,6 +164,7 @@ app.get("/health", async (req, res) => {
     }
 });
 // app.use("/lia", liaRouter);
+app.use("/_health", health_1.default); // Health checks protegidos
 app.use("/api/ai", chat_1.default); // Nuevo endpoint con guardado garantizado en Supabase
 app.use("/api/files", files_1.default); // Endpoint de ingesta estructural de documentos
 app.use("/api/voice", voice_1.voiceRouter);
@@ -170,6 +172,7 @@ app.use("/api/sessions", sessions_1.sessionsRouter);
 app.use("/api/memory", memory_1.default); // Memoria explícita (acuerdos/decisiones/hechos)
 app.use("/api/profile", profile_1.default); // Personalización de usuario
 // Log simple de verificación
+console.log("[DEBUG] healthRouter montado en /_health");
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
 console.log("[DEBUG] filesRouter (ingest) montado en /api/files");
 console.log("[DEBUG] voiceRouter montado en /api/voice");
