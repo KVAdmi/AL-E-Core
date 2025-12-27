@@ -59,6 +59,28 @@ const VERIFICATION_PATTERNS = {
 };
 
 // ═══════════════════════════════════════════════════════════════
+// PATTERNS DE ACCIONES TRANSACCIONALES
+// ═══════════════════════════════════════════════════════════════
+
+const TRANSACTIONAL_PATTERNS = {
+  // Gmail - Lectura
+  gmail_read: /\b(revisa|revisar|ver|leer|check|checa|checka|busca en|buscar en|mira en|mirar en|correo|correos|email|emails|inbox|bandeja|mensajes?)\b.*\b(correo|email|gmail|bandeja|inbox)\b/i,
+  
+  // Gmail - Envío
+  gmail_send: /\b(envía|enviar|manda|mandar|send|escribe|escribir|redacta|redactar|responde|responder)\b.*\b(correo|email|mensaje)\b/i,
+  
+  // Calendar - Lectura
+  calendar_read: /\b(revisa|revisar|ver|check|checa|checka|mira|mirar|consulta|consultar)\b.*\b(agenda|calendario|calendar|citas?|eventos?|meeting|reunión|reunion)\b/i,
+  
+  // Calendar - Creación
+  calendar_create: /\b(agenda|agendar|agend[aá]r|crea|crear|añade|añadir|programa|programar|schedule)\b.*\b(cita|evento|meeting|reunión|reunion)\b/i,
+  
+  // Detectores genéricos
+  has_gmail_action: /\b(correo|email|gmail|bandeja|inbox)\b/i,
+  has_calendar_action: /\b(agenda|calendario|calendar|cita|evento|meeting|reunión|reunion)\b/i
+};
+
+// ═══════════════════════════════════════════════════════════════
 // PATTERNS DE CONOCIMIENTO ESTABLE
 // ═══════════════════════════════════════════════════════════════
 
@@ -152,6 +174,32 @@ export function classifyIntent(message: string): IntentClassification {
   }
   
   // ═══════════════════════════════════════════════════════════════
+  // SCORE: Transactional (Gmail/Calendar)
+  // ═══════════════════════════════════════════════════════════════
+  
+  let transactionalScore = 0;
+  
+  if (TRANSACTIONAL_PATTERNS.gmail_read.test(lowerMsg)) {
+    transactionalScore += 10; // MÁXIMA PRIORIDAD
+    reasoning.push('🔴 Lectura de Gmail detectada');
+  }
+  
+  if (TRANSACTIONAL_PATTERNS.gmail_send.test(lowerMsg)) {
+    transactionalScore += 10; // MÁXIMA PRIORIDAD
+    reasoning.push('🔴 Envío de Gmail detectado');
+  }
+  
+  if (TRANSACTIONAL_PATTERNS.calendar_read.test(lowerMsg)) {
+    transactionalScore += 10; // MÁXIMA PRIORIDAD
+    reasoning.push('🔴 Lectura de Calendar detectada');
+  }
+  
+  if (TRANSACTIONAL_PATTERNS.calendar_create.test(lowerMsg)) {
+    transactionalScore += 10; // MÁXIMA PRIORIDAD
+    reasoning.push('🔴 Creación de Calendar detectada');
+  }
+  
+  // ═══════════════════════════════════════════════════════════════
   // SCORE: Stable Knowledge
   // ═══════════════════════════════════════════════════════════════
   
@@ -184,15 +232,37 @@ export function classifyIntent(message: string): IntentClassification {
   // DECISIÓN: Intent Type
   // ═══════════════════════════════════════════════════════════════
   
-  const maxScore = Math.max(timeSensitiveScore, verificationScore, stableKnowledgeScore);
+  const maxScore = Math.max(timeSensitiveScore, verificationScore, stableKnowledgeScore, transactionalScore);
   
   let intent_type: IntentType;
   let tools_required: string[] = [];
   let fallback_strategy: IntentClassification['fallback_strategy'];
   let confidence: number;
   
-  if (verificationScore >= 4) {
-    // VERIFICACIÓN EXPLÍCITA (mayor prioridad)
+  // PRIORIDAD 1: Transactional (Gmail/Calendar) - SIEMPRE gana
+  if (transactionalScore >= 10) {
+    intent_type = 'transactional';
+    
+    // Determinar herramientas específicas
+    if (TRANSACTIONAL_PATTERNS.gmail_read.test(lowerMsg)) {
+      tools_required.push('gmail_read');
+    }
+    if (TRANSACTIONAL_PATTERNS.gmail_send.test(lowerMsg)) {
+      tools_required.push('gmail_send');
+    }
+    if (TRANSACTIONAL_PATTERNS.calendar_read.test(lowerMsg)) {
+      tools_required.push('calendar_read');
+    }
+    if (TRANSACTIONAL_PATTERNS.calendar_create.test(lowerMsg)) {
+      tools_required.push('calendar_create');
+    }
+    
+    fallback_strategy = 'none'; // Sin fallback - DEBE ejecutar o rechazar
+    confidence = 1.0; // Máxima confianza en detección
+    reasoning.push('→ Intent: TRANSACTIONAL (Gmail/Calendar action detected)');
+    
+  } else if (verificationScore >= 4) {
+    // PRIORIDAD 2: VERIFICACIÓN EXPLÍCITA
     intent_type = 'verification';
     tools_required = ['web_search'];
     fallback_strategy = 'verification_steps';

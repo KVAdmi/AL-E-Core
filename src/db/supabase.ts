@@ -13,6 +13,11 @@ export const supabase = createClient(
   }
 );
 
+// Export function to get Supabase client
+export function getSupabaseClient() {
+  return supabase;
+}
+
 // Database helper functions
 export class DatabaseService {
   

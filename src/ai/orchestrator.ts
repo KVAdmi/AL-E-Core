@@ -224,7 +224,8 @@ export class Orchestrator {
    */
   private async decideAndExecuteTool(
     userMessage: string,
-    intent: IntentClassification
+    intent: IntentClassification,
+    userId: string
   ): Promise<{ 
     toolUsed: string; 
     toolReason?: string;
@@ -244,7 +245,109 @@ export class Orchestrator {
       };
     }
     
-    // EJECUTAR TOOLS REQUERIDOS
+    // ═══════════════════════════════════════════════════════════════
+    // EJECUTAR TRANSACTIONAL TOOLS (Gmail/Calendar)
+    // ═══════════════════════════════════════════════════════════════
+    
+    if (intent.intent_type === 'transactional') {
+      console.log('[ORCH] 🔴 Intent: TRANSACTIONAL - Tools:', intent.tools_required.join(', '));
+      
+      // CRÍTICO: Usar action parser para extraer parámetros
+      const { detectActionIntent } = await import('../services/actionParser');
+      const actionIntent = detectActionIntent(userMessage);
+      
+      console.log(`[ORCH] 📋 Action Parser - Confidence: ${actionIntent.confidence}, Actions: ${actionIntent.actions.length}`);
+      
+      if (actionIntent.confidence < 0.6) {
+        // Confianza baja - falta info crítica
+        return {
+          toolUsed: 'none',
+          toolReason: 'Insufficient parameters for action execution',
+          toolResult: `Para ejecutar esta acción necesito más información:
+- Fecha específica (ej: "lunes", "mañana", "15 de enero")
+- Hora (ej: "a las 12", "15:30")
+
+¿Puedes darme más detalles?`,
+          toolFailed: true,
+          toolError: 'MISSING_PARAMETERS'
+        };
+      }
+      
+      // EJECUTAR ACCIONES (sin preguntar)
+      const results: string[] = [];
+      let anySuccess = false;
+      
+      for (const action of actionIntent.actions) {
+        if (action.action === 'check_email') {
+          const { readGmail } = await import('../services/gmailService');
+          const result = await readGmail(userId, action.query, 10);
+          
+          if (result.success) {
+            anySuccess = true;
+            
+            if (result.emails && result.emails.length > 0) {
+              const emailList = result.emails.slice(0, 3).map(e => 
+                `- **De:** ${e.from}\n  **Asunto:** ${e.subject}\n  **Fecha:** ${e.date}`
+              ).join('\n\n');
+              
+              results.push(`📧 **Correos encontrados:**\n\n${emailList}`);
+            } else {
+              results.push(`📧 ${result.message}`);
+            }
+          } else {
+            results.push(`❌ Gmail: ${result.message}`);
+          }
+        }
+        
+        if (action.action === 'create_calendar_event') {
+          const { createCalendarEvent } = await import('../services/calendarService');
+          
+          // Construir startTime y endTime
+          const startDateTime = new Date(action.date);
+          const [hours, minutes] = action.time_start.split(':').map(Number);
+          startDateTime.setHours(hours, minutes, 0, 0);
+          
+          const endDateTime = new Date(startDateTime);
+          endDateTime.setMinutes(endDateTime.getMinutes() + action.duration_minutes);
+          
+          const result = await createCalendarEvent(
+            userId,
+            action.title,
+            startDateTime,
+            endDateTime,
+            action.description
+          );
+          
+          if (result.success) {
+            anySuccess = true;
+            
+            const dateStr = startDateTime.toLocaleDateString('es-MX', { 
+              weekday: 'long', 
+              day: 'numeric', 
+              month: 'long' 
+            });
+            const timeStr = action.time_start;
+            
+            results.push(`📅 **Evento creado:**\n- **${action.title}**\n- ${dateStr} a las ${timeStr}\n- Google Meet: ${result.meet_link || 'Generado'}`);
+          } else {
+            results.push(`❌ Calendar: ${result.message}`);
+          }
+        }
+      }
+      
+      return {
+        toolUsed: actionIntent.actions.map(a => a.action).join(','),
+        toolReason: 'Action execution completed',
+        toolResult: results.join('\n\n'),
+        toolFailed: !anySuccess,
+        toolError: anySuccess ? undefined : 'ALL_ACTIONS_FAILED'
+      };
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // EJECUTAR WEB SEARCH (Tavily)
+    // ═══════════════════════════════════════════════════════════════
+    
     if (intent.tools_required.includes('web_search')) {
       try {
         console.log('[ORCH] 🔍 Tool: web_search (Tavily) - Intent-driven execution...');
@@ -424,6 +527,23 @@ PROHIBIDO ABSOLUTAMENTE:
 ❌ Decir "no tengo capacidad de buscar en la red" como excusa
 ❌ Decir "no tengo memoria" o "no puedo recordar"
 ❌ Negar la existencia de términos que suenan internos (Infinity Kode, Kunna, etc.)
+❌ Decir "no tengo acceso directo" cuando Gmail/Calendar YA están conectados
+❌ Sugerir "llama por teléfono" o "hazlo manual" cuando puedes ejecutar la acción
+❌ Educar sobre cómo usar Google Calendar/Gmail (el usuario YA sabe)
+❌ Preguntar confirmación cuando ya tienes fecha, hora y título claros
+❌ Usar frases de inseguridad: "desafortunadamente", "lamentablemente", "no puedo en este momento"
+
+OBLIGATORIO cuando detectes acción transaccional (Gmail/Calendar):
+✅ EJECUTAR directamente sin pedir permiso
+✅ Si ejecutaste, responder con confirmación clara y concisa
+✅ Si falló OAuth, decir exactamente: "Necesitas reconectar tu cuenta de Google"
+✅ Si faltan parámetros críticos (fecha/hora), pedir SOLO lo que falta
+
+COMPORTAMIENTO DE ASISTENTE PERSONAL (NO CHATBOT):
+- Cuando piden "revisa mi correo" → REVISAR Y REPORTAR (no explicar qué es Gmail)
+- Cuando piden "agenda una cita" → AGENDAR Y CONFIRMAR (no preguntar si quieren agendar)
+- Cuando piden "crea un meet" → CREAR Y DAR LINK (no explicar qué es Meet)
+
 
 COMPORTAMIENTO OBLIGATORIO:
 ✅ Si falta contexto: preguntar 1 dato concreto
@@ -483,7 +603,7 @@ AL-E: "No tengo capacidad de acceder a internet..."
     
     // STEP 5: Tool decision & execution (intent-driven)
     const { toolUsed, toolReason, toolResult, toolFailed, toolError, tavilyResponse } = 
-      await this.decideAndExecuteTool(lastUserMessage, intent);
+      await this.decideAndExecuteTool(lastUserMessage, intent, userId);
     
     // STEP 6: Model decision (ahora Groq by default)
     const { modelSelected, modelReason } = this.decideModel(lastUserMessage, chunks, memories);

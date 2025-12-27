@@ -41,6 +41,7 @@ const FAKE_SEARCH_PHRASES = [
   '*buscando*',
   '*verificando*',
   '*consultando*',
+  '*revisando*', // NUEVO: Detectar "revisando..." sin tool execution
   'según lo que vi en',
   'segun lo que vi en',
   'según mi búsqueda',
@@ -63,6 +64,49 @@ const FAKE_SEARCH_PHRASES = [
 ];
 
 // ═══════════════════════════════════════════════════════════════
+// FRASES TRANSACCIONALES PROHIBIDAS (Gmail/Calendar sin tool execution)
+// ═══════════════════════════════════════════════════════════════
+
+const FAKE_TRANSACTIONAL_PHRASES = [
+  // Gmail - Acciones falsas
+  '*revisando*',
+  '*leyendo correos*',
+  '*buscando en correo*',
+  '*verificando inbox*',
+  'revisé tu correo',
+  'revise tu correo',
+  'revisé tus correos',
+  'revise tus correos',
+  'consulté tu gmail',
+  'consulte tu gmail',
+  'verifiqué tu bandeja',
+  'verifique tu bandeja',
+  'accedí a tu correo',
+  'accedi a tu correo',
+  'envié el correo',
+  'envie el correo',
+  'mandé el email',
+  'mande el email',
+  
+  // Calendar - Acciones falsas
+  '*revisando agenda*',
+  '*consultando calendario*',
+  '*verificando eventos*',
+  'revisé tu agenda',
+  'revise tu agenda',
+  'consulté tu calendario',
+  'consulte tu calendario',
+  'verifiqué tus eventos',
+  'verifique tus eventos',
+  'agendé la cita',
+  'agende la cita',
+  'creé el evento',
+  'cree el evento',
+  'programé la reunión',
+  'programe la reunion'
+];
+
+// ═══════════════════════════════════════════════════════════════
 // DETECTOR
 // ═══════════════════════════════════════════════════════════════
 
@@ -82,6 +126,37 @@ export function detectFakeToolUse(responseText: string, webSearchUsed: boolean):
   const detectedPhrases: string[] = [];
   
   for (const phrase of FAKE_SEARCH_PHRASES) {
+    if (lowerResponse.includes(phrase.toLowerCase())) {
+      detectedPhrases.push(phrase);
+    }
+  }
+  
+  return {
+    hasFakeClaims: detectedPhrases.length > 0,
+    detectedPhrases
+  };
+}
+
+/**
+ * Detectar si la respuesta menciona acciones transaccionales falsas (Gmail/Calendar)
+ * CRITICAL: Si intent=transactional Y tool_failed, NO puede simular ejecución
+ */
+export function detectFakeTransactionalUse(
+  responseText: string, 
+  transactionalToolsUsed: boolean
+): {
+  hasFakeClaims: boolean;
+  detectedPhrases: string[];
+} {
+  if (transactionalToolsUsed) {
+    // Si SÍ se ejecutaron tools transaccionales, está OK mencionar acciones
+    return { hasFakeClaims: false, detectedPhrases: [] };
+  }
+  
+  const lowerResponse = responseText.toLowerCase();
+  const detectedPhrases: string[] = [];
+  
+  for (const phrase of FAKE_TRANSACTIONAL_PHRASES) {
     if (lowerResponse.includes(phrase.toLowerCase())) {
       detectedPhrases.push(phrase);
     }
@@ -150,7 +225,33 @@ export function applyAntiLieGuardrail(
     };
   }
   
-  // CHECK 2: Datos específicos inventados en time_sensitive queries con tool_failed
+  // CHECK 2: Fake transactional actions (Gmail/Calendar inventadas)
+  if (intent?.intent_type === 'transactional' && toolFailed) {
+    const transactionalDetection = detectFakeTransactionalUse(responseText, false);
+    
+    if (transactionalDetection.hasFakeClaims) {
+      console.log(`[GUARDRAIL] 🛡️ Sanitizing response (fake transactional use detected)`);
+      
+      return {
+        sanitized: true,
+        text: `⚠️ **Funcionalidad no disponible**
+
+No puedo acceder a tu correo electrónico o agenda en este momento porque:
+- La integración con Gmail/Google Calendar aún no está implementada
+- Necesitas vincular tu cuenta de Google con AL-E
+
+**Lo que necesitas hacer:**
+1. Configurar la integración de Google en tu perfil de AL-E
+2. Autorizar permisos de Gmail y Calendar
+3. Una vez configurado, podré ayudarte con estas tareas
+
+¿Hay algo más en lo que pueda ayudarte mientras tanto?`,
+        reason: `Fake transactional claims detected: ${transactionalDetection.detectedPhrases.join(', ')}`
+      };
+    }
+  }
+  
+  // CHECK 3: Datos específicos inventados en time_sensitive queries con tool_failed
   if (intent?.intent_type === 'time_sensitive' && toolFailed) {
     // Detectar si la respuesta contiene números específicos presentados como actuales
     const hasSpecificNumbers = /\b\d{1,3}(?:[.,]\d{1,3})?(?:\s*(?:°C|°F|grados|pesos?|dólares?|USD|MXN|%|porcentaje))?\b/i.test(responseText);
