@@ -35,23 +35,35 @@ export interface CalendarCreateResult {
 async function getAuthenticatedClient(userId: string) {
   const supabase = getSupabaseClient();
   
-  // Obtener tokens de Supabase
+  console.log(`[CALENDAR] 🔍 Looking for OAuth tokens - userId: ${userId}`);
+  
+  // Obtener tokens de Supabase (tabla: user_integrations, campo: integration_type)
   const { data: tokenData, error } = await supabase
-    .from('user_oauth_tokens')
+    .from('user_integrations')
     .select('access_token, refresh_token, expires_at')
     .eq('user_id', userId)
-    .eq('provider', 'google')
+    .eq('integration_type', 'calendar')
     .single();
   
+  console.log(`[CALENDAR] 🔍 Query result - found: ${!!tokenData}, error: ${error?.message || 'none'}`);
+  
   if (error || !tokenData) {
+    console.log(`[CALENDAR] ❌ OAuth tokens not found for user: ${userId}`);
     throw new Error('OAUTH_NOT_CONNECTED');
   }
   
-  // Verificar si el token expiró
-  const now = Date.now();
-  if (tokenData.expires_at && tokenData.expires_at < now) {
-    // TODO: Implementar refresh token
-    throw new Error('OAUTH_TOKEN_EXPIRED');
+  console.log(`[CALENDAR] ✅ OAuth tokens found for user: ${userId}`);
+  
+  // Verificar si el token expiró (expires_at es timestamp de Supabase)
+  if (tokenData.expires_at) {
+    const expiresAtDate = new Date(tokenData.expires_at);
+    const now = new Date();
+    
+    if (expiresAtDate < now) {
+      console.log(`[CALENDAR] ⚠️ Token expired at ${tokenData.expires_at}`);
+      // TODO: Implementar refresh token
+      throw new Error('OAUTH_TOKEN_EXPIRED');
+    }
   }
   
   const oauth2Client = new google.auth.OAuth2(
