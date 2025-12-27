@@ -703,4 +703,425 @@ router.get('/ping', (req, res) => {
   });
 });
 
+/**
+ * =====================================================
+ * POST /api/ai/chat/v2
+ * =====================================================
+ * 
+ * P0 REFACTOR: CORE ES LA ÚNICA FUENTE DE VERDAD
+ * 
+ * CAMBIOS CRÍTICOS:
+ * - Acepta UN SOLO mensaje (no array)
+ * - Reconstruye contexto desde Supabase (historial + memories)
+ * - Timeout defensivo para acciones (15s)
+ * - No confía en historial del frontend
+ * 
+ * PAYLOAD MÍNIMO:
+ * {
+ *   message: string,
+ *   sessionId: string,
+ *   workspaceId?: string,
+ *   meta?: object
+ * }
+ */
+router.post('/chat/v2', optionalAuth, async (req, res) => {
+  const startTime = Date.now();
+  let sessionId: string | null = null;
+  
+  try {
+    console.log('\n[CHAT_V2] ==================== NUEVA SOLICITUD ====================');
+    
+    // CRITICAL: Verificar que OpenAI está bloqueado
+    const openaiCheck = verifyOpenAIBlocked();
+    console.log(`[CHAT_V2] OpenAI Status: ${openaiCheck.message}`);
+    
+    // ============================================
+    // 1. VALIDAR PAYLOAD MÍNIMO
+    // ============================================
+    
+    const { message, sessionId: requestSessionId, workspaceId, meta } = req.body;
+    
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({
+        error: 'INVALID_PAYLOAD',
+        message: 'Campo "message" es requerido y debe ser string',
+        session_id: null,
+        memories_to_add: []
+      });
+    }
+    
+    // Anti-duplicado: request_id
+    const request_id = req.body.request_id || uuidv4();
+    const now = Date.now();
+    
+    if (recentRequests.has(request_id)) {
+      const timestamp = recentRequests.get(request_id)!;
+      if (now - timestamp < 30000) { // 30s
+        console.warn(`[CHAT_V2] ⚠️ Duplicate request detected: ${request_id}`);
+        return res.status(409).json({
+          error: 'DUPLICATE_REQUEST',
+          message: 'Request already processed recently',
+          request_id,
+          session_id: null,
+          memories_to_add: []
+        });
+      }
+    }
+    
+    recentRequests.set(request_id, now);
+    
+    // Cleanup old entries
+    for (const [rid, timestamp] of recentRequests.entries()) {
+      if (now - timestamp > 120000) {
+        recentRequests.delete(rid);
+      }
+    }
+    
+    // ============================================
+    // 2. RESOLVER USER_ID (JWT o body)
+    // ============================================
+    
+    const authenticatedUserId = getUserId(req);
+    const userId = authenticatedUserId || req.body.userId;
+    const user_id_uuid = req.user?.id || null;
+    
+    if (!userId || typeof userId !== 'string') {
+      return res.status(400).json({
+        error: 'MISSING_USER_ID',
+        message: 'userId es requerido (JWT o body)',
+        session_id: null,
+        memories_to_add: []
+      });
+    }
+    
+    console.log(`[CHAT_V2] userId: ${userId}, authenticated: ${!!req.user}`);
+    
+    // ============================================
+    // 3. RESOLVER SESSION (crear si no existe)
+    // ============================================
+    
+    const finalWorkspaceId = workspaceId || env.defaultWorkspaceId;
+    
+    if (requestSessionId && isUuid(requestSessionId)) {
+      // Session existente
+      sessionId = requestSessionId;
+      console.log(`[CHAT_V2] Using existing session: ${sessionId}`);
+    } else {
+      // Crear nueva session
+      sessionId = uuidv4();
+      const { error: sessionError } = await supabase
+        .from('ae_sessions')
+        .insert({
+          session_id: sessionId,
+          user_id: userId,
+          user_id_uuid,
+          workspace_id: finalWorkspaceId,
+          project_id: null,
+          title: 'Nueva conversación',
+          last_message_at: new Date().toISOString(),
+          total_messages: 0,
+          total_tokens: 0,
+          total_cost: 0
+        });
+      
+      if (sessionError) {
+        console.error('[CHAT_V2] Error creating session:', sessionError);
+        throw new Error('Failed to create session');
+      }
+      
+      console.log(`[CHAT_V2] ✓ New session created: ${sessionId}`);
+    }
+    
+    // ============================================
+    // 4. RECONSTRUIR CONTEXTO DESDE SUPABASE
+    // ============================================
+    
+    console.log('[CHAT_V2] 📚 Reconstructing context from Supabase...');
+    
+    // 4.1: Cargar historial de mensajes
+    const { data: historyData, error: historyError } = await supabase
+      .from('ae_messages')
+      .select('role, content, created_at')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: true })
+      .limit(50); // Últimos 50 mensajes
+    
+    if (historyError) {
+      console.error('[CHAT_V2] Error loading history:', historyError);
+    }
+    
+    const history = historyData || [];
+    console.log(`[CHAT_V2] ✓ Loaded ${history.length} messages from history`);
+    
+    // 4.2: Cargar memories del usuario
+    const { data: memoriesData, error: memoriesError } = await supabase
+      .from('assistant_memories')
+      .select('content, memory_type, created_at')
+      .eq('user_id', userId)
+      .eq('workspace_id', finalWorkspaceId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    
+    if (memoriesError) {
+      console.error('[CHAT_V2] Error loading memories:', memoriesError);
+    }
+    
+    const memories = memoriesData || [];
+    console.log(`[CHAT_V2] ✓ Loaded ${memories.length} memories`);
+    
+    // ============================================
+    // 5. INSERTAR MENSAJE DEL USUARIO
+    // ============================================
+    
+    const userMessageId = uuidv4();
+    const { error: insertUserError } = await supabase
+      .from('ae_messages')
+      .insert({
+        message_id: userMessageId,
+        session_id: sessionId,
+        user_id: userId,
+        user_id_uuid,
+        workspace_id: finalWorkspaceId,
+        role: 'user',
+        content: message,
+        tokens: estimateTokens(message),
+        created_at: new Date().toISOString()
+      });
+    
+    if (insertUserError) {
+      console.error('[CHAT_V2] Error inserting user message:', insertUserError);
+      throw new Error('Failed to save user message');
+    }
+    
+    console.log(`[CHAT_V2] ✓ User message saved: ${userMessageId}`);
+    
+    // ============================================
+    // 6. ORQUESTACIÓN (Intent + Tools + LLM)
+    // ============================================
+    
+    console.log('[CHAT_V2] 🧠 Starting orchestration...');
+    
+    // Construir messages array para orchestrator
+    const messagesForOrchestrator = [
+      ...history.map((h: any) => ({ role: h.role, content: h.content })),
+      { role: 'user', content: message }
+    ];
+    
+    const orchestratorRequest = {
+      userId,
+      workspaceId: finalWorkspaceId,
+      projectId: null,
+      sessionId,
+      messages: messagesForOrchestrator,
+      attachments: []
+    };
+    
+    // TIMEOUT DEFENSIVO: 15s para acciones
+    const orchestrationPromise = orchestrator.orchestrate(orchestratorRequest as any, ALEON_SYSTEM_PROMPT);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('ORCHESTRATION_TIMEOUT')), 15000)
+    );
+    
+    let orchestratorContext;
+    try {
+      orchestratorContext = await Promise.race([orchestrationPromise, timeoutPromise]);
+    } catch (error: any) {
+      if (error.message === 'ORCHESTRATION_TIMEOUT') {
+        console.warn('[CHAT_V2] ⏱️ Orchestration timeout - returning fallback');
+        
+        // Respuesta fallback para acciones lentas
+        const fallbackMessage = 'Estoy procesando tu solicitud, te confirmo enseguida.';
+        
+        const assistantMessageId = uuidv4();
+        await supabase.from('ae_messages').insert({
+          message_id: assistantMessageId,
+          session_id: sessionId,
+          user_id: userId,
+          user_id_uuid,
+          workspace_id: finalWorkspaceId,
+          role: 'assistant',
+          content: fallbackMessage,
+          tokens: estimateTokens(fallbackMessage),
+          created_at: new Date().toISOString()
+        });
+        
+        return res.json({
+          answer: fallbackMessage,
+          session_id: sessionId,
+          memories_to_add: [],
+          metadata: {
+            timeout: true,
+            latency_ms: Date.now() - startTime
+          }
+        });
+      }
+      throw error;
+    }
+    
+    console.log(`[CHAT_V2] ✓ Orchestration completed`);
+    
+    // ============================================
+    // 7. LLAMAR AL LLM
+    // ============================================
+    
+    console.log('[CHAT_V2] 🤖 Calling LLM router...');
+    
+    // Preparar messages con system prompt
+    const llmMessages = [
+      { role: 'system', content: orchestratorContext.systemPrompt },
+      ...messagesForOrchestrator
+    ];
+    
+    const llmResult = await llmGenerate({
+      messages: llmMessages as any,
+      temperature: 0.7,
+      maxTokens: 600,
+      model: orchestratorContext.modelSelected
+    });
+    
+    console.log(`[CHAT_V2] ✓ LLM response received from ${llmResult.fallbackChain.final_provider}`);
+    
+    // ============================================
+    // 8. APLICAR GUARDRAILS
+    // ============================================
+    
+    const guardrailResult = applyAntiLieGuardrail(
+      llmResult.response.text,
+      orchestratorContext.webSearchUsed,
+      orchestratorContext.intent,
+      orchestratorContext.toolFailed
+    );
+    
+    const finalAnswer = guardrailResult.sanitized 
+      ? guardrailResult.text 
+      : llmResult.response.text;
+    
+    if (guardrailResult.sanitized) {
+      console.log(`[CHAT_V2] 🛡️ Guardrail applied: ${guardrailResult.reason}`);
+    }
+    
+    // ============================================
+    // 9. GUARDAR RESPUESTA DEL ASSISTANT
+    // ============================================
+    
+    const assistantMessageId = uuidv4();
+    const { error: insertAssistantError } = await supabase
+      .from('ae_messages')
+      .insert({
+        message_id: assistantMessageId,
+        session_id: sessionId,
+        user_id: userId,
+        user_id_uuid,
+        workspace_id: finalWorkspaceId,
+        role: 'assistant',
+        content: finalAnswer,
+        tokens: llmResult.response.tokens_out || estimateTokens(finalAnswer),
+        created_at: new Date().toISOString()
+      });
+    
+    if (insertAssistantError) {
+      console.error('[CHAT_V2] Error inserting assistant message:', insertAssistantError);
+    }
+    
+    // ============================================
+    // 10. ACTUALIZAR SESSION
+    // ============================================
+    
+    const totalTokens = 
+      (llmResult.response.tokens_in || 0) + 
+      (llmResult.response.tokens_out || 0);
+    
+    await supabase
+      .from('ae_sessions')
+      .update({
+        last_message_at: new Date().toISOString(),
+        total_messages: supabase.rpc('increment', { x: 2 }), // user + assistant
+        total_tokens: supabase.rpc('increment', { x: totalTokens }),
+        total_cost: supabase.rpc('increment', { x: estimateCost(totalTokens, orchestratorContext.modelSelected) })
+      })
+      .eq('session_id', sessionId);
+    
+    // ============================================
+    // 11. LOG EN AE_REQUESTS
+    // ============================================
+    
+    const latency_ms = Date.now() - startTime;
+    
+    await supabase.from('ae_requests').insert({
+      request_id,
+      session_id: sessionId,
+      user_id: userId,
+      user_id_uuid,
+      workspace_id: finalWorkspaceId,
+      endpoint: '/api/ai/chat/v2',
+      method: 'POST',
+      status_code: 200,
+      latency_ms,
+      metadata: {
+        message_length: message.length,
+        intent_type: orchestratorContext.intent?.intent_type,
+        action_attempted: orchestratorContext.toolUsed !== 'none',
+        action_success: !orchestratorContext.toolFailed,
+        provider_used: llmResult.fallbackChain.final_provider,
+        model_used: orchestratorContext.modelSelected,
+        guardrail_sanitized: guardrailResult.sanitized,
+        web_search_used: orchestratorContext.webSearchUsed,
+        tokens_total: totalTokens
+      }
+    });
+    
+    console.log(`[CHAT_V2] ✓ Request logged - ${latency_ms}ms`);
+    console.log('[CHAT_V2] ==================== FIN SOLICITUD ====================\n');
+    
+    // ============================================
+    // 12. RESPONDER AL FRONTEND
+    // ============================================
+    
+    return res.json({
+      answer: finalAnswer,
+      session_id: sessionId,
+      memories_to_add: [], // TODO: Implementar extracción de memories
+      metadata: {
+        latency_ms,
+        provider: llmResult.fallbackChain.final_provider,
+        model: orchestratorContext.modelSelected,
+        intent: orchestratorContext.intent?.intent_type,
+        action_executed: orchestratorContext.toolUsed !== 'none',
+        guardrail_applied: guardrailResult.sanitized
+      }
+    });
+    
+  } catch (error: any) {
+    console.error('[CHAT_V2] ❌ Error:', error);
+    
+    const latency_ms = Date.now() - startTime;
+    
+    // Log error en ae_requests
+    if (sessionId) {
+      await supabase.from('ae_requests').insert({
+        request_id: req.body.request_id || uuidv4(),
+        session_id: sessionId,
+        user_id: req.body.userId,
+        workspace_id: req.body.workspaceId || env.defaultWorkspaceId,
+        endpoint: '/api/ai/chat/v2',
+        method: 'POST',
+        status_code: 500,
+        latency_ms,
+        metadata: {
+          error: error.message,
+          stack: error.stack
+        }
+      });
+    }
+    
+    return res.status(500).json({
+      error: 'INTERNAL_ERROR',
+      message: error.message,
+      session_id: sessionId,
+      memories_to_add: []
+    });
+  }
+});
+
 export default router;
+
