@@ -64,6 +64,14 @@ async function getAuthenticatedClient(userId: string) {
   
   console.log(`[GMAIL] ✅ OAuth tokens found for user: ${userId}`);
   
+  // DEBUG: Verificar contenido de tokens
+  console.log(`[GMAIL] 🔍 Token details - has access_token: ${!!tokenData.access_token}, has refresh_token: ${!!tokenData.refresh_token}, expires_at: ${tokenData.expires_at || 'N/A'}`);
+  
+  if (!tokenData.access_token) {
+    console.log(`[GMAIL] ❌ CRITICAL: access_token is NULL or empty`);
+    throw new Error('OAUTH_NOT_CONNECTED');
+  }
+  
   // Verificar si el token expiró (expires_at es timestamp de Supabase)
   if (tokenData.expires_at) {
     const expiresAtDate = new Date(tokenData.expires_at);
@@ -162,6 +170,16 @@ export async function readGmail(
     
   } catch (error: any) {
     console.error('[GMAIL] ❌ Error:', error.message);
+    console.error('[GMAIL] ❌ Error details:', JSON.stringify(error, null, 2));
+    
+    // Detectar errores de OAuth específicos de Google
+    if (error.message && error.message.includes('No access, refresh token')) {
+      return {
+        success: false,
+        error: 'OAUTH_TOKENS_INVALID',
+        message: 'Los tokens de Gmail están vacíos o inválidos. Reconecta tu cuenta en el perfil.'
+      };
+    }
     
     if (error.message === 'OAUTH_NOT_CONNECTED') {
       return {
