@@ -569,6 +569,8 @@ AL-E: "No tengo capacidad de acceder a internet..."
    */
   async orchestrate(request: OrchestratorRequest, basePrompt: string): Promise<OrchestratorContext> {
     const startTime = Date.now();
+    console.log('[ORCH] ========== STARTING ORCHESTRATION ==========');
+    console.log('[ORCH] User message:', request.messages[request.messages.length - 1]?.content?.substring(0, 100));
     
     // STEP 0: Check cache
     const lastUserMessage = request.messages[request.messages.length - 1]?.content || '';
@@ -591,25 +593,37 @@ AL-E: "No tengo capacidad de acceder a internet..."
     const userIdentity = await this.loadProfile(userId, isAuthenticated);
     
     // STEP 3: Memories
+    console.log('[ORCH] STEP 3: Loading memories...');
     const memories = isAuthenticated 
       ? await this.loadMemories(userId, request.workspaceId, request.projectId)
       : [];
+    console.log(`[ORCH] STEP 3: ✓ Loaded ${memories.length} memories`);
     
     // STEP 4: RAG
+    console.log('[ORCH] STEP 4: RAG retrieval...');
     const chunks = await this.ragRetrieve(userId, request.workspaceId, request.projectId || 'N/A', lastUserMessage);
+    console.log(`[ORCH] STEP 4: ✓ Retrieved ${chunks.length} chunks`);
     
     // STEP 4.5: Intent Classification (NUEVO)
+    console.log('[ORCH] STEP 4.5: Classifying intent...');
     const intent = this.classifyUserIntent(lastUserMessage);
+    console.log(`[ORCH] STEP 4.5: ✓ Intent: ${intent.intent_type}, confidence: ${intent.confidence}, tools: ${intent.tools_required.join(',')}`);
     
     // STEP 5: Tool decision & execution (intent-driven)
+    console.log('[ORCH] STEP 5: Tool execution...');
     const { toolUsed, toolReason, toolResult, toolFailed, toolError, tavilyResponse } = 
       await this.decideAndExecuteTool(lastUserMessage, intent, userId);
+    console.log(`[ORCH] STEP 5: ✓ Tool: ${toolUsed}, failed: ${toolFailed}`);
     
     // STEP 6: Model decision (ahora Groq by default)
+    console.log('[ORCH] STEP 6: Model decision...');
     const { modelSelected, modelReason } = this.decideModel(lastUserMessage, chunks, memories);
+    console.log(`[ORCH] STEP 6: ✓ Model: ${modelSelected}`);
     
     // STEP 7: Build system prompt (incluye tool result si existe)
+    console.log('[ORCH] STEP 7: Building system prompt...');
     const systemPrompt = this.buildSystemPrompt(userIdentity, memories, chunks, basePrompt, toolResult);
+    console.log(`[ORCH] STEP 7: ✓ Prompt built (${systemPrompt.length} chars)`);
     
     // Métricas
     const inputTokens = Math.ceil(systemPrompt.length / 4); // Aproximación
