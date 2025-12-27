@@ -64,26 +64,16 @@ router.post('/save', requireAuth, async (req, res) => {
     // Para scope=user, scope_id es el mismo user_uuid
     const finalScopeId = scope === 'user' ? owner_user_uuid : scope_id;
 
-    // Preparar metadata
-    const metadata = {
-      scope,
-      scope_id: finalScopeId,
-      owner_user_uuid,
-      workspace_id: workspaceId
-    };
-
-    // Insertar en assistant_memories
+    // Insertar en assistant_memories (schema real: id, workspace_id, user_id_old, mode, memory, importance, created_at, user_id_uuid, user_id)
     const { data, error } = await supabase
       .from('assistant_memories')
       .insert({
         workspace_id: workspaceId,
-        user_id: owner_user_uuid, // Para queries legacy
+        user_id: owner_user_uuid, // UUID string
+        user_id_uuid: owner_user_uuid, // UUID para queries
         mode: 'universal',
-        type: type,
-        summary: content.trim(),
-        importance: Math.min(Math.max(parseInt(importance as any) || 3, 1), 5),
-        source: 'manual',
-        metadata: metadata
+        memory: `[${type}] ${content.trim()}`, // Guardar tipo y contenido en memory
+        importance: Math.min(Math.max(parseFloat(importance as any) || 1.0, 0.0), 1.0) // Float entre 0-1
       })
       .select()
       .single();
