@@ -146,45 +146,37 @@ export class Orchestrator {
    */
   private async loadMemories(userId: string, workspaceId: string, projectId?: string): Promise<Array<any>> {
     try {
-      // Memorias de usuario (scope: user)
+      console.log(`[ORCH] 🔍 Loading memories for userId: ${userId}, workspaceId: ${workspaceId}`);
+      
+      // Memorias de usuario (buscar en user_id_uuid o user_id)
       const { data: userMemories, error: userError } = await supabase
         .from('assistant_memories')
-        .select('id, content, memory_type, importance')
-        .eq('owner_user_uuid', userId)
-        .eq('scope', 'user')
-        .gte('importance', 3)
+        .select('id, memory, importance, created_at')
+        .eq('workspace_id', workspaceId)
+        .or(`user_id_uuid.eq.${userId},user_id.eq.${userId}`)
+        .gte('importance', 0.3) // Threshold más bajo para incluir más memorias
         .order('importance', { ascending: false })
-        .limit(5);
+        .limit(10);
       
       if (userError) {
-        console.error('[ORCH] Error loading user memories:', userError);
+        console.error('[ORCH] ❌ Error loading user memories:', userError);
+        return [];
       }
       
-      // Memorias de proyecto (scope: project)
-      let projectMemories: any[] = [];
-      if (projectId && projectId !== 'N/A') {
-        const { data, error: projError } = await supabase
-          .from('assistant_memories')
-          .select('id, content, memory_type, importance')
-          .eq('project_id', projectId)
-          .eq('scope', 'project')
-          .gte('importance', 3)
-          .order('importance', { ascending: false })
-          .limit(5);
-        
-        if (projError) {
-          console.error('[ORCH] Error loading project memories:', projError);
-        } else {
-          projectMemories = data || [];
-        }
-      }
+      console.log(`[ORCH] ✅ Loaded ${userMemories?.length || 0} memories from assistant_memories table`);
       
-      const allMemories = [...(userMemories || []), ...projectMemories];
-      console.log(`[ORCH] mem_count=${allMemories.length} (user:${userMemories?.length || 0}, project:${projectMemories.length})`);
+      // Mapear al formato esperado (memory → content)
+      const mappedMemories = (userMemories || []).map(m => ({
+        id: m.id,
+        content: m.memory, // La columna se llama 'memory' no 'content'
+        memory_type: 'user',
+        importance: m.importance,
+        created_at: m.created_at
+      }));
       
-      return allMemories;
+      return mappedMemories;
     } catch (err) {
-      console.error('[ORCH] Error in loadMemories:', err);
+      console.error('[ORCH] ❌ Error in loadMemories:', err);
       return [];
     }
   }
