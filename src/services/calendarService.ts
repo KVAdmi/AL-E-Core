@@ -54,6 +54,16 @@ async function getAuthenticatedClient(userId: string) {
   
   console.log(`[CALENDAR] ✅ OAuth tokens found for user: ${userId}`);
   
+  // CRÍTICO: Verificar que access_token NO esté NULL o vacío
+  if (!tokenData.access_token || tokenData.access_token.trim() === '') {
+    console.log(`[CALENDAR] ❌ CRITICAL: access_token is NULL or empty - Integration record exists but tokens are missing`);
+    throw new Error('OAUTH_TOKENS_MISSING');
+  }
+  
+  if (!tokenData.refresh_token || tokenData.refresh_token.trim() === '') {
+    console.log(`[CALENDAR] ⚠️ WARNING: refresh_token is NULL or empty`);
+  }
+  
   // Verificar si el token expiró (expires_at es timestamp de Supabase)
   if (tokenData.expires_at) {
     const expiresAtDate = new Date(tokenData.expires_at);
