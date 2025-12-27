@@ -719,11 +719,14 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         }
         const history = historyData || [];
         console.log(`[CHAT_V2] ✓ Loaded ${history.length} messages from history`);
+        if (history.length > 0) {
+            console.log(`[CHAT_V2] 📜 History sample - First: "${history[0].content.substring(0, 50)}...", Last: "${history[history.length - 1].content.substring(0, 50)}..."`);
+        }
         // 4.2: Cargar memories del usuario
         const { data: memoriesData, error: memoriesError } = await supabase_1.supabase
             .from('assistant_memories')
-            .select('content, memory_type, created_at')
-            .eq('user_id', userId)
+            .select('memory, importance, created_at')
+            .or(`user_id_uuid.eq.${userId},user_id.eq.${userId}`)
             .eq('workspace_id', finalWorkspaceId)
             .order('created_at', { ascending: false })
             .limit(10);
