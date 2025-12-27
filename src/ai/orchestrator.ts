@@ -287,15 +287,44 @@ export class Orchestrator {
             
             if (result.emails && result.emails.length > 0) {
               const emailList = result.emails.slice(0, 3).map(e => 
-                `- **De:** ${e.from}\n  **Asunto:** ${e.subject}\n  **Fecha:** ${e.date}`
+                `- De: ${e.from}\n  Asunto: ${e.subject}\n  Fecha: ${e.date}`
               ).join('\n\n');
               
-              results.push(`📧 **Correos encontrados:**\n\n${emailList}`);
+              results.push(`Correos encontrados:\n\n${emailList}`);
             } else {
-              results.push(`📧 ${result.message}`);
+              results.push(result.message);
             }
           } else {
-            results.push(`❌ Gmail: ${result.message}`);
+            // Error OAuth - mensaje SUPER explícito para el LLM
+            if (result.error === 'OAUTH_NOT_CONNECTED') {
+              return {
+                toolUsed: 'check_email',
+                toolReason: 'OAuth not connected',
+                toolResult: `
+
+═══════════════════════════════════════════════════════════════
+🔴 GMAIL NO CONECTADO
+═══════════════════════════════════════════════════════════════
+
+El usuario NO tiene Gmail conectado a AL-E.
+
+INSTRUCCIÓN OBLIGATORIA:
+Responde EXACTAMENTE esto (sin inventar acciones):
+
+"No tienes Gmail conectado. Ve a tu perfil y autoriza el acceso para que pueda revisar tus correos."
+
+NO digas:
+❌ "Estoy revisando..."
+❌ "Déjame conectarme..."
+❌ "Conectando a tu cuenta..."
+
+═══════════════════════════════════════════════════════════════
+`,
+                toolFailed: true,
+                toolError: 'OAUTH_NOT_CONNECTED'
+              };
+            }
+            results.push(`Error: ${result.message}`);
           }
         }
         
@@ -328,9 +357,35 @@ export class Orchestrator {
             });
             const timeStr = action.time_start;
             
-            results.push(`📅 **Evento creado:**\n- **${action.title}**\n- ${dateStr} a las ${timeStr}\n- Google Meet: ${result.meet_link || 'Generado'}`);
+            results.push(`Evento creado: ${action.title}\n- ${dateStr} a las ${timeStr}\n- Google Meet: ${result.meet_link || 'Generado'}`);
           } else {
-            results.push(`❌ Calendar: ${result.message}`);
+            // Error OAuth Calendar
+            if (result.error === 'OAUTH_NOT_CONNECTED') {
+              return {
+                toolUsed: 'create_calendar_event',
+                toolReason: 'OAuth not connected',
+                toolResult: `
+
+═══════════════════════════════════════════════════════════════
+🔴 GOOGLE CALENDAR NO CONECTADO
+═══════════════════════════════════════════════════════════════
+
+El usuario NO tiene Google Calendar conectado a AL-E.
+
+INSTRUCCIÓN OBLIGATORIA:
+Responde EXACTAMENTE esto:
+
+"No tienes Calendar conectado. Ve a tu perfil y autoriza el acceso para que pueda crear eventos."
+
+NO inventes acciones ni digas que estás agendando.
+
+═══════════════════════════════════════════════════════════════
+`,
+                toolFailed: true,
+                toolError: 'OAUTH_NOT_CONNECTED'
+              };
+            }
+            results.push(`Error Calendar: ${result.message}`);
           }
         }
       }
