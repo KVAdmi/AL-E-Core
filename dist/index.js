@@ -14,6 +14,7 @@ const sessions_1 = require("./api/sessions");
 const memory_1 = __importDefault(require("./api/memory")); // Memoria explícita
 const profile_1 = __importDefault(require("./api/profile")); // Personalización de usuario
 const health_1 = __importDefault(require("./api/health")); // Health checks
+const oauth_1 = __importDefault(require("./api/oauth")); // P0: OAuth callbacks (Google)
 const documentText_1 = require("./utils/documentText");
 const app = (0, express_1.default)();
 // Configurar multer para subida de archivos en memoria
@@ -171,6 +172,7 @@ app.use("/api/voice", voice_1.voiceRouter);
 app.use("/api/sessions", sessions_1.sessionsRouter);
 app.use("/api/memory", memory_1.default); // Memoria explícita (acuerdos/decisiones/hechos)
 app.use("/api/profile", profile_1.default); // Personalización de usuario
+app.use("/api/auth", oauth_1.default); // P0: OAuth callbacks (Google Gmail/Calendar)
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
@@ -179,6 +181,7 @@ console.log("[DEBUG] voiceRouter montado en /api/voice");
 console.log("[DEBUG] sessionsRouter montado en /api/sessions");
 console.log("[DEBUG] memoryRouter montado en /api/memory");
 console.log("[DEBUG] profileRouter montado en /api/profile");
+console.log("[DEBUG] oauthRouter (P0) montado en /api/auth");
 const PORT = env_1.env.port || 4000;
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`[AL-E CORE] Servidor iniciado en puerto ${PORT}`);

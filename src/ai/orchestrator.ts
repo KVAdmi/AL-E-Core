@@ -287,35 +287,63 @@ export class Orchestrator {
               results.push(result.message);
             }
           } else {
-            // Error OAuth - mensaje SUPER explícito para el LLM
+            // Error OAuth - BLOQUEO DURO: devolver inmediatamente
             if (result.error === 'OAUTH_NOT_CONNECTED') {
               return {
-                toolUsed: 'check_email',
+                toolUsed: 'gmail_read',
                 toolReason: 'OAuth not connected',
                 toolResult: `
 
-═══════════════════════════════════════════════════════════════
-🔴 GMAIL NO CONECTADO
-═══════════════════════════════════════════════════════════════
+⛔ BLOQUEO ABSOLUTO: OAUTH NO CONECTADO ⛔
 
-El usuario NO tiene Gmail conectado a AL-E.
+El usuario NO tiene Gmail conectado.
 
-INSTRUCCIÓN OBLIGATORIA:
-Responde EXACTAMENTE esto (sin inventar acciones):
+RESPONDE EXACTAMENTE ESTO (una sola línea):
+"No tienes Gmail conectado. Ve a tu perfil y autoriza el acceso."
 
-"No tienes Gmail conectado. Ve a tu perfil y autoriza el acceso para que pueda revisar tus correos."
+PROHIBIDO decir:
+❌ "Revisé tu correo"
+❌ "Estoy revisando"
+❌ "Acabo de revisar"
+❌ "Déjame conectarme"
+❌ "Conectando..."
+❌ Cualquier frase afirmativa sobre acciones de Gmail
 
-NO digas:
-❌ "Estoy revisando..."
-❌ "Déjame conectarme..."
-❌ "Conectando a tu cuenta..."
-
-═══════════════════════════════════════════════════════════════
+ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
 `,
                 toolFailed: true,
                 toolError: 'OAUTH_NOT_CONNECTED'
               };
             }
+            
+            // Error OAuth - tokens NULL (existe record pero sin tokens)
+            if (result.error === 'OAUTH_TOKENS_MISSING') {
+              return {
+                toolUsed: 'gmail_read',
+                toolReason: 'OAuth tokens missing',
+                toolResult: `
+
+⛔ BLOQUEO ABSOLUTO: TOKENS OAUTH VACÍOS ⛔
+
+La integración Gmail existe pero los tokens están vacíos (NULL).
+
+RESPONDE EXACTAMENTE ESTO (una sola línea):
+"Tu Gmail está conectado pero la autenticación expiró. Desconecta y vuelve a conectar desde tu perfil."
+
+PROHIBIDO decir:
+❌ "Revisé tu correo"
+❌ "Estoy revisando"
+❌ "Acabo de revisar"
+❌ "Déjame reconectar"
+❌ Cualquier frase afirmativa sobre acciones de Gmail
+
+ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
+`,
+                toolFailed: true,
+                toolError: 'OAUTH_TOKENS_MISSING'
+              };
+            }
+            
             results.push(`Error: ${result.message}`);
           }
         }
@@ -351,32 +379,62 @@ NO digas:
             
             results.push(`Evento creado: ${action.title}\n- ${dateStr} a las ${timeStr}\n- Google Meet: ${result.meet_link || 'Generado'}`);
           } else {
-            // Error OAuth Calendar
+            // Error OAuth Calendar - BLOQUEO DURO
             if (result.error === 'OAUTH_NOT_CONNECTED') {
               return {
-                toolUsed: 'create_calendar_event',
+                toolUsed: 'calendar_create',
                 toolReason: 'OAuth not connected',
                 toolResult: `
 
-═══════════════════════════════════════════════════════════════
-🔴 GOOGLE CALENDAR NO CONECTADO
-═══════════════════════════════════════════════════════════════
+⛔ BLOQUEO ABSOLUTO: OAUTH NO CONECTADO ⛔
 
-El usuario NO tiene Google Calendar conectado a AL-E.
+El usuario NO tiene Calendar conectado.
 
-INSTRUCCIÓN OBLIGATORIA:
-Responde EXACTAMENTE esto:
+RESPONDE EXACTAMENTE ESTO (una sola línea):
+"No tienes Calendar conectado. Ve a tu perfil y autoriza el acceso."
 
-"No tienes Calendar conectado. Ve a tu perfil y autoriza el acceso para que pueda crear eventos."
+PROHIBIDO decir:
+❌ "Agendé tu evento"
+❌ "Ya creé la reunión"
+❌ "Estoy agendando"
+❌ "Acabo de agendar"
+❌ Cualquier frase afirmativa sobre creación de eventos
 
-NO inventes acciones ni digas que estás agendando.
-
-═══════════════════════════════════════════════════════════════
+ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
 `,
                 toolFailed: true,
                 toolError: 'OAUTH_NOT_CONNECTED'
               };
             }
+            
+            // Error OAuth Calendar - tokens NULL
+            if (result.error === 'OAUTH_TOKENS_MISSING') {
+              return {
+                toolUsed: 'calendar_create',
+                toolReason: 'OAuth tokens missing',
+                toolResult: `
+
+⛔ BLOQUEO ABSOLUTO: TOKENS OAUTH VACÍOS ⛔
+
+La integración Calendar existe pero los tokens están vacíos (NULL).
+
+RESPONDE EXACTAMENTE ESTO (una sola línea):
+"Tu Calendar está conectado pero la autenticación expiró. Desconecta y vuelve a conectar desde tu perfil."
+
+PROHIBIDO decir:
+❌ "Agendé tu evento"
+❌ "Ya creé la reunión"
+❌ "Estoy agendando"
+❌ "Acabo de agendar"
+❌ Cualquier frase afirmativa sobre creación de eventos
+
+ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
+`,
+                toolFailed: true,
+                toolError: 'OAUTH_TOKENS_MISSING'
+              };
+            }
+            
             results.push(`Error Calendar: ${result.message}`);
           }
         }

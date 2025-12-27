@@ -9,6 +9,7 @@ import { sessionsRouter } from "./api/sessions";
 import memoryRouter from "./api/memory"; // Memoria explícita
 import profileRouter from "./api/profile"; // Personalización de usuario
 import healthRouter from "./api/health"; // Health checks
+import oauthRouter from "./api/oauth"; // P0: OAuth callbacks (Google)
 import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
 
 const app = express();
@@ -185,6 +186,7 @@ app.use("/api/voice", voiceRouter);
 app.use("/api/sessions", sessionsRouter);
 app.use("/api/memory", memoryRouter); // Memoria explícita (acuerdos/decisiones/hechos)
 app.use("/api/profile", profileRouter); // Personalización de usuario
+app.use("/api/auth", oauthRouter); // P0: OAuth callbacks (Google Gmail/Calendar)
 
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
@@ -194,6 +196,7 @@ console.log("[DEBUG] voiceRouter montado en /api/voice");
 console.log("[DEBUG] sessionsRouter montado en /api/sessions");
 console.log("[DEBUG] memoryRouter montado en /api/memory");
 console.log("[DEBUG] profileRouter montado en /api/profile");
+console.log("[DEBUG] oauthRouter (P0) montado en /api/auth");
 
 const PORT = env.port || 4000;
 

@@ -128,10 +128,12 @@ export function detectFakeToolUse(responseText: string, webSearchUsed: boolean):
 /**
  * Detectar si la respuesta menciona acciones transaccionales falsas (Gmail/Calendar)
  * CRITICAL: Si intent=transactional Y tool_failed, NO puede simular ejecución
+ * CRITICAL: Si toolError = OAUTH_TOKENS_MISSING, BLOQUEO ABSOLUTO de frases afirmativas
  */
 export function detectFakeTransactionalUse(
   responseText: string, 
-  transactionalToolsUsed: boolean
+  transactionalToolsUsed: boolean,
+  toolError?: string
 ): {
   hasFakeClaims: boolean;
   detectedPhrases: string[];
@@ -147,6 +149,32 @@ export function detectFakeTransactionalUse(
   for (const phrase of FAKE_TRANSACTIONAL_PHRASES) {
     if (lowerResponse.includes(phrase.toLowerCase())) {
       detectedPhrases.push(phrase);
+    }
+  }
+  
+  // BLOQUEO EXTRA: Si toolError = OAUTH_TOKENS_MISSING, rechazar CUALQUIER frase afirmativa
+  if (toolError === 'OAUTH_TOKENS_MISSING' || toolError === 'OAUTH_NOT_CONNECTED') {
+    // Detectar frases afirmativas genéricas sobre acciones
+    const affirmativePhrases = [
+      'revisé',
+      'revise',
+      'agendé',
+      'agende',
+      'creé',
+      'cree',
+      'envié',
+      'envie',
+      'acabo de',
+      'ya ',
+      'listo,',
+      'hecho,',
+      'completado'
+    ];
+    
+    for (const phrase of affirmativePhrases) {
+      if (lowerResponse.includes(phrase)) {
+        detectedPhrases.push(`AFFIRMATIVE: "${phrase}"`);
+      }
     }
   }
   
@@ -193,13 +221,15 @@ export function sanitizeFakeToolResponse(
  * @param webSearchUsed - Si se ejecutó web search en este request
  * @param intent - Clasificación de intención (NUEVO)
  * @param toolFailed - Si el tool falló (NUEVO)
+ * @param toolError - Código de error específico (NUEVO P0)
  * @returns Respuesta sanitizada si se detectaron fake claims, o respuesta original
  */
 export function applyAntiLieGuardrail(
   responseText: string,
   webSearchUsed: boolean,
   intent?: IntentClassification,
-  toolFailed?: boolean
+  toolFailed?: boolean,
+  toolError?: string
 ): { sanitized: boolean; text: string; reason?: string } {
   
   // CHECK 1: Fake tool claims (búsquedas web inventadas)
@@ -215,28 +245,28 @@ export function applyAntiLieGuardrail(
     };
   }
   
-  // CHECK 2: Fake transactional actions (Gmail/Calendar inventadas)
+  // CHECK 2: BLOQUEO DURO OAuth (P0)
   if (intent?.intent_type === 'transactional' && toolFailed) {
-    const transactionalDetection = detectFakeTransactionalUse(responseText, false);
+    const transactionalDetection = detectFakeTransactionalUse(responseText, false, toolError);
     
     if (transactionalDetection.hasFakeClaims) {
-      console.log(`[GUARDRAIL] 🛡️ Sanitizing response (fake transactional use detected)`);
+      console.log(`[GUARDRAIL] 🛡️ 🔴 BLOQUEO DURO OAuth - fake transactional detected: ${transactionalDetection.detectedPhrases.join(', ')}`);
+      
+      // Mensaje más directo según el error
+      let blockedMessage = '';
+      
+      if (toolError === 'OAUTH_NOT_CONNECTED') {
+        blockedMessage = `No tienes Gmail/Calendar conectado. Ve a tu perfil y autoriza el acceso.`;
+      } else if (toolError === 'OAUTH_TOKENS_MISSING') {
+        blockedMessage = `Tu Gmail/Calendar está conectado pero la autenticación expiró. Desconecta y vuelve a conectar desde tu perfil.`;
+      } else {
+        blockedMessage = `No puedo acceder a tu Gmail/Calendar en este momento. Verifica la conexión en tu perfil.`;
+      }
       
       return {
         sanitized: true,
-        text: `⚠️ **Funcionalidad no disponible**
-
-No puedo acceder a tu correo electrónico o agenda en este momento porque:
-- La integración con Gmail/Google Calendar aún no está implementada
-- Necesitas vincular tu cuenta de Google con AL-E
-
-**Lo que necesitas hacer:**
-1. Configurar la integración de Google en tu perfil de AL-E
-2. Autorizar permisos de Gmail y Calendar
-3. Una vez configurado, podré ayudarte con estas tareas
-
-¿Hay algo más en lo que pueda ayudarte mientras tanto?`,
-        reason: `Fake transactional claims detected: ${transactionalDetection.detectedPhrases.join(', ')}`
+        text: blockedMessage,
+        reason: `OAuth hard block - ${toolError} - phrases: ${transactionalDetection.detectedPhrases.join(', ')}`
       };
     }
   }

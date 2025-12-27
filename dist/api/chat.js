@@ -421,9 +421,44 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
             fallbackChain = llmResponse.fallbackChain.attempted;
             console.log(`[CHAT] ✓ LLM response received from ${providerUsed}${fallbackUsed ? ` (fallback from ${fallbackChain.join(' → ')})` : ''}`);
             // ============================================
-            // C4) APLICAR GUARDRAIL ANTI-MENTIRAS (MEJORADO)
+            // C3.5) P1: EXTRACCIÓN REAL DE DATOS (Web Search)
             // ============================================
-            guardrailResult = (0, noFakeTools_1.applyAntiLieGuardrail)(llmResponse.response.text, orchestratorContext.webSearchUsed, orchestratorContext.intent, orchestratorContext.toolFailed);
+            // Si usó web search Y la respuesta tiene >3 links, rechazar y regenerar
+            if (orchestratorContext.webSearchUsed && orchestratorContext.intent.intent_type === 'time_sensitive') {
+                const linkCount = (llmResponse.response.text.match(/https?:\/\//g) || []).length;
+                if (linkCount > 3) {
+                    console.log(`[WEB_SEARCH] ⚠️ Response contains ${linkCount} links - REGENERATING with extraction prompt`);
+                    // Re-generar con prompt forzado (mismo método que el original)
+                    const extractionMessages = [
+                        { role: 'system', content: `${orchestratorContext.systemPrompt}
+
+⛔ INSTRUCCIÓN CRÍTICA:
+- La búsqueda web YA se ejecutó
+- Los datos están disponibles en el contexto
+- Extrae SOLO datos concretos: precios, fechas, horas, números
+- NO devuelvas links
+- NO digas "visita este sitio"
+- Responde con los DATOS EXTRAÍDOS directamente
+
+Ejemplo bueno: "El dólar está a $20.50 MXN según el último reporte."
+Ejemplo malo: "Visita https://... para ver el precio."` },
+                        ...limitedMessages
+                    ];
+                    llmResponse = await (0, router_1.generate)({
+                        messages: extractionMessages,
+                        temperature: 0.7,
+                        maxTokens: 600,
+                        model: modelUsed
+                    });
+                    providerUsed = llmResponse.response.provider_used;
+                    console.log(`[WEB_SEARCH] ✓ Regenerated response without links`);
+                }
+            }
+            // ============================================
+            // C4) APLICAR GUARDRAIL ANTI-MENTIRAS (P0 REFUERZO)
+            // ============================================
+            guardrailResult = (0, noFakeTools_1.applyAntiLieGuardrail)(llmResponse.response.text, orchestratorContext.webSearchUsed, orchestratorContext.intent, orchestratorContext.toolFailed, orchestratorContext.toolError // P0: Pasar código de error OAuth
+            );
             if (guardrailResult.sanitized) {
                 console.log(`[GUARDRAIL] 🛡️ Response sanitized: ${guardrailResult.reason}`);
             }
@@ -436,7 +471,7 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
         }
         catch (llmError) {
             console.error('[LLM] ERROR:', llmError);
-            // Intentar guardar el error en ae_requests
+            // P0: Log obligatorio de errores en ae_requests
             try {
                 await supabase_1.supabase.from('ae_requests').insert({
                     session_id: sessionId,
@@ -448,6 +483,11 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                     cost: 0,
                     metadata: {
                         error: llmError.message || 'LLM error',
+                        error_type: llmError.name || 'LLMError',
+                        intent_detected: orchestratorContext?.intent?.intent_type,
+                        tool_expected: orchestratorContext?.toolUsed,
+                        tool_executed: false,
+                        failure_reason: orchestratorContext?.toolError || llmError.message,
                         userId: userId
                     }
                 });
@@ -555,10 +595,10 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                     tokens_in: llmResponse.response.tokens_in || orchestratorContext.inputTokens,
                     tokens_out: llmResponse.response.tokens_out || orchestratorContext.outputTokens,
                     max_output_tokens: orchestratorContext.maxOutputTokens,
-                    // Tools y memoria
+                    // Tools y memoria (P0: Observabilidad de fallos)
                     tool_used: orchestratorContext.toolUsed,
                     tool_failed: orchestratorContext.toolFailed,
-                    tool_error: orchestratorContext.toolError || null,
+                    tool_error: orchestratorContext.toolError || null, // P0: LOG OBLIGATORIO para OAuth failures
                     web_search_used: orchestratorContext.webSearchUsed,
                     web_results_count: orchestratorContext.webResultsCount,
                     memories_loaded: orchestratorContext.memoryCount,
@@ -638,6 +678,8 @@ router.get('/ping', (req, res) => {
 router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
     const startTime = Date.now();
     let sessionId = null;
+    // P0: Declarar orchestratorContext EN SCOPE DEL ENDPOINT (fuera del try principal)
+    let orchestratorContext = null;
     try {
         console.log('\n[CHAT_V2] ==================== NUEVA SOLICITUD ====================');
         // CRITICAL: Verificar que OpenAI está bloqueado
@@ -802,7 +844,6 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         // TIMEOUT DEFENSIVO: 15s para acciones
         const orchestrationPromise = orchestrator.orchestrate(orchestratorRequest, aleon_1.ALEON_SYSTEM_PROMPT);
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('ORCHESTRATION_TIMEOUT')), 15000));
-        let orchestratorContext;
         try {
             orchestratorContext = await Promise.race([orchestrationPromise, timeoutPromise]);
         }
@@ -836,6 +877,8 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
                     }
                 });
             }
+            // Otros errores de orquestación - loguear y lanzar
+            console.error('[CHAT_V2] ❌ Orchestration error:', error);
             throw error;
         }
         console.log(`[CHAT_V2] ✓ Orchestration completed`);
@@ -856,9 +899,49 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         });
         console.log(`[CHAT_V2] ✓ LLM response received from ${llmResult.fallbackChain.final_provider}`);
         // ============================================
-        // 8. APLICAR GUARDRAILS
+        // 7.5. P1: EXTRACCIÓN REAL DE DATOS (Web Search)
         // ============================================
-        const guardrailResult = (0, noFakeTools_1.applyAntiLieGuardrail)(llmResult.response.text, orchestratorContext.webSearchUsed, orchestratorContext.intent, orchestratorContext.toolFailed);
+        // Si usó web search Y la respuesta tiene >3 links, rechazar y regenerar
+        if (orchestratorContext.webSearchUsed && orchestratorContext.intent?.intent_type === 'time_sensitive') {
+            const linkCount = (llmResult.response.text.match(/https?:\/\//g) || []).length;
+            if (linkCount > 3) {
+                console.log(`[WEB_SEARCH] ⚠️ Response contains ${linkCount} links - REGENERATING with extraction prompt`);
+                // Re-generar con prompt forzado
+                const extractionMessages = [
+                    {
+                        role: 'system',
+                        content: `${orchestratorContext.systemPrompt}
+
+⛔ INSTRUCCIÓN CRÍTICA:
+- La búsqueda web YA se ejecutó
+- Los datos están disponibles en el contexto
+- Extrae SOLO datos concretos: precios, fechas, horas, números
+- NO devuelvas links
+- NO digas "visita este sitio"
+- Responde con los DATOS EXTRAÍDOS directamente
+
+Ejemplo bueno: "El dólar está a $20.50 MXN según el último reporte."
+Ejemplo malo: "Visita https://... para ver el precio."`
+                    },
+                    ...messagesForOrchestrator
+                ];
+                const retryLLM = await (0, router_1.generate)({
+                    messages: extractionMessages,
+                    temperature: 0.7,
+                    maxTokens: 600,
+                    model: orchestratorContext.modelSelected
+                });
+                // Reemplazar resultado
+                llmResult.response.text = retryLLM.response.text;
+                llmResult.response.tokens_out = retryLLM.response.tokens_out;
+                console.log(`[WEB_SEARCH] ✓ Regenerated response without links`);
+            }
+        }
+        // ============================================
+        // 8. APLICAR GUARDRAILS (P0 REFUERZO)
+        // ============================================
+        const guardrailResult = (0, noFakeTools_1.applyAntiLieGuardrail)(llmResult.response.text, orchestratorContext.webSearchUsed, orchestratorContext.intent, orchestratorContext.toolFailed, orchestratorContext.toolError // P0: Pasar código de error OAuth
+        );
         const finalAnswer = guardrailResult.sanitized
             ? guardrailResult.text
             : llmResult.response.text;
@@ -909,7 +992,7 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         })
             .eq('id', sessionId); // WHERE id = sessionId (no 'session_id' column)
         // ============================================
-        // 11. LOG EN AE_REQUESTS
+        // 11. LOG EN AE_REQUESTS (P0: Observabilidad completa)
         // ============================================
         const latency_ms = Date.now() - startTime;
         await supabase_1.supabase.from('ae_requests').insert({
@@ -927,6 +1010,7 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
                 intent_type: orchestratorContext.intent?.intent_type,
                 action_attempted: orchestratorContext.toolUsed !== 'none',
                 action_success: !orchestratorContext.toolFailed,
+                tool_error: orchestratorContext.toolError, // P0: LOG OBLIGATORIO para fallos OAuth/timeout
                 provider_used: llmResult.fallbackChain.final_provider,
                 model_used: orchestratorContext.modelSelected,
                 guardrail_sanitized: guardrailResult.sanitized,
@@ -956,7 +1040,7 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
     catch (error) {
         console.error('[CHAT_V2] ❌ Error:', error);
         const latency_ms = Date.now() - startTime;
-        // Log error en ae_requests
+        // P0: Log obligatorio de errores con contexto completo
         if (sessionId) {
             await supabase_1.supabase.from('ae_requests').insert({
                 request_id: req.body.request_id || (0, uuid_1.v4)(),
@@ -969,6 +1053,14 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
                 latency_ms,
                 metadata: {
                     error: error.message,
+                    error_type: error.name || 'UnknownError',
+                    intent_detected: orchestratorContext?.intent?.intent_type,
+                    tool_expected: orchestratorContext?.toolUsed,
+                    tool_executed: false,
+                    failure_reason: error.code === 'ETIMEDOUT' ? 'TIMEOUT' :
+                        error.message.includes('OAUTH') ? 'OAUTH_ERROR' :
+                            error.message.includes('provider') ? 'PROVIDER_TIMEOUT' :
+                                'UNKNOWN_ERROR',
                     stack: error.stack
                 }
             });
