@@ -689,7 +689,6 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
                 user_id: userId,
                 user_id_uuid,
                 workspace_id: finalWorkspaceId,
-                project_id: null,
                 title: 'Nueva conversación',
                 last_message_at: new Date().toISOString(),
                 total_messages: 0,
