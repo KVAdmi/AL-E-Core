@@ -15,10 +15,9 @@ import { IntentClassification } from '../services/intentClassifier';
 // ═══════════════════════════════════════════════════════════════
 
 const FAKE_SEARCH_PHRASES = [
-  // Español
-  'busqué',
-  'busque',
-  'búsqueda',
+  // Español - SOLO frases que CLARAMENTE indican búsqueda web falsa
+  'busqué en',
+  'busque en',
   'encontré en internet',
   'encontre en internet',
   'encontré en la web',
@@ -38,29 +37,23 @@ const FAKE_SEARCH_PHRASES = [
   'verifique en la web',
   'investigué en internet',
   'investigue en internet',
-  '*buscando*',
-  '*verificando*',
-  '*consultando*',
-  '*revisando*', // NUEVO: Detectar "revisando..." sin tool execution
-  'según lo que vi en',
-  'segun lo que vi en',
-  'según mi búsqueda',
-  'segun mi busqueda',
-  'en mi búsqueda',
-  'en mi busqueda',
-  'después de buscar',
-  'despues de buscar',
+  'según lo que vi en internet',
+  'segun lo que vi en internet',
+  'según mi búsqueda en',
+  'segun mi busqueda en',
+  'después de buscar en',
+  'despues de buscar en',
   
   // Inglés (por si el modelo responde en inglés)
-  'i searched',
+  'i searched on',
   'i found on the web',
   'i found on the internet',
-  'search results',
+  'search results show',
   'according to my search',
   'i accessed the website',
   'i checked online',
   'i looked it up',
-  'after searching'
+  'after searching on'
 ];
 
 // ═══════════════════════════════════════════════════════════════
@@ -68,15 +61,13 @@ const FAKE_SEARCH_PHRASES = [
 // ═══════════════════════════════════════════════════════════════
 
 const FAKE_TRANSACTIONAL_PHRASES = [
-  // Gmail - Acciones falsas
-  '*revisando*',
-  '*leyendo correos*',
-  '*buscando en correo*',
-  '*verificando inbox*',
+  // Gmail - SOLO acciones específicas falsas (no palabras sueltas)
   'revisé tu correo',
   'revise tu correo',
   'revisé tus correos',
   'revise tus correos',
+  'leí tu correo',
+  'lei tu correo',
   'consulté tu gmail',
   'consulte tu gmail',
   'verifiqué tu bandeja',
@@ -88,10 +79,7 @@ const FAKE_TRANSACTIONAL_PHRASES = [
   'mandé el email',
   'mande el email',
   
-  // Calendar - Acciones falsas
-  '*revisando agenda*',
-  '*consultando calendario*',
-  '*verificando eventos*',
+  // Calendar - SOLO acciones específicas falsas
   'revisé tu agenda',
   'revise tu agenda',
   'consulté tu calendario',
@@ -174,6 +162,9 @@ export function detectFakeTransactionalUse(
 
 /**
  * Reemplazar respuesta con mensaje honesto si se detectan fake claims
+ * 
+ * POLÍTICA: NO meta-transparencia. Si detectamos fake claims, simplemente
+ * devolvemos un mensaje neutral sin mencionar herramientas.
  */
 export function sanitizeFakeToolResponse(
   responseText: string,
@@ -181,15 +172,14 @@ export function sanitizeFakeToolResponse(
 ): string {
   console.log(`[GUARDRAIL] ⚠️ Detected fake tool claims: ${detectedPhrases.join(', ')}`);
   
-  return `⚠️ **Corrección de transparencia**
-
-No realicé una búsqueda web en este mensaje. 
-
-Si necesitas información actualizada o verificada de internet, puedo hacer una búsqueda web real usando:
-- Comandos explícitos: "busca", "verifica", "valida"
-- Preguntas sobre datos actuales: "precio del dólar hoy", "tipo de cambio actual"
-
-¿Te gustaría que busque algo específico?`;
+  // Si la respuesta original es muy corta (menos de 20 chars), probablemente
+  // no tiene fake claims reales - devolver original
+  if (responseText.trim().length < 20) {
+    return responseText;
+  }
+  
+  // Para fake claims reales, devolver mensaje simple sin mencionar tools
+  return `No tengo esa información en este momento. ¿Puedes darme más contexto o reformular tu pregunta?`;
 }
 
 // ═══════════════════════════════════════════════════════════════

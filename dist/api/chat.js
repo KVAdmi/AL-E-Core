@@ -682,18 +682,20 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         else {
             // Crear nueva session
             sessionId = (0, uuid_1.v4)();
+            // USAR 'id' (no 'session_id') porque el schema usa id como PK
             const { error: sessionError } = await supabase_1.supabase
                 .from('ae_sessions')
                 .insert({
-                session_id: sessionId,
+                id: sessionId, // PK de la tabla
                 user_id: userId,
-                user_id_uuid,
                 workspace_id: finalWorkspaceId,
+                mode: 'universal',
                 title: 'Nueva conversación',
                 last_message_at: new Date().toISOString(),
-                total_messages: 0,
-                total_tokens: 0,
-                total_cost: 0
+                meta: {
+                    user_id_uuid, // Guardar en meta si no hay columna directa
+                    created_by: 'chat_v2'
+                }
             });
             if (sessionError) {
                 console.error('[CHAT_V2] Error creating session:', sessionError);
@@ -737,14 +739,16 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         const { error: insertUserError } = await supabase_1.supabase
             .from('ae_messages')
             .insert({
-            message_id: userMessageId,
-            session_id: sessionId,
-            user_id: userId,
-            user_id_uuid,
-            workspace_id: finalWorkspaceId,
+            id: userMessageId, // PK
+            session_id: sessionId, // FK a ae_sessions(id)
             role: 'user',
             content: message,
-            tokens: (0, helpers_1.estimateTokens)(message),
+            meta: {
+                user_id: userId,
+                user_id_uuid,
+                workspace_id: finalWorkspaceId,
+                tokens: (0, helpers_1.estimateTokens)(message)
+            },
             created_at: new Date().toISOString()
         });
         if (insertUserError) {
@@ -783,14 +787,17 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
                 const fallbackMessage = 'Estoy procesando tu solicitud, te confirmo enseguida.';
                 const assistantMessageId = (0, uuid_1.v4)();
                 await supabase_1.supabase.from('ae_messages').insert({
-                    message_id: assistantMessageId,
+                    id: assistantMessageId,
                     session_id: sessionId,
-                    user_id: userId,
-                    user_id_uuid,
-                    workspace_id: finalWorkspaceId,
                     role: 'assistant',
                     content: fallbackMessage,
-                    tokens: (0, helpers_1.estimateTokens)(fallbackMessage),
+                    meta: {
+                        user_id: userId,
+                        user_id_uuid,
+                        workspace_id: finalWorkspaceId,
+                        tokens: (0, helpers_1.estimateTokens)(fallbackMessage),
+                        timeout: true
+                    },
                     created_at: new Date().toISOString()
                 });
                 return res.json({
@@ -839,14 +846,18 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         const { error: insertAssistantError } = await supabase_1.supabase
             .from('ae_messages')
             .insert({
-            message_id: assistantMessageId,
-            session_id: sessionId,
-            user_id: userId,
-            user_id_uuid,
-            workspace_id: finalWorkspaceId,
+            id: assistantMessageId, // PK
+            session_id: sessionId, // FK a ae_sessions(id)
             role: 'assistant',
             content: finalAnswer,
-            tokens: llmResult.response.tokens_out || (0, helpers_1.estimateTokens)(finalAnswer),
+            meta: {
+                user_id: userId,
+                user_id_uuid,
+                workspace_id: finalWorkspaceId,
+                tokens: llmResult.response.tokens_out || (0, helpers_1.estimateTokens)(finalAnswer),
+                model: orchestratorContext.modelSelected,
+                provider: llmResult.fallbackChain.final_provider
+            },
             created_at: new Date().toISOString()
         });
         if (insertAssistantError) {
@@ -857,15 +868,20 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         // ============================================
         const totalTokens = (llmResult.response.tokens_in || 0) +
             (llmResult.response.tokens_out || 0);
+        // Actualizar last_message_at y metadata (ae_sessions no tiene total_messages/total_tokens como columnas)
         await supabase_1.supabase
             .from('ae_sessions')
             .update({
             last_message_at: new Date().toISOString(),
-            total_messages: supabase_1.supabase.rpc('increment', { x: 2 }), // user + assistant
-            total_tokens: supabase_1.supabase.rpc('increment', { x: totalTokens }),
-            total_cost: supabase_1.supabase.rpc('increment', { x: (0, helpers_1.estimateCost)(totalTokens, orchestratorContext.modelSelected) })
+            updated_at: new Date().toISOString(),
+            meta: {
+                total_tokens: totalTokens,
+                total_cost: (0, helpers_1.estimateCost)(totalTokens, orchestratorContext.modelSelected),
+                last_model: orchestratorContext.modelSelected,
+                last_provider: llmResult.fallbackChain.final_provider
+            }
         })
-            .eq('session_id', sessionId);
+            .eq('id', sessionId); // WHERE id = sessionId (no 'session_id' column)
         // ============================================
         // 11. LOG EN AE_REQUESTS
         // ============================================
