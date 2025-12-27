@@ -48,14 +48,17 @@ const TIME_SENSITIVE_PATTERNS = {
 // ═══════════════════════════════════════════════════════════════
 
 const VERIFICATION_PATTERNS = {
-  // Comandos explícitos
-  explicit_commands: /\b(busca|buscar|búsqueda|busqueda|search|investiga|averigua|encuentra|verifica|checa|confirma|valida|validar|consulta|revisa|ve a|accede a|mira en)\b/i,
+  // Comandos explícitos de búsqueda
+  explicit_commands: /\b(busca|buscar|búsqueda|busqueda|search|investiga|averigua|encuentra|verifica|checa|confirma|valida|validar|consulta|échale un ojo|ve a|accede a|mira en)\b/i,
   
   // Preguntas sobre existencia
   existence: /\b(existe|existencia|tiene (página|web|sitio|url|dominio)|hay (página|web|sitio))\b/i,
   
   // Información sobre entidades
-  entity_info: /\b(información sobre|info sobre|datos sobre|qué es|que es|quién es|quien es|dónde está|donde esta)\b/i
+  entity_info: /\b(información sobre|info sobre|datos sobre|qué es|que es|quién es|quien es|dónde está|donde esta)\b/i,
+  
+  // Datos actuales/en tiempo real (NUEVO: tipo de cambio, precios, clima, etc)
+  real_time_data: /\b(tipo de cambio|precio del dólar|dólar hoy|cotización|cuánto está|cuanto esta|cuánto vale|cuanto vale|clima|temperatura|weather|tráfico|trafico|stock|bolsa|cripto)\b/i
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -63,21 +66,21 @@ const VERIFICATION_PATTERNS = {
 // ═══════════════════════════════════════════════════════════════
 
 const TRANSACTIONAL_PATTERNS = {
-  // Gmail - Lectura
-  gmail_read: /\b(revisa|revisar|ver|leer|check|checa|checka|busca en|buscar en|mira en|mirar en|correo|correos|email|emails|inbox|bandeja|mensajes?)\b.*\b(correo|email|gmail|bandeja|inbox)\b/i,
+  // Gmail - Lectura: cualquier mención de correo con acción de ver/revisar/checar
+  gmail_read: /\b(revisa|revisar|checa|checka|check|ve|ver|mira|mirar|échale un ojo|echale un ojo|consulta|busca|lee|leer|último|ultima|recibí|recibi|llegó|llego|tengo|hay|muestra|mostrar)\b.{0,80}\b(correo|email|gmail|mail|inbox|bandeja|mensajes?)\b|\b(correo|email|gmail|mail|inbox|bandeja|mensajes?)\b.{0,80}\b(revisa|revisar|checa|checka|ve|ver|mira|último|ultima|recibí|recibi|llegó|llego)\b/i,
   
-  // Gmail - Envío
-  gmail_send: /\b(envía|enviar|manda|mandar|send|escribe|escribir|redacta|redactar|responde|responder)\b.*\b(correo|email|mensaje)\b/i,
+  // Gmail - Envío: enviar/mandar + correo
+  gmail_send: /\b(envía|enviar|manda|mandar|send|escribe|escribir|redacta|responde|responder|contesta|contestar|dispara|disparar)\b.{0,50}\b(correo|email|mensaje|mail)\b|\b(correo|email|mail)\b.{0,30}\b(a|para)\b/i,
   
-  // Calendar - Lectura
-  calendar_read: /\b(revisa|revisar|ver|check|checa|checka|mira|mirar|consulta|consultar)\b.*\b(agenda|calendario|calendar|citas?|eventos?|meeting|reunión|reunion)\b/i,
+  // Calendar - Lectura: revisar/ver agenda
+  calendar_read: /\b(revisa|revisar|checa|checka|ve|ver|mira|mirar|échale un ojo|echale un ojo|consulta|muestra|mostrar)\b.{0,80}\b(agenda|calendario|calendar|citas?|eventos?|pendientes?)\b|\b(agenda|calendario|citas?)\b.{0,50}\b(revisa|checa|ve|mira|tengo|hay)\b/i,
   
-  // Calendar - Creación
-  calendar_create: /\b(agenda|agendar|agend[aá]r|crea|crear|añade|añadir|programa|programar|schedule)\b.*\b(cita|evento|meeting|reunión|reunion)\b/i,
+  // Calendar - Creación: agendar/crear cita con fecha/hora
+  calendar_create: /\b(agenda|agendar|pon|poner|crea|crear|añade|añadir|apunta|apuntar|programa|programar|separa|separar|reserva|reservar|book|schedule)\b.{0,80}\b(cita|evento|meeting|junta|reunión|reunion|call|videollamada)\b|\b(cita|evento|meeting|junta)\b.{0,50}\b(con|para|el|lunes|martes|miércoles|jueves|viernes|mañana|hoy)\b/i,
   
-  // Detectores genéricos
-  has_gmail_action: /\b(correo|email|gmail|bandeja|inbox)\b/i,
-  has_calendar_action: /\b(agenda|calendario|calendar|cita|evento|meeting|reunión|reunion)\b/i
+  // Detectores genéricos (cualquier mención)
+  has_gmail_action: /\b(correo|email|gmail|mail|inbox|bandeja|mensaje)\b/i,
+  has_calendar_action: /\b(agenda|calendario|calendar|cita|evento|meeting|junta|reunión|reunion)\b/i
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -171,6 +174,13 @@ export function classifyIntent(message: string): IntentClassification {
   if (VERIFICATION_PATTERNS.entity_info.test(lowerMsg)) {
     verificationScore += 3;
     reasoning.push('Solicitud de información sobre entidad');
+  }
+  
+  // NUEVO: Real-time data (tipo de cambio, clima, etc) → WEB SEARCH OBLIGATORIO
+  if (VERIFICATION_PATTERNS.real_time_data.test(lowerMsg)) {
+    verificationScore += 8; // SCORE ALTO para forzar web search
+    timeSensitiveScore += 5; // También es time-sensitive
+    reasoning.push('🔴 Datos en tiempo real detectados (tipo cambio/clima/precios) → Web search requerido');
   }
   
   // ═══════════════════════════════════════════════════════════════

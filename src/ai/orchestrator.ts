@@ -453,6 +453,35 @@ export class Orchestrator {
   ): string {
     let systemPrompt = basePrompt;
     
+    // 0. CONTEXTO TEMPORAL ACTUAL (CRÍTICO PARA PREGUNTAS DE FECHA/HORA)
+    const now = new Date();
+    const mexicoTime = new Intl.DateTimeFormat('es-MX', {
+      timeZone: 'America/Mexico_City',
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    }).format(now);
+    
+    systemPrompt += `
+
+═══════════════════════════════════════════════════════════════
+CONTEXTO TEMPORAL ACTUAL
+═══════════════════════════════════════════════════════════════
+
+Fecha y hora EXACTA en este momento (Mexico City):
+${mexicoTime}
+
+INSTRUCCIÓN: Si el usuario pregunta "qué día es hoy" o "qué hora es", usa ESTA información exacta.
+NO uses tu conocimiento de entrenamiento. Esta es la fecha/hora real del sistema.
+
+═══════════════════════════════════════════════════════════════
+`;
+    console.log('[ORCH] ✓ Temporal context injected:', mexicoTime);
+    
     // 1. Tool result (si se ejecutó alguna herramienta) - VA PRIMERO
     if (toolResult) {
       systemPrompt += toolResult;
@@ -559,6 +588,16 @@ COMPORTAMIENTO OBLIGATORIO:
 ✅ Si falta contexto: preguntar 1 dato concreto (sin mencionar herramientas)
 ✅ Si el término suena interno: asumir que pertenece al ecosistema del usuario y pedir precisión
 ✅ Si se requiere información actualizada: usar web internamente y responder con el resultado
+
+ESTILO DE RESPUESTA (FORMATO):
+❌ NO uses ** (negritas) en exceso - solo para 1-2 palabras clave máximo
+❌ NO uses ## o ### (headers de markdown)
+❌ NO uses listas con - o * innecesariamente
+❌ NO uses emojis en exceso (máximo 1-2 por respuesta)
+✅ Responde de forma NATURAL y conversacional
+✅ Usa saltos de línea solo cuando sea necesario
+✅ Si necesitas destacar algo, usa MAYÚSCULAS o una sola palabra en **negrita**
+✅ Prioriza claridad sobre formato visual
 ✅ Nunca preguntes si el usuario quiere que busques; actúa
 
 EJEMPLO CORRECTO (pregunta neutral):
