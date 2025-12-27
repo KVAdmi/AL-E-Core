@@ -37,15 +37,15 @@ async function getAuthenticatedClient(userId: string) {
   
   console.log(`[CALENDAR] 🔍 Looking for OAuth tokens - userId: ${userId}`);
   
-  // Obtener tokens de Supabase (tabla: user_integrations, campo: integration_type)
+  // Obtener tokens de Supabase (buscar calendar, google, o google-calendar)
   const { data: tokenData, error } = await supabase
     .from('user_integrations')
-    .select('access_token, refresh_token, expires_at')
+    .select('access_token, refresh_token, expires_at, integration_type')
     .eq('user_id', userId)
-    .eq('integration_type', 'calendar')
+    .or('integration_type.eq.calendar,integration_type.eq.google,integration_type.eq.google-calendar')
     .single();
   
-  console.log(`[CALENDAR] 🔍 Query result - found: ${!!tokenData}, error: ${error?.message || 'none'}`);
+  console.log(`[CALENDAR] 🔍 Query result - found: ${!!tokenData}, integration_type: ${tokenData?.integration_type || 'N/A'}, error: ${error?.message || 'none'}`);
   
   if (error || !tokenData) {
     console.log(`[CALENDAR] ❌ OAuth tokens not found for user: ${userId}`);

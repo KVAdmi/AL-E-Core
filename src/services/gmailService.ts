@@ -34,17 +34,28 @@ export interface GmailSendResult {
 async function getAuthenticatedClient(userId: string) {
   const supabase = getSupabaseClient();
   
-  console.log(`[GMAIL] 🔍 Looking for OAuth tokens - userId: ${userId}`);
+  console.log(`[GMAIL] 🔍 Looking for OAuth tokens - userId: ${userId}, userId type: ${typeof userId}`);
   
-  // Obtener tokens de Supabase (tabla: user_integrations, campo: integration_type)
+  // Primero: verificar si la tabla user_integrations existe y tiene datos
+  const { data: allIntegrations, error: countError } = await supabase
+    .from('user_integrations')
+    .select('user_id, integration_type')
+    .limit(5);
+  
+  console.log(`[GMAIL] 🔍 Sample integrations in DB: ${allIntegrations?.length || 0} rows, error: ${countError?.message || 'none'}`);
+  if (allIntegrations && allIntegrations.length > 0) {
+    console.log(`[GMAIL] 🔍 Sample row:`, JSON.stringify(allIntegrations[0]));
+  }
+  
+  // Obtener tokens de Supabase (tabla: user_integrations según schema)
   const { data: tokenData, error } = await supabase
     .from('user_integrations')
-    .select('access_token, refresh_token, expires_at')
+    .select('access_token, refresh_token, expires_at, integration_type')
     .eq('user_id', userId)
-    .eq('integration_type', 'gmail')
-    .single();
+    .or('integration_type.eq.gmail,integration_type.eq.google,integration_type.eq.google-gmail')
+    .maybeSingle(); // Usar maybeSingle() en vez de single() para evitar error si no existe
   
-  console.log(`[GMAIL] 🔍 Query result - found: ${!!tokenData}, error: ${error?.message || 'none'}`);
+  console.log(`[GMAIL] 🔍 Query result - found: ${!!tokenData}, integration_type: ${tokenData?.integration_type || 'N/A'}, error: ${error?.message || 'none'}, error code: ${error?.code || 'N/A'}`);
   
   if (error || !tokenData) {
     console.log(`[GMAIL] ❌ OAuth tokens not found for user: ${userId}`);
