@@ -78,7 +78,7 @@ const PROVIDER_CONFIGS: Record<LlmProvider, () => ProviderConfig | null> = {
     return {
       baseURL: 'https://api.fireworks.ai/inference/v1',
       apiKey,
-      defaultModel: 'accounts/fireworks/models/llama-v3p1-70b-instruct',
+      defaultModel: 'accounts/fireworks/models/llama-v3p3-70b-instruct', // Actualizado a v3.3
       timeout: 15000 // 15s
     };
   },

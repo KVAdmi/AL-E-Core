@@ -306,6 +306,36 @@ router.post('/chat', optionalAuth, async (req, res) => {
     }
     
     // ============================================
+    // A4) RECONSTRUIR HISTORIAL DESDE SUPABASE
+    // ============================================
+    
+    console.log('[CHAT] 📚 Reconstructing conversation history from Supabase...');
+    
+    const { data: historyData, error: historyError } = await supabase
+      .from('ae_messages')
+      .select('role, content, created_at')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: true })
+      .limit(50); // Últimos 50 mensajes
+    
+    if (historyError) {
+      console.error('[CHAT] Error loading history:', historyError);
+    }
+    
+    const storedHistory = historyData || [];
+    console.log(`[CHAT] ✓ Loaded ${storedHistory.length} messages from database`);
+    
+    // Reconstruir messages array desde historial + nuevo mensaje del usuario
+    const reconstructedMessages = [
+      ...storedHistory.map((h: any) => ({ role: h.role, content: h.content })),
+      { role: 'user', content: userContent }
+    ];
+    
+    // IMPORTANTE: Usar historial reconstruido, NO el del frontend
+    messages = reconstructedMessages;
+    console.log(`[CHAT] 📝 Using reconstructed history: ${messages.length} messages total`);
+    
+    // ============================================
     // B) INSERTAR MENSAJE DEL USUARIO
     // ============================================
     

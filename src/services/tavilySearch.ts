@@ -166,22 +166,31 @@ ${result.content}
 ║  ⚠️ INSTRUCCIONES OBLIGATORIAS (NO NEGOCIABLES)                ║
 ╚════════════════════════════════════════════════════════════════╝
 
+TU RESPUESTA DEBE SEGUIR ESTE FORMATO EXACTO:
+
+1. EXTRAER datos específicos de los resultados PRIMERO
+2. Citar la fuente DESPUÉS con [Título](URL)
+3. NO dar solo links genéricos
+
+EJEMPLO CORRECTO (pregunta sobre vuelos):
+"Encontré 2 opciones para mañana GDL → PVR:
+- Volaris: salida 12:35pm, $2,450 MXN
+- Aeroméxico: salida 13:10pm, $3,200 MXN
+
+Puedes reservar en [Google Flights](url) o [Volaris](url)."
+
+EJEMPLO INCORRECTO:
+"Según [Skyscanner](url) hay vuelos disponibles. Te recomiendo verificar en Volaris..."
+
 ✅ DEBES usar ESTOS resultados para responder al usuario
 ✅ DEBES citar las fuentes con formato: [Título](URL)
-✅ DEBES priorizar el Resultado #1 (mayor relevancia)
+✅ DEBES EXTRAER datos concretos (horarios, precios, fechas, nombres)
+❌ PROHIBIDO dar solo links sin extraer información
 ❌ PROHIBIDO inventar información que no esté en estos resultados
 ❌ PROHIBIDO decir "buscando..." o "*buscando*" (la búsqueda YA se ejecutó)
 ❌ PROHIBIDO mezclar memoria interna con estos facts externos
-❌ PROHIBIDO sugerir "alternativas" si los resultados son claros
 
-EJEMPLO DE RESPUESTA CORRECTA:
-"Encontré información sobre [tema]:
-
-Según [Título del Resultado 1]([URL]), [contenido del resultado].
-
-Fuente: ${searchResponse.results[0]?.url || '[URL del resultado 1]'}"
-
-AHORA RESPONDE USANDO ESTOS DATOS REALES.
+AHORA RESPONDE EXTRAYENDO DATOS ESPECÍFICOS DE LOS RESULTADOS ARRIBA.
 `;
 
   return formatted;
