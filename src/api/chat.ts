@@ -965,7 +965,7 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
         session_id: sessionId,  // FK a ae_sessions(id)
         role: 'user',
         content: message,
-        meta: {
+        metadata: {  // FIXED: usar 'metadata' en vez de 'meta'
           user_id: userId,
           user_id_uuid,
           workspace_id: finalWorkspaceId,
@@ -1150,7 +1150,7 @@ Ejemplo malo: "Visita https://... para ver el precio."`
         session_id: sessionId,  // FK a ae_sessions(id)
         role: 'assistant',
         content: finalAnswer,
-        meta: {
+        metadata: {  // FIXED: usar 'metadata' en vez de 'meta'
           user_id: userId,
           user_id_uuid,
           workspace_id: finalWorkspaceId,
