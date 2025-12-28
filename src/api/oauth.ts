@@ -233,7 +233,6 @@ router.post('/google/callback', async (req, res) => {
         expires_at: expiresAt,
         scopes: tokenResponse.scope,
         connected_at: new Date().toISOString(),
-        email: userEmail,
         is_active: true,
         updated_at: new Date().toISOString()
       };
@@ -248,7 +247,6 @@ router.post('/google/callback', async (req, res) => {
           expires_at: expiresAt,
           scopes: tokenResponse.scope,
           connected_at: new Date().toISOString(),
-          email: userEmail,
           is_active: true,
           updated_at: new Date().toISOString()
         })
@@ -277,7 +275,6 @@ router.post('/google/callback', async (req, res) => {
         expires_at: expiresAt,
         scopes: tokenResponse.scope,
         connected_at: new Date().toISOString(),
-        email: userEmail,
         is_active: true
       };
       
@@ -293,7 +290,6 @@ router.post('/google/callback', async (req, res) => {
           expires_at: expiresAt,
           scopes: tokenResponse.scope,
           connected_at: new Date().toISOString(),
-          email: userEmail,
           is_active: true
         });
       
