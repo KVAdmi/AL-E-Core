@@ -40,10 +40,25 @@ export function detectActionIntent(message: string): {
   // ACCIÓN 1: CHECK EMAIL
   // ═══════════════════════════════════════════════════════════════
   
+  // P0 MEGA EXPANSIÓN: TODO el lenguaje mexicano/natural/casual
   const emailPatterns = [
-    /\b(revisa|revisar|checa|checka|ver|check|mira|mirar|busca|buscar)\b.*\b(correo|email|gmail|inbox|bandeja)/i,
-    /\b(correo|email|mail)\b.*\b(llegó|llego|llegaron|nuevo|nuevos|reciente)/i,
-    /\bme.*llegó.*correo/i
+    // Verbos de acción + correo (permisivo hasta 150 chars)
+    /\b(revisa|revisar|checa|checka|chécame|checame|ve|ver|vete a ver|vé|mira|mirar|échale un ojo|echale un ojo|échale|echale|consulta|consultá|consultame|búscame|buscame|busca|buscar|lee|leer|dame|dáme|dime|muestra|muestrame|muéstrame|trae|traeme|tráeme|ayúdame|ayudame|ayúdame a|ayudame a|me ayudas|me ayudás|puedes|podés|por favor|porfavor|porfa|pls|plz|favor de|necesito|quiero|quisiera).{0,150}\b(correo|correos|email|emails|gmail|mail|mails|inbox|bandeja|mensaje|mensajes)\b/i,
+    
+    // Correo + llegó/nuevo/reciente
+    /\b(correo|correos|email|emails|mail|mails).{0,80}\b(llegó|llego|llegaron|nuevo|nuevos|nueva|nuevas|reciente|recientes|pendiente|pendientes)/i,
+    
+    // Tengo/hay correos
+    /\b(tengo|tienes?|hay|habrá|habra|me llegó|me llego|me llegaron).{0,50}(correo|correos|email|emails|mail|mails)/i,
+    
+    // Mi/mis correos
+    /\b(mi|mis|tu|tus).{0,50}(correo|correos|email|emails|mail|mails|inbox|bandeja)/i,
+    
+    // Patterns casuales con "ayuda"
+    /\b(ayud[oa]|ayúda).{0,100}(revisar|ver|checar|mirar|buscar).{0,100}(correo|email|mail|inbox)/i,
+    
+    // Super casual: "flaca/vieja/compa + acción + correo"
+    /\b(flaca|vieja|compa|compadre|parce|brother|bro|wey|güey|carnal).{0,100}(correo|email|mail|inbox)/i
   ];
   
   if (emailPatterns.some(p => p.test(message))) {
@@ -64,9 +79,22 @@ export function detectActionIntent(message: string): {
   // ACCIÓN 2: CREATE CALENDAR EVENT
   // ═══════════════════════════════════════════════════════════════
   
+  // P0 MEGA EXPANSIÓN: TODO el lenguaje mexicano/natural/casual
   const calendarPatterns = [
-    /\b(agenda|agendar|agend[aá]r|crea|crear|pon|poner|añade|añadir|programa|programar)\b.*\b(cita|evento|reunión|reunion|meeting|meet)/i,
-    /\b(cita|reunión|reunion|meeting)\b.*\b(para|el|este|próximo|proximo)/i
+    // Verbos de acción + evento (permisivo hasta 150 chars)
+    /\b(agenda|agendá|agendar|agendame|agéndame|pon|poné|poner|ponme|crea|creá|crear|creame|créame|añade|añadí|añadir|añademe|agrega|agregá|agregar|agregame|apunta|apuntá|apuntar|apuntame|programa|programá|programar|programame|separa|separá|separar|sepárame|reserva|reservá|reservar|reservame|haz|hacé|hacer|hazme|book|schedule|ayúdame|ayudame|ayúdame a|ayudame a|me ayudas|me ayudás|puedes|podés|por favor|porfavor|porfa|pls|plz|favor de|necesito|quiero|quisiera).{0,150}\b(cita|evento|meet|meeting|junta|juntar|reunión|reunion|videollamada|video|call|llamada|sesión|sesion|compromiso|pendiente)\b/i,
+    
+    // Evento + con/para/el + día
+    /\b(cita|evento|meet|meeting|junta|reunión|reunion|videollamada|call|sesión|sesion).{0,100}\b(con|para|al|a|el|este|próximo|proximo|siguiente|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo|mañana|hoy|pasado)\b/i,
+    
+    // Super casual con "ayuda/favor"
+    /\b(ayud[oa]|ayúda).{0,100}(agendar|crear|hacer|poner).{0,100}(meet|meeting|cita|evento|reunión|reunion|junta|video)/i,
+    
+    // Flaca/casual + acción + meet
+    /\b(flaca|vieja|compa|compadre|parce|brother|bro|wey|güey|carnal).{0,150}(agendar|crear|hacer|poner).{0,150}(meet|meeting|cita|evento|reunión|reunion|junta|videollamada)/i,
+    
+    // Imperativo directo: "ponme/hazme/creame + meet"
+    /\b(ponme|poné|hazme|hacé|creame|créame|agéndame|agendame).{0,100}(meet|meeting|cita|evento|reunión|reunion|junta|videollamada)/i
   ];
   
   if (calendarPatterns.some(p => p.test(message))) {
