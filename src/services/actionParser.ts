@@ -11,6 +11,13 @@ export interface EmailCheckAction {
   timeframe_minutes?: number; // Default: 60 minutos
 }
 
+export interface EmailSendAction {
+  action: 'send_email';
+  to: string; // Email destino
+  subject: string;
+  body: string;
+}
+
 export interface CalendarCreateAction {
   action: 'create_calendar_event';
   title: string;
@@ -21,7 +28,7 @@ export interface CalendarCreateAction {
   create_meet: boolean; // Default: true
 }
 
-export type ParsedAction = EmailCheckAction | CalendarCreateAction;
+export type ParsedAction = EmailCheckAction | EmailSendAction | CalendarCreateAction;
 
 /**
  * Detectar acciones explícitas en el mensaje

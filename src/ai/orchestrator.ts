@@ -367,6 +367,48 @@ ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
           }
         }
         
+        // ACCIÓN 2: SEND_EMAIL (enviar correo)
+        if (action.action === 'send_email') {
+          const { sendGmail } = await import('../services/gmailService');
+          const result = await sendGmail(userId, action.to, action.subject, action.body);
+          
+          if (result.success) {
+            anySuccess = true;
+            results.push(`Correo enviado a ${action.to}\nAsunto: ${action.subject}`);
+          } else {
+            // Error OAuth - BLOQUEO DURO
+            if (result.error === 'OAUTH_NOT_CONNECTED') {
+              return {
+                toolUsed: 'gmail_send',
+                toolReason: 'OAuth not connected',
+                toolResult: `
+
+⛔ BLOQUEO ABSOLUTO: OAUTH NO CONECTADO ⛔
+
+El usuario NO tiene Gmail conectado.
+
+RESPONDE EXACTAMENTE ESTO (una sola línea):
+"No tienes Gmail conectado. Ve a tu perfil y autoriza el acceso."
+
+PROHIBIDO decir:
+❌ "Envié tu correo"
+❌ "Mandé el email"
+❌ "Acabo de enviar"
+❌ "Estoy enviando"
+❌ Cualquier frase afirmativa sobre envío de correos
+
+ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
+`,
+                toolFailed: true,
+                toolError: 'OAUTH_NOT_CONNECTED'
+              };
+            }
+            
+            results.push(`Error: ${result.message}`);
+          }
+        }
+        
+        // ACCIÓN 3: CREATE_CALENDAR_EVENT
         if (action.action === 'create_calendar_event') {
           const { createCalendarEvent } = await import('../services/calendarService');
           
