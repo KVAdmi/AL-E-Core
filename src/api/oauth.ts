@@ -282,26 +282,22 @@ router.post('/google/callback', async (req, res) => {
     console.log(`[OAUTH] ✓ OAuth callback completed in ${elapsed}ms`);
     console.log('[OAUTH] ==================== END CALLBACK ====================\n');
     
-    return res.json({
-      ok: true,
-      message: 'Integración conectada exitosamente',
-      integration: {
-        type: integrationType,
-        email: userEmail,
-        connected_at: new Date().toISOString(),
-        expires_at: expiresAt
-      }
-    });
+    // Redirigir al frontend con estado de éxito
+    const frontendUrl = process.env.FRONTEND_URL || 'https://al-eon.com';
+    const redirectUrl = `${frontendUrl}/integrations/oauth-callback?success=true&type=${integrationType}&email=${encodeURIComponent(userEmail)}`;
+    
+    console.log(`[OAUTH] 🔄 Redirecting to: ${redirectUrl}`);
+    
+    return res.redirect(redirectUrl);
     
   } catch (error: any) {
     console.error('[OAUTH] ❌ CRITICAL ERROR:', error);
     
-    return res.status(500).json({
-      ok: false,
-      error: 'INTERNAL_ERROR',
-      message: 'Error interno procesando OAuth callback',
-      details: error.message
-    });
+    // Redirigir al frontend con estado de error
+    const frontendUrl = process.env.FRONTEND_URL || 'https://al-eon.com';
+    const errorUrl = `${frontendUrl}/integrations/oauth-callback?success=false&error=${encodeURIComponent(error.message)}`;
+    
+    return res.redirect(errorUrl);
   }
 });
 

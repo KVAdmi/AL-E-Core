@@ -5,10 +5,10 @@
 # =====================================================
 # 
 # Reemplazar {{BACKEND_URL}} con tu URL de EC2
-# Ejemplo: https://api.luisatristain.com o http://tu-ip-ec2:4000
+# Ejemplo: https://api.al-eon.com o http://tu-ip-ec2:4000
 #
 
-BACKEND_URL="https://api.luisatristain.com"
+BACKEND_URL="https://api.al-eon.com"
 USER_ID="test-user"
 WORKSPACE_ID="default"
 

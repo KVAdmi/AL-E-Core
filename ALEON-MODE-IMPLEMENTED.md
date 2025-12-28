@@ -183,7 +183,7 @@ pm2 restart ale-core --update-env
 
 # 4. Verificar
 pm2 logs ale-core --lines 50
-curl -X POST https://api.luisatristain.com/api/ai/chat \
+  curl -X POST https://api.al-eon.com/api/ai/chat \
   -H "Content-Type: application/json" \
   -d '{"userId":"test","mode":"aleon","messages":[{"role":"user","content":"Hola, ¿puedes explicarme qué es recursión en programación?"}]}'
 ```

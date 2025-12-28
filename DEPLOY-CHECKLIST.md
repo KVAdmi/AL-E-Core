@@ -51,7 +51,7 @@ nano .env
 SUPABASE_URL=https://gptwzuqmuvzttajgjrry.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 OPENAI_API_KEY=sk-proj-...
-ALE_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3003,https://demoskv.site,https://www.demoskv.site,https://luisatristain.com,https://www.luisatristain.com
+ALE_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:3003,https://al-eon.com,https://www.al-eon.com,https://chat.al-eon.com
 PORT=4000
 ASSISTANT_ID=al-e
 DEFAULT_WORKSPACE_ID=default

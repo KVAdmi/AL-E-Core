@@ -301,7 +301,7 @@ pm2 logs ale-core --lines 50 | grep -E "Continuando sin sesión|GMAIL|OAUTH"
 **Verificación en producción:**
 ```bash
 # Test 1: Usuario sin Gmail
-curl -X POST https://api.luisatristain.com/api/ai/chat \
+  curl -X POST https://api.al-eon.com/api/ai/chat \
   -H "Content-Type: application/json" \
   -d '{
     "userId": "test-user-no-gmail",
@@ -314,7 +314,7 @@ curl -X POST https://api.luisatristain.com/api/ai/chat \
 # Esperado: "No tienes Gmail conectado..."
 
 # Test 2: Usuario CON Gmail (real)
-curl -X POST https://api.luisatristain.com/api/ai/chat \
+curl -X POST https://api.al-eon.com/api/ai/chat \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer REAL_JWT_TOKEN" \
   -d '{
