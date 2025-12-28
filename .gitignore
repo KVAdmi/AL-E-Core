@@ -60,3 +60,4 @@ temp/
 *.pem
 *.key
 *.crt.env
+al-eon-*.json
