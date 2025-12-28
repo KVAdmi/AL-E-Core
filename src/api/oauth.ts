@@ -63,7 +63,7 @@ router.post('/google/callback', async (req, res) => {
   try {
     console.log('\n[OAUTH] ==================== GOOGLE CALLBACK ====================');
     
-    const { code, userId, integrationType } = req.body;
+    const { code, userId, integrationType, redirect_uri } = req.body;
     
     // ============================================
     // 1. VALIDAR PAYLOAD
@@ -120,6 +120,8 @@ router.post('/google/callback', async (req, res) => {
     // ============================================
     
     console.log('[OAUTH] 🔄 Exchanging code for tokens with Google...');
+    const finalRedirectUri = redirect_uri || GOOGLE_REDIRECT_URI;
+    console.log(`[OAUTH] 🔍 redirect_uri enviado a Google: ${finalRedirectUri}`);
     
     let tokenResponse: GoogleTokenResponse;
     
@@ -130,7 +132,7 @@ router.post('/google/callback', async (req, res) => {
           code,
           client_id: GOOGLE_CLIENT_ID,
           client_secret: GOOGLE_CLIENT_SECRET,
-          redirect_uri: GOOGLE_REDIRECT_URI,
+          redirect_uri: finalRedirectUri,
           grant_type: 'authorization_code'
         },
         {
@@ -231,9 +233,8 @@ router.post('/google/callback', async (req, res) => {
         access_token: tokenResponse.access_token.substring(0, 20) + '...', // Preview
         refresh_token: tokenResponse.refresh_token ? tokenResponse.refresh_token.substring(0, 20) + '...' : 'NONE',
         expires_at: expiresAt,
-        scopes: tokenResponse.scope,
+        scopes: tokenResponse.scope ? tokenResponse.scope.split(' ') : [],
         connected_at: new Date().toISOString(),
-        is_active: true,
         updated_at: new Date().toISOString()
       };
       
@@ -245,9 +246,8 @@ router.post('/google/callback', async (req, res) => {
           access_token: tokenResponse.access_token,
           refresh_token: tokenResponse.refresh_token,
           expires_at: expiresAt,
-          scopes: tokenResponse.scope,
+          scopes: tokenResponse.scope ? tokenResponse.scope.split(' ') : [],
           connected_at: new Date().toISOString(),
-          is_active: true,
           updated_at: new Date().toISOString()
         })
         .eq('id', existingIntegration.id);
@@ -273,9 +273,8 @@ router.post('/google/callback', async (req, res) => {
         access_token: tokenResponse.access_token.substring(0, 20) + '...', // Preview
         refresh_token: tokenResponse.refresh_token ? tokenResponse.refresh_token.substring(0, 20) + '...' : 'NONE',
         expires_at: expiresAt,
-        scopes: tokenResponse.scope,
+        scopes: tokenResponse.scope ? tokenResponse.scope.split(' ') : [],
         connected_at: new Date().toISOString(),
-        is_active: true
       };
       
       console.log('[OAUTH] Insert payload (tokens truncated):', insertPayload);
@@ -288,9 +287,8 @@ router.post('/google/callback', async (req, res) => {
           access_token: tokenResponse.access_token,
           refresh_token: tokenResponse.refresh_token,
           expires_at: expiresAt,
-          scopes: tokenResponse.scope,
+          scopes: tokenResponse.scope ? tokenResponse.scope.split(' ') : [],
           connected_at: new Date().toISOString(),
-          is_active: true
         });
       
       if (insertError) {
