@@ -14,7 +14,7 @@ function ensure(value, name) {
 }
 exports.env = {
     port: parseInt(process.env.PORT || "3000", 10),
-    openaiApiKey: ensure(process.env.OPENAI_API_KEY, "OPENAI_API_KEY"),
+    openaiApiKey: process.env.OPENAI_API_KEY || "", // OPCIONAL: No usamos OpenAI, usamos Groq/Fireworks/Together
     supabaseUrl: ensure(process.env.SUPABASE_URL, "SUPABASE_URL"),
     supabaseAnonKey: ensure(process.env.SUPABASE_ANON_KEY, "SUPABASE_ANON_KEY"),
     supabaseServiceRoleKey: ensure(process.env.SUPABASE_SERVICE_ROLE_KEY, "SUPABASE_SERVICE_ROLE_KEY"),

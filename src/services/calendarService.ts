@@ -70,9 +70,52 @@ async function getAuthenticatedClient(userId: string) {
     const now = new Date();
     
     if (expiresAtDate < now) {
-      console.log(`[CALENDAR] ⚠️ Token expired at ${tokenData.expires_at}`);
-      // TODO: Implementar refresh token
-      throw new Error('OAUTH_TOKEN_EXPIRED');
+      console.log(`[CALENDAR] ⚠️ Token expired at ${tokenData.expires_at} - Refreshing...`);
+      
+      // 🔄 REFRESH TOKEN IMPLEMENTATION
+      if (!tokenData.refresh_token) {
+        console.log(`[CALENDAR] ❌ No refresh_token available`);
+        throw new Error('OAUTH_TOKEN_EXPIRED');
+      }
+      
+      try {
+        // Crear cliente OAuth2 temporal para refresh
+        const tempOAuth2Client = new google.auth.OAuth2(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_SECRET,
+          process.env.GOOGLE_REDIRECT_URI
+        );
+        
+        tempOAuth2Client.setCredentials({
+          refresh_token: tokenData.refresh_token
+        });
+        
+        // Refresh automático (googleapis lo hace internamente)
+        const { credentials } = await tempOAuth2Client.refreshAccessToken();
+        
+        console.log(`[CALENDAR] ✅ Token refreshed successfully`);
+        
+        // Actualizar en BD
+        const newExpiresAt = new Date(Date.now() + (credentials.expiry_date || 3600000));
+        
+        await supabase
+          .from('user_integrations')
+          .update({
+            access_token: credentials.access_token,
+            expires_at: newExpiresAt.toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', userId)
+          .eq('integration_type', tokenData.integration_type);
+        
+        // Actualizar tokens locales
+        tokenData.access_token = credentials.access_token!;
+        tokenData.expires_at = newExpiresAt.toISOString();
+        
+      } catch (refreshError: any) {
+        console.error(`[CALENDAR] ❌ Failed to refresh token:`, refreshError.message);
+        throw new Error('OAUTH_TOKEN_EXPIRED');
+      }
     }
   }
   
