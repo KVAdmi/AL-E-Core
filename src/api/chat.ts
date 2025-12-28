@@ -300,11 +300,14 @@ router.post('/chat', optionalAuth, async (req, res) => {
       
       if (sessionError) {
         console.error('[DB] ERROR creando sesión:', sessionError);
-        throw new Error('No se pudo crear la sesión');
+        // P0 FIX: NO abortar conversación por error de sesión
+        // Continuar sin sesión (sessionId = null) → conversación stateless
+        console.warn('[DB] ⚠️ Continuando sin sesión (stateless mode)');
+        sessionId = null;
+      } else {
+        sessionId = newSession.id;
+        console.log(`[CHAT] Nueva sesión creada: ${sessionId} - "${title}"`);
       }
-      
-      sessionId = newSession.id;
-      console.log(`[CHAT] Nueva sesión creada: ${sessionId} - "${title}"`);
     }
     
     // ============================================
@@ -909,23 +912,24 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
         .from('ae_sessions')
         .insert({
           id: sessionId,  // PK de la tabla
+          assistant_id: 'al-e-core',  // P0 CRÍTICO: NOT NULL constraint
           user_id: userId,
           workspace_id: finalWorkspaceId,
           mode: 'universal',
           title: 'Nueva conversación',
           last_message_at: new Date().toISOString(),
-          meta: {
-            user_id_uuid, // Guardar en meta si no hay columna directa
-            created_by: 'chat_v2'
-          }
+          meta: {}  // Columna JSONB agregada
         });
       
       if (sessionError) {
         console.error('[CHAT_V2] Error creating session:', sessionError);
-        throw new Error('Failed to create session');
+        // P0 FIX: NO abortar conversación por error de sesión
+        // Continuar sin sesión (sessionId = null) → conversación stateless
+        console.warn('[CHAT_V2] ⚠️ Continuando sin sesión (stateless mode)');
+        sessionId = null;
+      } else {
+        console.log(`[CHAT_V2] ✓ New session created: ${sessionId}`);
       }
-      
-      console.log(`[CHAT_V2] ✓ New session created: ${sessionId}`);
     }
     
     // ============================================
@@ -1102,7 +1106,65 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
     console.log(`[CHAT_V2] ✓ Orchestration completed`);
     
     // ============================================
-    // 7. LLAMAR AL LLM
+    // 6.5. P0 CRÍTICO: SI TOOL EXITOSO (Gmail), DEVOLVER DIRECTAMENTE
+    // ============================================
+    
+    // P0 FIX: Si Gmail/Calendar ejecutó OK, NO llamar al LLM (evita alucinaciones)
+    if (orchestratorContext.toolUsed === 'check_email' && !orchestratorContext.toolFailed && orchestratorContext.toolResult) {
+      console.log('[CHAT_V2] 🔒 Tool exitoso - Devolviendo toolResult directamente (sin LLM)');
+      
+      // Extraer datos del toolResult (está en formato markdown con separadores)
+      const toolResultText = orchestratorContext.toolResult;
+      
+      // El toolResult tiene formato:
+      // ═══════════════════════════════════════════════════════════════
+      // ⚠️ RESULTADOS DE GMAIL (DATOS REALES - OBLIGATORIO USAR) ⚠️
+      // ...
+      // - De: X
+      // - Asunto: Y
+      // - Fecha: Z
+      
+      // Construir respuesta limpia para el usuario
+      const answer = toolResultText
+        .replace(/═+/g, '')
+        .replace(/⚠️ RESULTADOS DE GMAIL \(DATOS REALES - OBLIGATORIO USAR\) ⚠️/g, '')
+        .replace(/Acabas de ejecutar exitosamente Gmail API\./g, '')
+        .replace(/Los siguientes correos fueron obtenidos DIRECTAMENTE de la cuenta del usuario:/g, 'Estos son tus correos recientes:')
+        .replace(/INSTRUCCIÓN CRÍTICA:[\s\S]*$/g, '') // Eliminar instrucciones para LLM
+        .trim();
+      
+      // Guardar respuesta en BD
+      const assistantMessageId = uuidv4();
+      await supabase.from('ae_messages').insert({
+        id: assistantMessageId,
+        session_id: sessionId,
+        role: 'assistant',
+        content: answer,
+        metadata: {
+          user_id: userId,
+          user_id_uuid,
+          workspace_id: finalWorkspaceId,
+          tokens: estimateTokens(answer),
+          tool_used: orchestratorContext.toolUsed,
+          direct_tool_response: true // Flag para indicar que NO pasó por LLM
+        },
+        created_at: new Date().toISOString()
+      });
+      
+      return res.json({
+        answer,
+        session_id: sessionId,
+        memories_to_add: [],
+        metadata: {
+          latency_ms: Date.now() - startTime,
+          direct_tool_response: true,
+          tool_used: orchestratorContext.toolUsed
+        }
+      });
+    }
+    
+    // ============================================
+    // 7. LLAMAR AL LLM (solo si no fue tool directo)
     // ============================================
     
     console.log('[CHAT_V2] 🤖 Calling LLM router...');
