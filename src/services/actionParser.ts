@@ -18,6 +18,11 @@ export interface EmailSendAction {
   body: string;
 }
 
+export interface CalendarReadAction {
+  action: 'read_calendar';
+  days_ahead?: number; // Default: 7 días
+}
+
 export interface CalendarCreateAction {
   action: 'create_calendar_event';
   title: string;
@@ -28,7 +33,7 @@ export interface CalendarCreateAction {
   create_meet: boolean; // Default: true
 }
 
-export type ParsedAction = EmailCheckAction | EmailSendAction | CalendarCreateAction;
+export type ParsedAction = EmailCheckAction | EmailSendAction | CalendarReadAction | CalendarCreateAction;
 
 /**
  * Detectar acciones explícitas en el mensaje

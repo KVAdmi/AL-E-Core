@@ -408,7 +408,88 @@ ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
           }
         }
         
-        // ACCIÓN 3: CREATE_CALENDAR_EVENT
+        // ACCIÓN 3: READ_CALENDAR (leer eventos)
+        if (action.action === 'read_calendar') {
+          const { readCalendar } = await import('../services/calendarService');
+          
+          const startDate = new Date();
+          const endDate = new Date();
+          endDate.setDate(endDate.getDate() + (action.days_ahead || 7));
+          
+          const result = await readCalendar(userId, startDate, endDate);
+          
+          if (result.success) {
+            anySuccess = true;
+            
+            if (result.events && result.events.length > 0) {
+              const eventList = result.events.map(e => {
+                const dateStr = new Date(e.start).toLocaleDateString('es-MX', {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                });
+                const meetInfo = e.meet_link ? `\n  Meet: ${e.meet_link}` : '';
+                return `- ${e.summary}\n  ${dateStr}${meetInfo}`;
+              }).join('\n\n');
+              
+              results.push(`
+═══════════════════════════════════════════════════════════════
+⚠️ EVENTOS DE CALENDAR (DATOS REALES - OBLIGATORIO USAR) ⚠️
+═══════════════════════════════════════════════════════════════
+
+Acabas de ejecutar exitosamente Calendar API.
+Los siguientes eventos fueron obtenidos DIRECTAMENTE del calendario del usuario:
+
+${eventList}
+
+INSTRUCCIÓN CRÍTICA:
+- Estos son los ÚNICOS eventos reales en el calendario
+- NO inventes otros eventos o fechas
+- USA EXACTAMENTE estos datos (Título/Fecha/Meet)
+- Si el usuario pregunta "qué tengo en mi agenda", responde con ESTOS datos
+- Si ninguno coincide con lo que busca, di "No encontré ese evento"
+
+═══════════════════════════════════════════════════════════════
+`);
+            } else {
+              results.push(result.message || 'No tienes eventos próximos.');
+            }
+          } else {
+            // Error OAuth - BLOQUEO DURO
+            if (result.error === 'OAUTH_NOT_CONNECTED') {
+              return {
+                toolUsed: 'calendar_read',
+                toolReason: 'OAuth not connected',
+                toolResult: `
+
+⛔ BLOQUEO ABSOLUTO: OAUTH NO CONECTADO ⛔
+
+El usuario NO tiene Calendar conectado.
+
+RESPONDE EXACTAMENTE ESTO (una sola línea):
+"No tienes Calendar conectado. Ve a tu perfil y autoriza el acceso."
+
+PROHIBIDO decir:
+❌ "Revisé tu agenda"
+❌ "Consulté tu calendario"
+❌ "Vi tus eventos"
+❌ "Estoy revisando"
+❌ Cualquier frase afirmativa sobre lectura de calendario
+
+ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
+`,
+                toolFailed: true,
+                toolError: 'OAUTH_NOT_CONNECTED'
+              };
+            }
+            
+            results.push(`Error: ${result.message}`);
+          }
+        }
+        
+        // ACCIÓN 4: CREATE_CALENDAR_EVENT
         if (action.action === 'create_calendar_event') {
           const { createCalendarEvent } = await import('../services/calendarService');
           
