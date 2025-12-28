@@ -227,6 +227,19 @@ router.post('/google/callback', async (req, res) => {
       // UPDATE: Actualizar tokens existentes
       console.log(`[OAUTH] Updating existing integration: ${existingIntegration.id}`);
       
+      const updatePayload = {
+        access_token: tokenResponse.access_token.substring(0, 20) + '...', // Preview
+        refresh_token: tokenResponse.refresh_token ? tokenResponse.refresh_token.substring(0, 20) + '...' : 'NONE',
+        expires_at: expiresAt,
+        scopes: tokenResponse.scope,
+        connected_at: new Date().toISOString(),
+        email: userEmail,
+        is_active: true,
+        updated_at: new Date().toISOString()
+      };
+      
+      console.log('[OAUTH] Update payload (tokens truncated):', updatePayload);
+      
       const { error: updateError } = await supabase
         .from('user_integrations')
         .update({
@@ -236,14 +249,18 @@ router.post('/google/callback', async (req, res) => {
           scopes: tokenResponse.scope,
           connected_at: new Date().toISOString(),
           email: userEmail,
-          status: 'active',
+          is_active: true,
           updated_at: new Date().toISOString()
         })
         .eq('id', existingIntegration.id);
       
       if (updateError) {
-        console.error('[OAUTH] ❌ Error updating integration:', updateError);
-        throw new Error('Failed to update integration in database');
+        console.error('[OAUTH] ❌ SUPABASE UPDATE ERROR:');
+        console.error('[OAUTH]   - message:', updateError.message);
+        console.error('[OAUTH]   - details:', updateError.details);
+        console.error('[OAUTH]   - hint:', updateError.hint);
+        console.error('[OAUTH]   - code:', updateError.code);
+        throw new Error(`Failed to update integration: ${updateError.message} (${updateError.code})`);
       }
       
       console.log(`[OAUTH] ✓ Integration updated successfully`);
@@ -251,6 +268,20 @@ router.post('/google/callback', async (req, res) => {
     } else {
       // INSERT: Crear nueva integración
       console.log(`[OAUTH] Creating new integration for user: ${userId}`);
+      
+      const insertPayload = {
+        user_id: userId,
+        integration_type: integrationType,
+        access_token: tokenResponse.access_token.substring(0, 20) + '...', // Preview
+        refresh_token: tokenResponse.refresh_token ? tokenResponse.refresh_token.substring(0, 20) + '...' : 'NONE',
+        expires_at: expiresAt,
+        scopes: tokenResponse.scope,
+        connected_at: new Date().toISOString(),
+        email: userEmail,
+        is_active: true
+      };
+      
+      console.log('[OAUTH] Insert payload (tokens truncated):', insertPayload);
       
       const { error: insertError } = await supabase
         .from('user_integrations')
@@ -263,12 +294,18 @@ router.post('/google/callback', async (req, res) => {
           scopes: tokenResponse.scope,
           connected_at: new Date().toISOString(),
           email: userEmail,
-          status: 'active'
+          is_active: true
         });
       
       if (insertError) {
-        console.error('[OAUTH] ❌ Error inserting integration:', insertError);
-        throw new Error('Failed to save integration in database');
+        console.error('[OAUTH] ❌ SUPABASE INSERT ERROR:');
+        console.error('[OAUTH]   - message:', insertError.message);
+        console.error('[OAUTH]   - details:', insertError.details);
+        console.error('[OAUTH]   - hint:', insertError.hint);
+        console.error('[OAUTH]   - code:', insertError.code);
+        console.error('[OAUTH]   - user_id:', userId);
+        console.error('[OAUTH]   - integration_type:', integrationType);
+        throw new Error(`Failed to save integration: ${insertError.message} (${insertError.code})`);
       }
       
       console.log(`[OAUTH] ✓ Integration created successfully`);
