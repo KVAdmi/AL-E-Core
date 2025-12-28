@@ -1,5 +1,8 @@
 import dotenv from "dotenv";
-dotenv.config();
+import path from "path";
+
+// Cargar .env desde la raíz del proyecto (no desde dist/)
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 function ensure<T>(value: T | undefined, name: string): T {
 	if (value === undefined || value === "") {
