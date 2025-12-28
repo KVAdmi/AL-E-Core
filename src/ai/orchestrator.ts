@@ -396,7 +396,10 @@ ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
             });
             const timeStr = action.time_start;
             
-            results.push(`Evento creado: ${action.title}\n- ${dateStr} a las ${timeStr}\n- Google Meet: ${result.meet_link || 'Generado'}`);
+            // FIX P0: Incluir meet_link real si existe
+            const meetInfo = result.meet_link ? `\n- Google Meet: ${result.meet_link}` : '';
+            
+            results.push(`Evento creado: ${action.title}\n- ${dateStr} a las ${timeStr}${meetInfo}`);
           } else {
             // Error OAuth Calendar - BLOQUEO DURO
             if (result.error === 'OAUTH_NOT_CONNECTED') {
@@ -608,7 +611,26 @@ NO uses tu conocimiento de entrenamiento. Esta es la fecha/hora real del sistema
     
     // 1. Tool result (si se ejecutó alguna herramienta) - VA PRIMERO
     if (toolResult) {
-      systemPrompt += toolResult;
+      systemPrompt += `
+
+═══════════════════════════════════════════════════════════════
+⚠️  RESULTADO DE ACCIÓN EJECUTADA (PRIORIDAD MÁXIMA) ⚠️
+═══════════════════════════════════════════════════════════════
+
+INSTRUCCIÓN CRÍTICA:
+Este bloque contiene el resultado REAL de una acción que YA SE EJECUTÓ.
+NO ignores esta información. NO inventes datos. USA EXACTAMENTE lo que dice aquí.
+
+${toolResult}
+
+OBLIGATORIO:
+- Si hay un link de Google Meet, INCLÚYELO en tu respuesta
+- Si hay información de eventos creados, CONFÍRMALA al usuario
+- Si hay errores OAuth, REPITE EL MENSAJE EXACTO sin modificar
+- NO digas "intenté" o "traté" - la acción YA OCURRIÓ
+
+═══════════════════════════════════════════════════════════════
+`;
       console.log('[ORCH] ✓ Tool result injected (PRIORITY POSITION)');
     }
     
