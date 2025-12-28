@@ -214,6 +214,8 @@ export interface TTSRequest {
   voice?: string;
   format?: 'mp3' | 'wav' | 'ogg';
   language?: string;
+  sessionId?: string; // P0: Para logging
+  userId?: string; // P0: Para logging
 }
 
 export interface TTSResponse {
@@ -224,6 +226,8 @@ export interface TTSResponse {
 
 export interface STTRequest {
   language?: string;
+  sessionId?: string; // P0: Para logging
+  userId?: string; // P0: Para logging
 }
 
 export interface STTResponse {

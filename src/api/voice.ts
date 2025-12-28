@@ -1,8 +1,26 @@
 import express from 'express';
 import multer from 'multer';
+import Groq from 'groq-sdk';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { v4 as uuidv4 } from 'uuid';
+import { supabase } from '../db/supabase';
 import { TTSRequest, TTSResponse, STTRequest, STTResponse } from '../types';
 
 const router = express.Router();
+const execPromise = promisify(exec);
+
+// Inicializar Groq para Whisper STT
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY
+});
+
+// Timeouts defensivos
+const STT_TIMEOUT_MS = 20000; // 20s para STT
+const TTS_TIMEOUT_MS = 15000; // 15s para TTS
 
 // Configurar multer para archivos de audio
 const upload = multer({
@@ -22,13 +40,20 @@ const upload = multer({
 
 /**
  * POST /api/voice/tts
- * Convierte texto a voz
+ * Convierte texto a voz usando Edge-TTS (Microsoft)
+ * 
+ * P0: TTS REAL - Edge-TTS
+ * - Timeout: 15s
+ * - Log obligatorio en ae_requests
+ * - Formato: mp3
+ * - Voz: es-MX-DaliaNeural (México, femenina) por default
  */
 router.post('/tts', async (req, res) => {
-  console.log('[TTS] Request recibido:', req.body);
+  const startTime = Date.now();
+  console.log('[TTS] 🔊 Request recibido:', req.body);
 
   try {
-    const { text, voice, format = 'mp3', language }: TTSRequest = req.body;
+    const { text, voice, format = 'mp3', language, sessionId, userId }: TTSRequest = req.body;
 
     // Validaciones básicas
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -45,30 +70,135 @@ router.post('/tts', async (req, res) => {
       });
     }
 
-    // Por ahora, respuesta mockup preparando la infraestructura
-    // TODO: Implementar integración real con servicio TTS (OpenAI, Azure, etc.)
-    const response: TTSResponse = {
-      audioUrl: '', // Se generaría URL temporal del audio
-      format: format,
-      duration: Math.ceil(text.length / 10) // Estimación simple de duración
-    };
+    // Limpiar texto de Markdown excesivo para TTS
+    let cleanText = text
+      .replace(/#{1,6}\s/g, '') // Eliminar headers
+      .replace(/\*\*([^*]+)\*\*/g, '$1') // Eliminar bold
+      .replace(/\*([^*]+)\*/g, '$1') // Eliminar italic
+      .replace(/`([^`]+)`/g, '$1') // Eliminar code
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Eliminar links
+      .replace(/^[-*]\s/gm, '') // Eliminar bullets
+      .trim();
 
-    console.log('[TTS] Respuesta preparada (mockup):', {
-      textLength: text.length,
-      voice,
-      format,
-      language
-    });
+    // Limitar a 2 frases para respuestas cortas (modo voz)
+    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+    if (sentences.length > 2) {
+      cleanText = sentences.slice(0, 2).join(' ');
+      console.log('[TTS] ⚠️ Text truncated to 2 sentences for voice mode');
+    }
 
-    // Respuesta de placeholder indicando que está preparado para implementar
-    return res.status(501).json({
-      message: 'TTS endpoint preparado, implementación pendiente',
-      request: { text: text.substring(0, 50) + '...', voice, format, language },
-      placeholder: true
-    });
+    console.log(`[TTS] Text length: ${cleanText.length} chars`);
 
-  } catch (error) {
-    console.error('[TTS] Error:', error);
+    // Seleccionar voz (default: es-MX-DaliaNeural - México femenina)
+    const selectedVoice = voice || 'es-MX-DaliaNeural';
+
+    // Generar archivo temporal
+    const tempDir = os.tmpdir();
+    const outputFile = path.join(tempDir, `tts_${uuidv4()}.mp3`);
+
+    try {
+      // Llamar a edge-tts con timeout
+      console.log('[TTS] 🔄 Calling Edge-TTS...');
+      
+      const ttsCommand = `edge-tts --voice "${selectedVoice}" --text "${cleanText.replace(/"/g, '\\"')}" --write-media "${outputFile}"`;
+      
+      const ttsPromise = execPromise(ttsCommand, {
+        timeout: TTS_TIMEOUT_MS
+      });
+      
+      await ttsPromise;
+      
+      // Verificar que el archivo se generó
+      if (!fs.existsSync(outputFile)) {
+        throw new Error('TTS file not generated');
+      }
+
+      const audioBuffer = fs.readFileSync(outputFile);
+      const latency_ms = Date.now() - startTime;
+      const estimatedDuration = Math.ceil(cleanText.length / 15); // ~15 chars/sec promedio
+
+      console.log(`[TTS] ✅ Síntesis completada en ${latency_ms}ms, ${audioBuffer.length} bytes`);
+
+      // Log en ae_requests
+      try {
+        await supabase.from('ae_requests').insert({
+          request_id: uuidv4(),
+          session_id: sessionId || null,
+          user_id: userId || null,
+          endpoint: '/api/voice/tts',
+          method: 'POST',
+          status_code: 200,
+          latency_ms,
+          metadata: {
+            text_chars: cleanText.length,
+            text_original_chars: text.length,
+            tts_provider: 'edge-tts',
+            tts_voice: selectedVoice,
+            audio_size_bytes: audioBuffer.length,
+            audio_format: 'mp3',
+            estimated_duration_seconds: estimatedDuration,
+            truncated: cleanText.length < text.length
+          }
+        });
+      } catch (logError) {
+        console.error('[TTS] Error logging request:', logError);
+      }
+
+      // Limpiar archivo temporal
+      fs.unlinkSync(outputFile);
+
+      // Devolver audio como base64 (más fácil para frontend)
+      const response: TTSResponse = {
+        audioUrl: `data:audio/mpeg;base64,${audioBuffer.toString('base64')}`,
+        format: 'mp3',
+        duration: estimatedDuration
+      };
+
+      return res.json(response);
+
+    } catch (ttsError: any) {
+      // Limpiar archivo temporal en caso de error
+      if (fs.existsSync(outputFile)) {
+        fs.unlinkSync(outputFile);
+      }
+
+      const latency_ms = Date.now() - startTime;
+
+      // Log error
+      try {
+        await supabase.from('ae_requests').insert({
+          request_id: uuidv4(),
+          session_id: sessionId || null,
+          user_id: userId || null,
+          endpoint: '/api/voice/tts',
+          method: 'POST',
+          status_code: 500,
+          latency_ms,
+          metadata: {
+            error: ttsError.message,
+            error_type: ttsError.killed ? 'TIMEOUT' : 'TTS_ERROR',
+            text_chars: cleanText.length,
+            tts_provider: 'edge-tts',
+            tts_voice: selectedVoice
+          }
+        });
+      } catch (logError) {
+        console.error('[TTS] Error logging error:', logError);
+      }
+
+      throw ttsError;
+    }
+
+  } catch (error: any) {
+    console.error('[TTS] ❌ Error:', error);
+
+    if (error.killed) {
+      return res.status(504).json({
+        error: 'TTS_TIMEOUT',
+        message: 'La síntesis de voz tomó demasiado tiempo (>15s)'
+      });
+    }
+
     return res.status(500).json({
       error: 'TTS_ERROR',
       message: 'Error interno al procesar TTS'
@@ -78,13 +208,19 @@ router.post('/tts', async (req, res) => {
 
 /**
  * POST /api/voice/stt
- * Convierte voz a texto
+ * Convierte voz a texto usando Groq Whisper
+ * 
+ * P0: STT REAL - Groq Whisper API
+ * - Timeout: 20s
+ * - Log obligatorio en ae_requests
+ * - Soporta: mp3, wav, ogg, webm, m4a
  */
 router.post('/stt', upload.single('audio'), async (req, res) => {
-  console.log('[STT] Request recibido');
+  const startTime = Date.now();
+  console.log('[STT] 🎤 Request recibido');
 
   try {
-    const { language }: STTRequest = req.body;
+    const { language, sessionId, userId }: STTRequest = req.body;
     const audioFile = req.file;
 
     // Validaciones
@@ -106,32 +242,117 @@ router.post('/stt', upload.single('audio'), async (req, res) => {
       originalname: audioFile.originalname,
       mimetype: audioFile.mimetype,
       size: audioFile.size,
-      language
+      language: language || 'auto'
     });
 
-    // Por ahora, respuesta mockup preparando la infraestructura
-    // TODO: Implementar integración real con servicio STT (OpenAI Whisper, Azure, etc.)
-    const response: STTResponse = {
-      transcript: '', // Se transcribiría el audio real
-      confidence: 0.95, // Nivel de confianza del STT
-      detectedLanguage: language || 'auto-detect'
-    };
+    // Guardar archivo temporalmente (Groq Whisper requiere file path)
+    const tempDir = os.tmpdir();
+    const tempFilePath = path.join(tempDir, `stt_${uuidv4()}_${audioFile.originalname}`);
+    
+    fs.writeFileSync(tempFilePath, audioFile.buffer);
+    
+    try {
+      // Llamar a Groq Whisper API con timeout
+      console.log('[STT] 🔄 Calling Groq Whisper API...');
+      
+      const transcriptionPromise = groq.audio.transcriptions.create({
+        file: fs.createReadStream(tempFilePath),
+        model: 'whisper-large-v3',
+        language: language || undefined, // auto-detect si no se especifica
+        response_format: 'json',
+        temperature: 0.0 // Máxima precisión
+      });
+      
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('STT_TIMEOUT')), STT_TIMEOUT_MS)
+      );
+      
+      const transcription = await Promise.race([transcriptionPromise, timeoutPromise]) as any;
+      
+      const latency_ms = Date.now() - startTime;
+      const audioSeconds = Math.ceil(audioFile.size / 16000); // Estimación aproximada
+      
+      console.log(`[STT] ✅ Transcripción completada en ${latency_ms}ms`);
+      console.log(`[STT] Texto: "${transcription.text.substring(0, 100)}..."`);
+      
+      // Log en ae_requests
+      try {
+        await supabase.from('ae_requests').insert({
+          request_id: uuidv4(),
+          session_id: sessionId || null,
+          user_id: userId || null,
+          endpoint: '/api/voice/stt',
+          method: 'POST',
+          status_code: 200,
+          latency_ms,
+          metadata: {
+            audio_seconds: audioSeconds,
+            audio_size_bytes: audioFile.size,
+            audio_mimetype: audioFile.mimetype,
+            stt_provider: 'groq',
+            stt_model: 'whisper-large-v3',
+            transcript_length: transcription.text.length,
+            language: language || 'auto',
+            detected_language: transcription.language || 'unknown'
+          }
+        });
+      } catch (logError) {
+        console.error('[STT] Error logging request:', logError);
+      }
+      
+      // Limpiar archivo temporal
+      fs.unlinkSync(tempFilePath);
+      
+      const response: STTResponse = {
+        transcript: transcription.text,
+        confidence: 0.95, // Groq Whisper no devuelve confidence, usar valor alto
+        detectedLanguage: transcription.language || language || 'unknown'
+      };
 
-    console.log('[STT] Respuesta preparada (mockup)');
+      return res.json(response);
+      
+    } catch (transcriptionError: any) {
+      // Limpiar archivo temporal en caso de error
+      if (fs.existsSync(tempFilePath)) {
+        fs.unlinkSync(tempFilePath);
+      }
+      
+      const latency_ms = Date.now() - startTime;
+      
+      // Log error
+      try {
+        await supabase.from('ae_requests').insert({
+          request_id: uuidv4(),
+          session_id: sessionId || null,
+          user_id: userId || null,
+          endpoint: '/api/voice/stt',
+          method: 'POST',
+          status_code: 500,
+          latency_ms,
+          metadata: {
+            error: transcriptionError.message,
+            error_type: transcriptionError.message === 'STT_TIMEOUT' ? 'TIMEOUT' : 'STT_ERROR',
+            audio_size_bytes: audioFile.size,
+            stt_provider: 'groq'
+          }
+        });
+      } catch (logError) {
+        console.error('[STT] Error logging error:', logError);
+      }
+      
+      throw transcriptionError;
+    }
 
-    // Respuesta de placeholder indicando que está preparado para implementar
-    return res.status(501).json({
-      message: 'STT endpoint preparado, implementación pendiente',
-      fileInfo: {
-        name: audioFile.originalname,
-        type: audioFile.mimetype,
-        size: audioFile.size
-      },
-      placeholder: true
-    });
-
-  } catch (error) {
-    console.error('[STT] Error:', error);
+  } catch (error: any) {
+    console.error('[STT] ❌ Error:', error);
+    
+    if (error.message === 'STT_TIMEOUT') {
+      return res.status(504).json({
+        error: 'STT_TIMEOUT',
+        message: 'La transcripción tomó demasiado tiempo (>20s)'
+      });
+    }
+    
     return res.status(500).json({
       error: 'STT_ERROR',
       message: 'Error interno al procesar STT'
@@ -146,18 +367,30 @@ router.post('/stt', upload.single('audio'), async (req, res) => {
 router.get('/capabilities', (req, res) => {
   res.json({
     tts: {
-      available: false, // Cambiar a true cuando esté implementado
-      formats: ['mp3', 'wav', 'ogg'],
+      available: true, // ✅ Edge-TTS implementado
+      formats: ['mp3'],
       maxTextLength: 5000,
-      voices: [] // Se llenarían las voces disponibles
+      voices: [
+        'es-MX-DaliaNeural', // México - Femenina (default)
+        'es-MX-JorgeNeural', // México - Masculina
+        'es-ES-ElviraNeural', // España - Femenina
+        'es-AR-ElenaNeural', // Argentina - Femenina
+        'en-US-JennyNeural', // USA - Femenina
+        'en-US-GuyNeural' // USA - Masculina
+      ],
+      provider: 'edge-tts',
+      timeout_ms: TTS_TIMEOUT_MS
     },
     stt: {
-      available: false, // Cambiar a true cuando esté implementado
-      formats: ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm'],
+      available: true, // ✅ Groq Whisper implementado
+      formats: ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm', 'audio/m4a'],
       maxFileSize: '10MB',
-      languages: ['auto', 'es', 'en', 'fr', 'de']
+      languages: ['auto', 'es', 'en', 'fr', 'de', 'pt', 'it', 'ja', 'ko', 'zh'],
+      provider: 'groq',
+      model: 'whisper-large-v3',
+      timeout_ms: STT_TIMEOUT_MS
     },
-    status: 'prepared' // 'ready' cuando esté completamente implementado
+    status: 'ready' // ✅ Producción lista
   });
 });
 
