@@ -282,7 +282,26 @@ export class Orchestrator {
                 `- De: ${e.from}\n  Asunto: ${e.subject}\n  Fecha: ${e.date}`
               ).join('\n\n');
               
-              results.push(`Correos encontrados:\n\n${emailList}`);
+              // P0 FIX: Hacer el toolResult IMPERATIVO y NO IGNORABLE
+              results.push(`
+═══════════════════════════════════════════════════════════════
+⚠️ RESULTADOS DE GMAIL (DATOS REALES - OBLIGATORIO USAR) ⚠️
+═══════════════════════════════════════════════════════════════
+
+Acabas de ejecutar exitosamente Gmail API.
+Los siguientes correos fueron obtenidos DIRECTAMENTE de la cuenta del usuario:
+
+${emailList}
+
+INSTRUCCIÓN CRÍTICA:
+- Estos son los ÚNICOS correos reales en la bandeja
+- NO inventes otros correos o remitentes
+- USA EXACTAMENTE estos datos (De/Asunto/Fecha)
+- Si el usuario pregunta "qué correo me llegó", responde con ESTOS datos
+- Si ninguno coincide con lo que busca, di "No encontré ese correo entre los recientes"
+
+═══════════════════════════════════════════════════════════════
+`);
             } else {
               results.push(result.message);
             }

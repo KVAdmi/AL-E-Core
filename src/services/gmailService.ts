@@ -157,10 +157,18 @@ export async function readGmail(
   maxResults: number = 10
 ): Promise<GmailReadResult> {
   try {
-    console.log('[GMAIL] � readGmail - Executing real API call...');
+    console.log('[GMAIL] 📧 readGmail - Executing real API call...');
     
     const auth = await getAuthenticatedClient(userId);
     const gmail = google.gmail({ version: 'v1', auth });
+    
+    // P0 DEBUG: Verificar CUÁL cuenta Gmail está usando este token
+    try {
+      const profileResponse = await gmail.users.getProfile({ userId: 'me' });
+      console.log(`[GMAIL] 🔍 CUENTA GMAIL REAL: ${profileResponse.data.emailAddress}`);
+    } catch (profileError) {
+      console.log('[GMAIL] ⚠️ No se pudo obtener emailAddress del perfil');
+    }
     
     // Construir query
     let searchQuery = 'is:unread'; // Default: no leídos
@@ -196,14 +204,32 @@ export async function readGmail(
         const headers = msgData.data.payload?.headers || [];
         const from = headers.find(h => h.name === 'From')?.value || 'Desconocido';
         const subject = headers.find(h => h.name === 'Subject')?.value || '(sin asunto)';
-        const date = headers.find(h => h.name === 'Date')?.value || '';
+        const dateRaw = headers.find(h => h.name === 'Date')?.value || '';
+        
+        // P0 FIX: Convertir fecha a timezone de México (America/Mexico_City)
+        let dateFormatted = dateRaw;
+        try {
+          if (dateRaw) {
+            const parsedDate = new Date(dateRaw);
+            dateFormatted = parsedDate.toLocaleString('es-MX', {
+              timeZone: 'America/Mexico_City',
+              weekday: 'short',
+              day: 'numeric',
+              month: 'short',
+              hour: '2-digit',
+              minute: '2-digit'
+            });
+          }
+        } catch (err) {
+          console.log('[GMAIL] ⚠️ Error parsing date, using raw:', dateRaw);
+        }
         
         return {
           id: msg.id!,
           from,
           subject,
           snippet: msgData.data.snippet || '',
-          date
+          date: dateFormatted
         };
       })
     );

@@ -76,7 +76,9 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
         }
         // Obtener userId (autenticado o del body)
         const authenticatedUserId = (0, auth_1.getUserId)(req);
-        let { workspaceId = env_1.env.defaultWorkspaceId, userId: bodyUserId, mode = env_1.env.defaultMode, sessionId: requestSessionId, messages } = req.body;
+        let { workspaceId = env_1.env.defaultWorkspaceId, userId: bodyUserId, mode = env_1.env.defaultMode, sessionId: requestSessionId, messages, userEmail, // P0: Multi-user collaboration
+        userDisplayName // P0: Multi-user collaboration
+         } = req.body;
         // Prioridad: usuario autenticado > userId del body
         const userId = authenticatedUserId || bodyUserId;
         // Resolver user_id_uuid desde JWT (producción real)
@@ -680,6 +682,9 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
     let sessionId = null;
     // P0: Declarar orchestratorContext EN SCOPE DEL ENDPOINT (fuera del try principal)
     let orchestratorContext = null;
+    // P0: Declarar userEmail y userDisplayName en scope del endpoint
+    let userEmail;
+    let userDisplayName;
     try {
         console.log('\n[CHAT_V2] ==================== NUEVA SOLICITUD ====================');
         // CRITICAL: Verificar que OpenAI está bloqueado
@@ -689,6 +694,9 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         // 1. VALIDAR PAYLOAD MÍNIMO
         // ============================================
         const { message, sessionId: requestSessionId, workspaceId, meta } = req.body;
+        // P0: Extraer userEmail y userDisplayName del payload (multi-user collaboration)
+        userEmail = req.body.userEmail;
+        userDisplayName = req.body.userDisplayName;
         if (!message || typeof message !== 'string') {
             return res.status(400).json({
                 error: 'INVALID_PAYLOAD',
@@ -772,10 +780,10 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         // 4. RECONSTRUIR CONTEXTO DESDE SUPABASE
         // ============================================
         console.log('[CHAT_V2] 📚 Reconstructing context from Supabase...');
-        // 4.1: Cargar historial de mensajes
+        // 4.1: Cargar historial de mensajes (P0: incluir user_email y user_display_name)
         const { data: historyData, error: historyError } = await supabase_1.supabase
             .from('ae_messages')
-            .select('role, content, created_at')
+            .select('role, content, user_email, user_display_name, created_at') // P0: Multi-user
             .eq('session_id', sessionId)
             .order('created_at', { ascending: true })
             .limit(50); // Últimos 50 mensajes
@@ -811,7 +819,9 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
             session_id: sessionId, // FK a ae_sessions(id)
             role: 'user',
             content: message,
-            meta: {
+            user_email: userEmail || null, // P0: Multi-user collaboration
+            user_display_name: userDisplayName || null, // P0: Multi-user collaboration
+            metadata: {
                 user_id: userId,
                 user_id_uuid,
                 workspace_id: finalWorkspaceId,
@@ -828,11 +838,41 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         // 6. ORQUESTACIÓN (Intent + Tools + LLM)
         // ============================================
         console.log('[CHAT_V2] 🧠 Starting orchestration...');
-        // Construir messages array para orchestrator
-        const messagesForOrchestrator = [
-            ...history.map((h) => ({ role: h.role, content: h.content })),
-            { role: 'user', content: message }
-        ];
+        // P0: Construir messages array para orchestrator CON NOMBRES DE USUARIO
+        let lastUserEmail = null;
+        const messagesForOrchestrator = history.map((h) => {
+            if (h.role === 'user' && h.user_display_name) {
+                // Detectar cambio de usuario
+                const userChanged = lastUserEmail && lastUserEmail !== h.user_email;
+                lastUserEmail = h.user_email;
+                if (userChanged) {
+                    return {
+                        role: 'user',
+                        content: `[${h.user_display_name} se une a la conversación]\n${h.user_display_name}: ${h.content}`
+                    };
+                }
+                return {
+                    role: 'user',
+                    content: `${h.user_display_name}: ${h.content}`
+                };
+            }
+            return { role: h.role, content: h.content };
+        });
+        // Agregar mensaje actual con nombre del usuario
+        const currentUserName = userDisplayName || userEmail?.split('@')[0] || 'Usuario';
+        const currentUserChanged = lastUserEmail && lastUserEmail !== userEmail;
+        if (currentUserChanged) {
+            messagesForOrchestrator.push({
+                role: 'user',
+                content: `[${currentUserName} se une a la conversación]\n${currentUserName}: ${message}`
+            });
+        }
+        else {
+            messagesForOrchestrator.push({
+                role: 'user',
+                content: userDisplayName ? `${currentUserName}: ${message}` : message
+            });
+        }
         const orchestratorRequest = {
             userId,
             workspaceId: finalWorkspaceId,
@@ -959,7 +999,7 @@ Ejemplo malo: "Visita https://... para ver el precio."`
             session_id: sessionId, // FK a ae_sessions(id)
             role: 'assistant',
             content: finalAnswer,
-            meta: {
+            metadata: {
                 user_id: userId,
                 user_id_uuid,
                 workspace_id: finalWorkspaceId,

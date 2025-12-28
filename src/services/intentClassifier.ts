@@ -66,21 +66,22 @@ const VERIFICATION_PATTERNS = {
 // ═══════════════════════════════════════════════════════════════
 
 const TRANSACTIONAL_PATTERNS = {
-  // Gmail - Lectura: cualquier mención de correo con acción de ver/revisar/checar
-  gmail_read: /\b(revisa|revisar|checa|checka|check|ve|ver|mira|mirar|échale un ojo|echale un ojo|consulta|busca|lee|leer|último|ultima|recibí|recibi|llegó|llego|tengo|hay|muestra|mostrar)\b.{0,80}\b(correo|email|gmail|mail|inbox|bandeja|mensajes?)\b|\b(correo|email|gmail|mail|inbox|bandeja|mensajes?)\b.{0,80}\b(revisa|revisar|checa|checka|ve|ver|mira|último|ultima|recibí|recibi|llegó|llego)\b/i,
+  // Gmail - Lectura: TODO lenguaje natural para revisar correos
+  gmail_read: /\b(revisa|revisar|checa|checka|échale|echale|check|ve|ver|vete a|mira|mirar|échale un ojo|echale un ojo|consulta|consultame|busca|buscame|lee|leer|último|ultima|recibí|recibi|llegó|llego|tengo|tienes?|hay|habrá|habra|muestra|mostrar|muéstrame|muestrame|trae|traeme|dame|dime|ve a|ayudame a ver|ayúdame a ver|puedes ir|puedes ver|favor|pls|plz|porfavor|por favor)\b.{0,100}\b(correo|email|emails|gmail|mail|mails|inbox|bandeja|mensajes?|mensaje)\b|\b(correo|email|gmail|mail|inbox|bandeja|mensajes?)\b.{0,100}\b(revisa|revisar|checa|checka|ve|ver|mira|último|ultima|recibí|recibi|llegó|llego|hay|tengo|dame|dime|trae)\b/i,
   
-  // Gmail - Envío: enviar/mandar + correo
-  gmail_send: /\b(envía|enviar|manda|mandar|send|escribe|escribir|redacta|responde|responder|contesta|contestar|dispara|disparar)\b.{0,50}\b(correo|email|mensaje|mail)\b|\b(correo|email|mail)\b.{0,30}\b(a|para)\b/i,
+  // Gmail - Envío: TODO lenguaje natural para enviar correos
+  gmail_send: /\b(envía|enviá|enviar|manda|mandá|mandar|mandame|mándame|send|escribe|escribí|escribir|redacta|redactá|responde|respondé|responder|contesta|contestá|contestar|dispara|disparar|comunícate|comunicate|contacta|contactá|avísale|avisale|dile)\b.{0,80}\b(correo|email|mensaje|mail|un email|un correo|un mail|un mensaje)\b|\b(correo|email|mail|mensaje)\b.{0,50}\b(a|para|al|pa)\b/i,
   
-  // Calendar - Lectura: revisar/ver agenda
-  calendar_read: /\b(revisa|revisar|checa|checka|ve|ver|mira|mirar|échale un ojo|echale un ojo|consulta|muestra|mostrar)\b.{0,80}\b(agenda|calendario|calendar|citas?|eventos?|pendientes?)\b|\b(agenda|calendario|citas?)\b.{0,50}\b(revisa|checa|ve|mira|tengo|hay)\b/i,
+  // Calendar - Lectura: TODO lenguaje natural para ver agenda
+  calendar_read: /\b(revisa|revisá|revisar|checa|checá|checka|ve|vé|ver|mira|mirá|mirar|échale|échale un ojo|echale un ojo|consulta|consultá|consultame|muestra|mostrá|mostrar|muéstrame|muestrame|dame|dime|trae|traeme|qué tengo|que tengo|qué hay|que hay)\b.{0,100}\b(agenda|calendario|calendar|citas?|eventos?|pendientes?|compromisos?|juntas?|reuniones?|meets?|meetings?)\b|\b(agenda|calendario|citas?|eventos?|juntas?|reuniones?)\b.{0,80}\b(revisa|checa|ve|mira|tengo|tienes?|hay|dame|dime|trae|hoy|mañana|semana|mes)\b/i,
   
-  // Calendar - Creación: agendar/crear cita con fecha/hora
-  calendar_create: /\b(agenda|agendar|pon|poner|crea|crear|añade|añadir|apunta|apuntar|programa|programar|separa|separar|reserva|reservar|book|schedule)\b.{0,80}\b(cita|evento|meeting|junta|reunión|reunion|call|videollamada)\b|\b(cita|evento|meeting|junta)\b.{0,50}\b(con|para|el|lunes|martes|miércoles|jueves|viernes|mañana|hoy)\b/i,
+  // Calendar - Creación: TODO lenguaje natural para crear eventos
+  // P0 FIX: MEGA EXPANSIÓN - "meet", "ayudame", "porfavor", "flaca", etc.
+  calendar_create: /\b(agenda|agendá|agendar|agendame|pon|poné|poner|ponme|crea|creá|crear|creame|añade|añadí|añadir|añademe|agrega|agregá|agregar|agregame|apunta|apuntá|apuntar|apuntame|programa|programá|programar|programame|separa|separá|separar|sepárame|reserva|reservá|reservar|reservame|book|schedule|ayúdame|ayudame|ayúdame a|ayudame a|me ayudas|me ayudás|puedes|podés|por favor|porfavor|porfa|pls|plz|favor de|necesito|quiero|quisiera)\b.{0,150}\b(cita|evento|meet|meeting|junta|juntar|reunión|reunion|videollamada|video|call|llamada|sesión|sesion|compromiso|pendiente|agendar|crear|poner)\b|\b(cita|evento|meet|meeting|junta|reunión|reunion|videollamada|call)\b.{0,100}\b(con|para|al|a|el|este|próximo|proximo|siguiente|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo|mañana|hoy|pasado)\b/i,
   
   // Detectores genéricos (cualquier mención)
-  has_gmail_action: /\b(correo|email|gmail|mail|inbox|bandeja|mensaje)\b/i,
-  has_calendar_action: /\b(agenda|calendario|calendar|cita|evento|meeting|junta|reunión|reunion)\b/i
+  has_gmail_action: /\b(correo|email|emails|gmail|mail|mails|inbox|bandeja|mensaje|mensajes)\b/i,
+  has_calendar_action: /\b(agenda|agendá|calendario|calendar|cita|citas|evento|eventos|meet|meets|meeting|meetings|junta|juntas|reunión|reunion|reuniones|videollamada|video call)\b/i
 };
 
 // ═══════════════════════════════════════════════════════════════

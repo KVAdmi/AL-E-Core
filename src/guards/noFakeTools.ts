@@ -66,6 +66,8 @@ const FAKE_TRANSACTIONAL_PHRASES = [
   'revise tu correo',
   'revisé tus correos',
   'revise tus correos',
+  'acabo de revisar tu correo',  // NUEVO: variante con "acabo de"
+  'acabo de revisar tus correos', // NUEVO
   'leí tu correo',
   'lei tu correo',
   'consulté tu gmail',
@@ -76,8 +78,11 @@ const FAKE_TRANSACTIONAL_PHRASES = [
   'accedi a tu correo',
   'envié el correo',
   'envie el correo',
+  'acabo de enviar',  // NUEVO: muy común en respuestas falsas
   'mandé el email',
   'mande el email',
+  'he enviado',  // NUEVO
+  'acabo de mandar',  // NUEVO
   
   // Calendar - SOLO acciones específicas falsas
   'revisé tu agenda',
@@ -129,17 +134,20 @@ export function detectFakeToolUse(responseText: string, webSearchUsed: boolean):
  * Detectar si la respuesta menciona acciones transaccionales falsas (Gmail/Calendar)
  * CRITICAL: Si intent=transactional Y tool_failed, NO puede simular ejecución
  * CRITICAL: Si toolError = OAUTH_TOKENS_MISSING, BLOQUEO ABSOLUTO de frases afirmativas
+ * 
+ * P0 FIX: transactionalToolsUsed SOLO es true si la ejecución fue EXITOSA
+ * Si el tool falló (OAuth missing, timeout, etc.), transactionalToolsUsed DEBE SER FALSE
  */
 export function detectFakeTransactionalUse(
   responseText: string, 
-  transactionalToolsUsed: boolean,
+  transactionalToolsSucceeded: boolean,  // RENOMBRADO: ahora indica éxito real, no solo intento
   toolError?: string
 ): {
   hasFakeClaims: boolean;
   detectedPhrases: string[];
 } {
-  if (transactionalToolsUsed) {
-    // Si SÍ se ejecutaron tools transaccionales, está OK mencionar acciones
+  if (transactionalToolsSucceeded) {
+    // Si SÍ se ejecutaron tools transaccionales EXITOSAMENTE, está OK mencionar acciones
     return { hasFakeClaims: false, detectedPhrases: [] };
   }
   
@@ -246,8 +254,17 @@ export function applyAntiLieGuardrail(
   }
   
   // CHECK 2: BLOQUEO DURO OAuth (P0)
-  if (intent?.intent_type === 'transactional' && toolFailed) {
-    const transactionalDetection = detectFakeTransactionalUse(responseText, false, toolError);
+  // P0 FIX CRÍTICO: Si intent=transactional, verificar SIEMPRE fake claims
+  // independientemente de si toolFailed (porque el LLM puede mentir ANTES del tool)
+  if (intent?.intent_type === 'transactional') {
+    // transactionalToolsSucceeded = !toolFailed
+    // Si toolFailed = true → transactionalToolsSucceeded = false → detectar fake claims
+    // Si toolFailed = false → transactionalToolsSucceeded = true → permitir menciones
+    const transactionalDetection = detectFakeTransactionalUse(
+      responseText, 
+      !toolFailed,  // P0: Solo true si NO hubo fallo
+      toolError
+    );
     
     if (transactionalDetection.hasFakeClaims) {
       console.log(`[GUARDRAIL] 🛡️ 🔴 BLOQUEO DURO OAuth - fake transactional detected: ${transactionalDetection.detectedPhrases.join(', ')}`);
@@ -259,14 +276,18 @@ export function applyAntiLieGuardrail(
         blockedMessage = `No tienes Gmail/Calendar conectado. Ve a tu perfil y autoriza el acceso.`;
       } else if (toolError === 'OAUTH_TOKENS_MISSING') {
         blockedMessage = `Tu Gmail/Calendar está conectado pero la autenticación expiró. Desconecta y vuelve a conectar desde tu perfil.`;
-      } else {
+      } else if (toolFailed) {
+        // Tool falló por razón desconocida
         blockedMessage = `No puedo acceder a tu Gmail/Calendar en este momento. Verifica la conexión en tu perfil.`;
+      } else {
+        // Tool no falló pero el LLM inventó la respuesta ANTES de ejecutar
+        blockedMessage = `No tengo esa información. ¿Puedes darme más contexto?`;
       }
       
       return {
         sanitized: true,
         text: blockedMessage,
-        reason: `OAuth hard block - ${toolError} - phrases: ${transactionalDetection.detectedPhrases.join(', ')}`
+        reason: `OAuth hard block - ${toolError || 'PREMATURE_RESPONSE'} - phrases: ${transactionalDetection.detectedPhrases.join(', ')}`
       };
     }
   }

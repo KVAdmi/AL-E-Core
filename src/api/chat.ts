@@ -98,7 +98,9 @@ router.post('/chat', optionalAuth, async (req, res) => {
       userId: bodyUserId,
       mode = env.defaultMode,
       sessionId: requestSessionId,
-      messages
+      messages,
+      userEmail,  // P0: Multi-user collaboration
+      userDisplayName  // P0: Multi-user collaboration
     } = req.body;
     
     // Prioridad: usuario autenticado > userId del body
@@ -807,6 +809,10 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
   // P0: Declarar orchestratorContext EN SCOPE DEL ENDPOINT (fuera del try principal)
   let orchestratorContext: any = null;
   
+  // P0: Declarar userEmail y userDisplayName en scope del endpoint
+  let userEmail: string | undefined;
+  let userDisplayName: string | undefined;
+  
   try {
     console.log('\n[CHAT_V2] ==================== NUEVA SOLICITUD ====================');
     
@@ -818,7 +824,16 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
     // 1. VALIDAR PAYLOAD MÍNIMO
     // ============================================
     
-    const { message, sessionId: requestSessionId, workspaceId, meta } = req.body;
+    const { 
+      message, 
+      sessionId: requestSessionId, 
+      workspaceId, 
+      meta 
+    } = req.body;
+    
+    // P0: Extraer userEmail y userDisplayName del payload (multi-user collaboration)
+    userEmail = req.body.userEmail;
+    userDisplayName = req.body.userDisplayName;
     
     if (!message || typeof message !== 'string') {
       return res.status(400).json({
@@ -919,10 +934,10 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
     
     console.log('[CHAT_V2] 📚 Reconstructing context from Supabase...');
     
-    // 4.1: Cargar historial de mensajes
+    // 4.1: Cargar historial de mensajes (P0: incluir user_email y user_display_name)
     const { data: historyData, error: historyError } = await supabase
       .from('ae_messages')
-      .select('role, content, created_at')
+      .select('role, content, user_email, user_display_name, created_at')  // P0: Multi-user
       .eq('session_id', sessionId)
       .order('created_at', { ascending: true })
       .limit(50); // Últimos 50 mensajes
@@ -965,6 +980,8 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
         session_id: sessionId,  // FK a ae_sessions(id)
         role: 'user',
         content: message,
+        user_email: userEmail || null,  // P0: Multi-user collaboration
+        user_display_name: userDisplayName || null,  // P0: Multi-user collaboration
         metadata: {  // FIXED: usar 'metadata' en vez de 'meta'
           user_id: userId,
           user_id_uuid,
@@ -987,11 +1004,44 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
     
     console.log('[CHAT_V2] 🧠 Starting orchestration...');
     
-    // Construir messages array para orchestrator
-    const messagesForOrchestrator = [
-      ...history.map((h: any) => ({ role: h.role, content: h.content })),
-      { role: 'user', content: message }
-    ];
+    // P0: Construir messages array para orchestrator CON NOMBRES DE USUARIO
+    let lastUserEmail: string | null = null;
+    const messagesForOrchestrator = history.map((h: any) => {
+      if (h.role === 'user' && h.user_display_name) {
+        // Detectar cambio de usuario
+        const userChanged = lastUserEmail && lastUserEmail !== h.user_email;
+        lastUserEmail = h.user_email;
+        
+        if (userChanged) {
+          return {
+            role: 'user',
+            content: `[${h.user_display_name} se une a la conversación]\n${h.user_display_name}: ${h.content}`
+          };
+        }
+        
+        return {
+          role: 'user',
+          content: `${h.user_display_name}: ${h.content}`
+        };
+      }
+      return { role: h.role, content: h.content };
+    });
+    
+    // Agregar mensaje actual con nombre del usuario
+    const currentUserName = userDisplayName || userEmail?.split('@')[0] || 'Usuario';
+    const currentUserChanged = lastUserEmail && lastUserEmail !== userEmail;
+    
+    if (currentUserChanged) {
+      messagesForOrchestrator.push({
+        role: 'user',
+        content: `[${currentUserName} se une a la conversación]\n${currentUserName}: ${message}`
+      });
+    } else {
+      messagesForOrchestrator.push({
+        role: 'user',
+        content: userDisplayName ? `${currentUserName}: ${message}` : message
+      });
+    }
     
     const orchestratorRequest = {
       userId,
