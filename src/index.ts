@@ -192,6 +192,7 @@ app.use("/api/memory", memoryRouter); // Memoria explícita (acuerdos/decisiones
 app.use("/api/profile", profileRouter); // Personalización de usuario
 app.use("/api/email", emailRouter); // Email accounts (SMTP/IMAP manual)
 app.use("/api/mail", mailRouter); // Mail send/inbox
+app.use("/api/email", mailRouter); // Mail send/inbox TAMBIÉN en /api/email (para compatibilidad frontend)
 app.use("/api/calendar", calendarRouter); // Calendario interno
 app.use("/api/telegram", telegramRouter); // Telegram bot por usuario
 

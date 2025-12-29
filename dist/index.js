@@ -178,6 +178,7 @@ app.use("/api/memory", memory_1.default); // Memoria explícita (acuerdos/decisi
 app.use("/api/profile", profile_1.default); // Personalización de usuario
 app.use("/api/email", email_1.default); // Email accounts (SMTP/IMAP manual)
 app.use("/api/mail", mail_1.default); // Mail send/inbox
+app.use("/api/email", mail_1.default); // Mail send/inbox TAMBIÉN en /api/email (para compatibilidad frontend)
 app.use("/api/calendar", calendar_1.default); // Calendario interno
 app.use("/api/telegram", telegram_1.default); // Telegram bot por usuario
 // Log simple de verificación
