@@ -522,7 +522,17 @@ ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
             // FIX P0: Incluir meet_link real si existe
             const meetInfo = result.meet_link ? `\n- Google Meet: ${result.meet_link}` : '';
             
-            results.push(`Evento creado: ${action.title}\n- ${dateStr} a las ${timeStr}${meetInfo}`);
+            // FIX P0: Formato explícito para que el LLM lo detecte
+            results.push(`
+⚠️ EVENTO CREADO EN CALENDAR (DATOS REALES - OBLIGATORIO USAR) ⚠️
+
+✅ Evento creado exitosamente:
+- Título: ${action.title}
+- Fecha: ${dateStr}
+- Hora: ${timeStr}${meetInfo}
+
+INSTRUCCIÓN: Confirma al usuario que el evento fue creado y proporciona TODOS los detalles anteriores, especialmente el link de Google Meet si existe.
+`);
           } else {
             // Error OAuth Calendar - BLOQUEO DURO
             if (result.error === 'OAUTH_NOT_CONNECTED') {
@@ -733,8 +743,12 @@ NO uses tu conocimiento de entrenamiento. Esta es la fecha/hora real del sistema
     console.log('[ORCH] ✓ Temporal context injected:', mexicoTime);
     
     // 1. Tool result (si se ejecutó alguna herramienta) - VA PRIMERO
-    if (toolResult) {
-      systemPrompt += `
+  if (toolResult) {
+    // DEBUG P0: Log actual toolResult content
+    console.log('[ORCH] 🔍 ToolResult content (first 300 chars):', toolResult.substring(0, 300));
+    console.log('[ORCH] 🔍 ToolResult full length:', toolResult.length, 'chars');
+    
+    systemPrompt += `
 
 ═══════════════════════════════════════════════════════════════
 ⚠️  RESULTADO DE ACCIÓN EJECUTADA (PRIORIDAD MÁXIMA) ⚠️
@@ -754,10 +768,8 @@ OBLIGATORIO:
 
 ═══════════════════════════════════════════════════════════════
 `;
-      console.log('[ORCH] ✓ Tool result injected (PRIORITY POSITION)');
-    }
-    
-    // 2. Brand context (SIEMPRE)
+    console.log('[ORCH] ✓ Tool result injected (PRIORITY POSITION)');
+  }    // 2. Brand context (SIEMPRE)
     const brandContext = buildBrandContext();
     systemPrompt += brandContext;
     console.log('[ORCH] ✓ Brand context injected');
