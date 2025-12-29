@@ -57,34 +57,36 @@ const FAKE_SEARCH_PHRASES = [
 ];
 
 // ═══════════════════════════════════════════════════════════════
-// FRASES TRANSACCIONALES PROHIBIDAS (Gmail/Calendar sin tool execution)
+// FRASES TRANSACCIONALES PROHIBIDAS (Email/Calendar/Telegram sin tool execution)
+// ═══════════════════════════════════════════════════════════════
+// ACTUALIZADO: Post-migración a email manual + calendar interno + telegram
 // ═══════════════════════════════════════════════════════════════
 
 const FAKE_TRANSACTIONAL_PHRASES = [
-  // Gmail - SOLO acciones específicas falsas (no palabras sueltas)
+  // Email (SMTP/IMAP manual) - SOLO acciones específicas falsas
   'revisé tu correo',
   'revise tu correo',
   'revisé tus correos',
   'revise tus correos',
-  'acabo de revisar tu correo',  // NUEVO: variante con "acabo de"
-  'acabo de revisar tus correos', // NUEVO
+  'acabo de revisar tu correo',
+  'acabo de revisar tus correos',
   'leí tu correo',
   'lei tu correo',
-  'consulté tu gmail',
-  'consulte tu gmail',
+  'consulté tu email',
+  'consulte tu email',
   'verifiqué tu bandeja',
   'verifique tu bandeja',
   'accedí a tu correo',
   'accedi a tu correo',
   'envié el correo',
   'envie el correo',
-  'acabo de enviar',  // NUEVO: muy común en respuestas falsas
+  'acabo de enviar',
   'mandé el email',
   'mande el email',
-  'he enviado',  // NUEVO
-  'acabo de mandar',  // NUEVO
+  'he enviado',
+  'acabo de mandar',
   
-  // Calendar - SOLO acciones específicas falsas
+  // Calendar interno - SOLO acciones específicas falsas
   'revisé tu agenda',
   'revise tu agenda',
   'consulté tu calendario',
@@ -96,7 +98,15 @@ const FAKE_TRANSACTIONAL_PHRASES = [
   'creé el evento',
   'cree el evento',
   'programé la reunión',
-  'programe la reunion'
+  'programe la reunion',
+  
+  // Telegram - SOLO acciones específicas falsas
+  'envié por telegram',
+  'envie por telegram',
+  'mandé el mensaje por telegram',
+  'mande el mensaje por telegram',
+  'te notifiqué por telegram',
+  'te notifique por telegram'
 ];
 
 // ═══════════════════════════════════════════════════════════════
@@ -131,12 +141,14 @@ export function detectFakeToolUse(responseText: string, webSearchUsed: boolean):
 }
 
 /**
- * Detectar si la respuesta menciona acciones transaccionales falsas (Gmail/Calendar)
+ * Detectar si la respuesta menciona acciones transaccionales falsas (Email/Calendar/Telegram)
  * CRITICAL: Si intent=transactional Y tool_failed, NO puede simular ejecución
- * CRITICAL: Si toolError = OAUTH_TOKENS_MISSING, BLOQUEO ABSOLUTO de frases afirmativas
+ * CRITICAL: Si toolError = CONFIG_MISSING, BLOQUEO ABSOLUTO de frases afirmativas
  * 
  * P0 FIX: transactionalToolsUsed SOLO es true si la ejecución fue EXITOSA
- * Si el tool falló (OAuth missing, timeout, etc.), transactionalToolsUsed DEBE SER FALSE
+ * Si el tool falló (config missing, conexión fallida, etc.), transactionalToolsUsed DEBE SER FALSE
+ * 
+ * ACTUALIZADO: Post-migración (no más OAuth, ahora SMTP/IMAP/Telegram)
  */
 export function detectFakeTransactionalUse(
   responseText: string, 
@@ -160,8 +172,8 @@ export function detectFakeTransactionalUse(
     }
   }
   
-  // BLOQUEO EXTRA: Si toolError = OAUTH_TOKENS_MISSING, rechazar CUALQUIER frase afirmativa
-  if (toolError === 'OAUTH_TOKENS_MISSING' || toolError === 'OAUTH_NOT_CONNECTED') {
+  // BLOQUEO EXTRA: Si toolError = CONFIG_MISSING o SMTP_ERROR, rechazar CUALQUIER frase afirmativa
+  if (toolError === 'CONFIG_MISSING' || toolError === 'SMTP_ERROR' || toolError === 'IMAP_ERROR' || toolError === 'TELEGRAM_ERROR') {
     // Detectar frases afirmativas genéricas sobre acciones
     const affirmativePhrases = [
       'revisé',
@@ -272,13 +284,15 @@ export function applyAntiLieGuardrail(
       // Mensaje más directo según el error
       let blockedMessage = '';
       
-      if (toolError === 'OAUTH_NOT_CONNECTED') {
-        blockedMessage = `No tienes Gmail/Calendar conectado. Ve a tu perfil y autoriza el acceso.`;
-      } else if (toolError === 'OAUTH_TOKENS_MISSING') {
-        blockedMessage = `Tu Gmail/Calendar está conectado pero la autenticación expiró. Desconecta y vuelve a conectar desde tu perfil.`;
+      if (toolError === 'CONFIG_MISSING') {
+        blockedMessage = `No tienes una cuenta de email configurada. Ve a tu perfil y configura tu SMTP/IMAP.`;
+      } else if (toolError === 'SMTP_ERROR' || toolError === 'IMAP_ERROR') {
+        blockedMessage = `No puedo conectar con tu servidor de email. Verifica la configuración en tu perfil.`;
+      } else if (toolError === 'TELEGRAM_ERROR') {
+        blockedMessage = `No puedo enviar por Telegram. Verifica que tu bot esté conectado en tu perfil.`;
       } else if (toolFailed) {
         // Tool falló por razón desconocida
-        blockedMessage = `No puedo acceder a tu Gmail/Calendar en este momento. Verifica la conexión en tu perfil.`;
+        blockedMessage = `No puedo ejecutar esa acción en este momento. Verifica tu configuración.`;
       } else {
         // Tool no falló pero el LLM inventó la respuesta ANTES de ejecutar
         blockedMessage = `No tengo esa información. ¿Puedes darme más contexto?`;

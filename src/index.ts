@@ -9,8 +9,12 @@ import { sessionsRouter } from "./api/sessions";
 import memoryRouter from "./api/memory"; // Memoria explícita
 import profileRouter from "./api/profile"; // Personalización de usuario
 import healthRouter from "./api/health"; // Health checks
-import oauthRouter from "./api/oauth"; // P0: OAuth callbacks (Google)
+import emailRouter from "./api/email"; // Email accounts (SMTP/IMAP manual)
+import mailRouter from "./api/mail"; // Mail send/inbox
+import calendarRouter from "./api/calendar"; // Calendario interno
+import telegramRouter from "./api/telegram"; // Telegram bot por usuario
 import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
+import { startNotificationWorker } from "./workers/notificationWorker";
 
 const app = express();
 
@@ -186,7 +190,10 @@ app.use("/api/voice", voiceRouter);
 app.use("/api/sessions", sessionsRouter);
 app.use("/api/memory", memoryRouter); // Memoria explícita (acuerdos/decisiones/hechos)
 app.use("/api/profile", profileRouter); // Personalización de usuario
-app.use("/api/auth", oauthRouter); // P0: OAuth callbacks (Google Gmail/Calendar)
+app.use("/api/email", emailRouter); // Email accounts (SMTP/IMAP manual)
+app.use("/api/mail", mailRouter); // Mail send/inbox
+app.use("/api/calendar", calendarRouter); // Calendario interno
+app.use("/api/telegram", telegramRouter); // Telegram bot por usuario
 
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
@@ -196,7 +203,10 @@ console.log("[DEBUG] voiceRouter montado en /api/voice");
 console.log("[DEBUG] sessionsRouter montado en /api/sessions");
 console.log("[DEBUG] memoryRouter montado en /api/memory");
 console.log("[DEBUG] profileRouter montado en /api/profile");
-console.log("[DEBUG] oauthRouter (P0) montado en /api/auth");
+console.log("[DEBUG] emailRouter montado en /api/email");
+console.log("[DEBUG] mailRouter montado en /api/mail");
+console.log("[DEBUG] calendarRouter montado en /api/calendar");
+console.log("[DEBUG] telegramRouter montado en /api/telegram");
 
 const PORT = env.port || 4000;
 
@@ -206,4 +216,8 @@ app.listen(PORT, "0.0.0.0", () => {
 	console.log("[AL-E CORE] Servidor iniciado en:", "0.0.0.0", "puerto:", PORT);
 	console.log("[AL-E CORE] URL base:", process.env.ALE_CORE_URL || "localhost");
 	console.log(`AL-E Core listening on port ${PORT}`);
+	
+	// Iniciar notification worker
+	console.log('[AL-E CORE] Iniciando notification worker...');
+	startNotificationWorker();
 });

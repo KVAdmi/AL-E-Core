@@ -23,4 +23,11 @@ exports.env = {
     assistantId: process.env.ASSISTANT_ID || "al-e",
     defaultWorkspaceId: process.env.DEFAULT_WORKSPACE_ID || "default",
     defaultMode: process.env.DEFAULT_MODE || "universal",
+    // Feature Flags - Post-migración Google → Manual
+    enableGoogle: process.env.ENABLE_GOOGLE === "true", // false por defecto
+    enableOcr: process.env.ENABLE_OCR !== "false", // true por defecto
+    enableTelegram: process.env.ENABLE_TELEGRAM !== "false", // true por defecto
+    enableImap: process.env.ENABLE_IMAP !== "false", // true por defecto
+    // Encryption
+    encryptionKey: process.env.ENCRYPTION_KEY || "", // OBLIGATORIO para credenciales
 };

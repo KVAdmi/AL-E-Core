@@ -238,11 +238,34 @@ export class Orchestrator {
     }
     
     // ═══════════════════════════════════════════════════════════════
-    // EJECUTAR TRANSACTIONAL TOOLS (Gmail/Calendar)
+    // TRANSACTIONAL TOOLS ELIMINADOS (Google Gmail/Calendar)
+    // ═══════════════════════════════════════════════════════════════
+    // MIGRACIÓN P0: Todo reemplazado por Email manual + Calendar interno + Telegram
+    // Ver nuevos endpoints:
+    //   - /api/email/* (SMTP/IMAP manual)
+    //   - /api/calendar/* (calendario interno)
+    //   - /api/telegram/* (bot por usuario)
     // ═══════════════════════════════════════════════════════════════
     
     if (intent.intent_type === 'transactional') {
-      console.log('[ORCH] 🔴 Intent: TRANSACTIONAL - Tools:', intent.tools_required.join(', '));
+      console.log('[ORCH] 🔴 Intent: TRANSACTIONAL - DEPRECADO (Google eliminado)');
+      
+      return {
+        toolUsed: 'none',
+        toolReason: 'Google services removed - use new email/calendar/telegram endpoints',
+        toolResult: `⚠️ Gmail y Google Calendar han sido reemplazados.
+
+Ahora uso:
+✅ Email manual (SMTP/IMAP) - Configura tu cuenta en perfil
+✅ Calendario interno de AL-E
+✅ Telegram para notificaciones
+
+Por favor, configura tu cuenta de email en tu perfil para poder enviar correos.`,
+        toolFailed: true,
+        toolError: 'GOOGLE_SERVICES_REMOVED'
+      };
+      
+      /* CÓDIGO COMENTADO - GMAIL/CALENDAR ELIMINADO
       
       // CRÍTICO: Usar action parser para extraer parámetros
       const { detectActionIntent } = await import('../services/actionParser');
@@ -602,6 +625,8 @@ ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
         toolFailed: !anySuccess,
         toolError: anySuccess ? undefined : 'ALL_ACTIONS_FAILED'
       };
+      
+      FIN CÓDIGO COMENTADO - GMAIL/CALENDAR ELIMINADO */
     }
     
     // ═══════════════════════════════════════════════════════════════

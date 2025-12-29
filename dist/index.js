@@ -14,8 +14,12 @@ const sessions_1 = require("./api/sessions");
 const memory_1 = __importDefault(require("./api/memory")); // Memoria explícita
 const profile_1 = __importDefault(require("./api/profile")); // Personalización de usuario
 const health_1 = __importDefault(require("./api/health")); // Health checks
-const oauth_1 = __importDefault(require("./api/oauth")); // P0: OAuth callbacks (Google)
+const email_1 = __importDefault(require("./api/email")); // Email accounts (SMTP/IMAP manual)
+const mail_1 = __importDefault(require("./api/mail")); // Mail send/inbox
+const calendar_1 = __importDefault(require("./api/calendar")); // Calendario interno
+const telegram_1 = __importDefault(require("./api/telegram")); // Telegram bot por usuario
 const documentText_1 = require("./utils/documentText");
+const notificationWorker_1 = require("./workers/notificationWorker");
 const app = (0, express_1.default)();
 // Configurar multer para subida de archivos en memoria
 const upload = (0, multer_1.default)({
@@ -172,7 +176,10 @@ app.use("/api/voice", voice_1.voiceRouter);
 app.use("/api/sessions", sessions_1.sessionsRouter);
 app.use("/api/memory", memory_1.default); // Memoria explícita (acuerdos/decisiones/hechos)
 app.use("/api/profile", profile_1.default); // Personalización de usuario
-app.use("/api/auth", oauth_1.default); // P0: OAuth callbacks (Google Gmail/Calendar)
+app.use("/api/email", email_1.default); // Email accounts (SMTP/IMAP manual)
+app.use("/api/mail", mail_1.default); // Mail send/inbox
+app.use("/api/calendar", calendar_1.default); // Calendario interno
+app.use("/api/telegram", telegram_1.default); // Telegram bot por usuario
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
@@ -181,7 +188,10 @@ console.log("[DEBUG] voiceRouter montado en /api/voice");
 console.log("[DEBUG] sessionsRouter montado en /api/sessions");
 console.log("[DEBUG] memoryRouter montado en /api/memory");
 console.log("[DEBUG] profileRouter montado en /api/profile");
-console.log("[DEBUG] oauthRouter (P0) montado en /api/auth");
+console.log("[DEBUG] emailRouter montado en /api/email");
+console.log("[DEBUG] mailRouter montado en /api/mail");
+console.log("[DEBUG] calendarRouter montado en /api/calendar");
+console.log("[DEBUG] telegramRouter montado en /api/telegram");
 const PORT = env_1.env.port || 4000;
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`[AL-E CORE] Servidor iniciado en puerto ${PORT}`);
@@ -189,4 +199,7 @@ app.listen(PORT, "0.0.0.0", () => {
     console.log("[AL-E CORE] Servidor iniciado en:", "0.0.0.0", "puerto:", PORT);
     console.log("[AL-E CORE] URL base:", process.env.ALE_CORE_URL || "localhost");
     console.log(`AL-E Core listening on port ${PORT}`);
+    // Iniciar notification worker
+    console.log('[AL-E CORE] Iniciando notification worker...');
+    (0, notificationWorker_1.startNotificationWorker)();
 });

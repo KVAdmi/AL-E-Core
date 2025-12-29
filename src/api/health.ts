@@ -72,6 +72,90 @@ router.get('/ai', async (req, res) => {
 });
 
 /**
+ * GET /_health/full
+ * 
+ * Health check completo incluyendo DB, SMTP, Telegram, OCR
+ */
+router.get('/full', async (req, res) => {
+  try {
+    const status: any = {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      memory: {
+        used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024)
+      }
+    };
+    
+    // Test DB
+    try {
+      const { supabase } = await import('../db/supabase');
+      const { data, error } = await supabase
+        .from('email_accounts')
+        .select('id')
+        .limit(1);
+      
+      status.db_ok = !error;
+      if (error) status.db_error = error.message;
+    } catch (err: any) {
+      status.db_ok = false;
+      status.db_error = err.message;
+    }
+    
+    // Feature flags
+    status.features = {
+      google: env.enableGoogle,
+      ocr: env.enableOcr,
+      telegram: env.enableTelegram,
+      imap: env.enableImap
+    };
+    
+    // SMTP test (si hay al menos una cuenta configurada)
+    try {
+      const { supabase } = await import('../db/supabase');
+      const { data: accounts } = await supabase
+        .from('email_accounts')
+        .select('id')
+        .eq('is_active', true)
+        .limit(1);
+      
+      status.smtp_configured = (accounts && accounts.length > 0);
+    } catch (err) {
+      status.smtp_configured = false;
+    }
+    
+    // Telegram test (si hay al menos un bot configurado)
+    try {
+      const { supabase } = await import('../db/supabase');
+      const { data: bots } = await supabase
+        .from('telegram_bots')
+        .select('id')
+        .eq('is_active', true)
+        .limit(1);
+      
+      status.telegram_configured = (bots && bots.length > 0);
+    } catch (err) {
+      status.telegram_configured = false;
+    }
+    
+    // OCR (verificar si está habilitado)
+    status.ocr_ok = env.enableOcr;
+    
+    // Encryption key
+    status.encryption_key_set = !!process.env.ENCRYPTION_KEY;
+    
+    res.json(status);
+  } catch (error: any) {
+    console.error('[HEALTH] Error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message || 'Health check failed'
+    });
+  }
+});
+
+/**
  * GET /_health/ping
  * 
  * Simple ping para verificar que el servidor está vivo
