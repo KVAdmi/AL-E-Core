@@ -139,7 +139,7 @@ router.get('/full', async (req, res) => {
     
     const requiredEnv = [
       'SUPABASE_URL',
-      'SUPABASE_SERVICE_KEY',
+      'SUPABASE_SERVICE_ROLE_KEY',  // Nombre correcto de la variable
       'ENCRYPTION_KEY',
       'GROQ_API_KEY'
     ];
