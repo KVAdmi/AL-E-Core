@@ -16,6 +16,132 @@ interface ToolExecutionResult {
   toolError?: string;
 }
 
+interface EventInfo {
+  title: string | null;
+  description: string | null;
+  location: string | null;
+  startDate: Date | null;
+  endDate: Date | null;
+}
+
+/**
+ * Extrae información del evento del mensaje del usuario
+ */
+function extractEventInfo(userMessage: string): EventInfo {
+  const lowerMsg = userMessage.toLowerCase();
+  
+  // Extraer título (después de "agendar/crear/etc" y antes de fecha/hora)
+  let title: string | null = null;
+  const titleMatches = userMessage.match(/\b(?:agenda|agendar|crea|crear|pon|poner)\s+(?:una?\s+)?(?:cita|reunión|reunion|evento|llamada)?\s+(?:con|para|de|sobre|el)?\s+([^,.?!]+?)(?:\s+(?:para|el|a|en)\s+)/i);
+  if (titleMatches && titleMatches[1]) {
+    title = titleMatches[1].trim();
+  } else {
+    // Fallback: buscar cualquier texto descriptivo
+    const fallbackMatch = userMessage.match(/\b(?:cita|reunión|reunion|evento|llamada)\s+(?:con|para|de|sobre|el)?\s+([^,.?!0-9]+)/i);
+    if (fallbackMatch && fallbackMatch[1]) {
+      title = fallbackMatch[1].trim();
+    }
+  }
+  
+  // Extraer ubicación (después de "en el/la")
+  let location: string | null = null;
+  const locationMatch = userMessage.match(/\b(?:en|ubicación|lugar)\s+(?:el|la|los)?\s*([^,.?!0-9]+?)(?:\s+(?:a|para|el|,|\?|$))/i);
+  if (locationMatch && locationMatch[1]) {
+    location = locationMatch[1].trim();
+  }
+  
+  // Extraer fecha y hora
+  const { startDate, endDate } = extractDateTime(userMessage);
+  
+  return {
+    title,
+    description: title, // Por ahora usamos el mismo título como descripción
+    location,
+    startDate,
+    endDate
+  };
+}
+
+/**
+ * Extrae fecha y hora del mensaje
+ */
+function extractDateTime(userMessage: string): { startDate: Date | null; endDate: Date | null } {
+  const lowerMsg = userMessage.toLowerCase();
+  const now = new Date();
+  
+  // Obtener fecha base
+  let targetDate = new Date(now);
+  
+  // Días de la semana
+  const dayPatterns: { [key: string]: number } = {
+    'lunes': 1,
+    'martes': 2,
+    'miércoles': 3,
+    'miercoles': 3,
+    'jueves': 4,
+    'viernes': 5,
+    'sábado': 6,
+    'sabado': 6,
+    'domingo': 0
+  };
+  
+  // Detectar día de la semana
+  for (const [dayName, dayNum] of Object.entries(dayPatterns)) {
+    if (lowerMsg.includes(dayName)) {
+      const currentDay = now.getDay();
+      let daysToAdd = dayNum - currentDay;
+      if (daysToAdd <= 0) daysToAdd += 7; // Siguiente semana si ya pasó
+      targetDate.setDate(now.getDate() + daysToAdd);
+      break;
+    }
+  }
+  
+  // Detectar "hoy", "mañana", "pasado mañana"
+  if (lowerMsg.includes('hoy')) {
+    targetDate = new Date(now);
+  } else if (lowerMsg.includes('mañana')) {
+    targetDate.setDate(now.getDate() + 1);
+  } else if (lowerMsg.includes('pasado mañana') || lowerMsg.includes('pasado manana')) {
+    targetDate.setDate(now.getDate() + 2);
+  }
+  
+  // Extraer hora
+  let hours = 9; // Default 9 AM
+  let minutes = 0;
+  
+  // Formato "1 pm", "13:00", "1:30 pm", etc.
+  const timeMatch = userMessage.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\b/i);
+  if (timeMatch) {
+    hours = parseInt(timeMatch[1]);
+    minutes = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
+    
+    // Convertir a formato 24 horas si hay am/pm
+    const meridiem = timeMatch[3]?.toLowerCase();
+    if (meridiem && meridiem.includes('pm') && hours < 12) {
+      hours += 12;
+    } else if (meridiem && meridiem.includes('am') && hours === 12) {
+      hours = 0;
+    }
+  }
+  
+  // Establecer la hora
+  targetDate.setHours(hours, minutes, 0, 0);
+  
+  // Si la fecha ya pasó hoy, agregar 7 días
+  if (targetDate < now) {
+    targetDate.setDate(targetDate.getDate() + 7);
+  }
+  
+  // End date: 1 hora después por defecto
+  const endDate = new Date(targetDate);
+  endDate.setHours(targetDate.getHours() + 1);
+  
+  return {
+    startDate: targetDate,
+    endDate
+  };
+}
+
 /**
  * Ejecuta acción transaccional según el intent
  */
@@ -194,16 +320,92 @@ Por ahora, usa el endpoint \`POST /api/mail/send\` directamente con tu cuenta co
   ) {
     console.log('[TRANSACTIONAL] Intent: CALENDAR_CREATE');
     
-    return {
-      toolUsed: 'calendar_create',
-      toolReason: 'Calendar create ready (implementation pending)',
-      toolResult: `✅ Calendario interno listo para crear eventos.
+    // Extraer información del evento usando regex
+    const eventInfo = extractEventInfo(userMessage);
+    
+    if (!eventInfo.title) {
+      return {
+        toolUsed: 'calendar_create',
+        toolReason: 'Missing event title',
+        toolResult: '⚠️ ¿Cuál es el nombre o motivo del evento que quieres agendar?',
+        toolFailed: true,
+        toolError: 'MISSING_TITLE'
+      };
+    }
+    
+    if (!eventInfo.startDate) {
+      return {
+        toolUsed: 'calendar_create',
+        toolReason: 'Missing event date',
+        toolResult: '⚠️ ¿Para qué fecha y hora quieres agendar el evento?',
+        toolFailed: true,
+        toolError: 'MISSING_DATE'
+      };
+    }
+    
+    try {
+      // Crear evento en la base de datos
+      const { data: newEvent, error } = await supabase
+        .from('calendar_events')
+        .insert({
+          owner_user_id: userId,
+          title: eventInfo.title,
+          description: eventInfo.description || '',
+          location: eventInfo.location || '',
+          start_at: eventInfo.startDate.toISOString(),
+          end_at: eventInfo.endDate.toISOString(),
+          timezone: 'America/Mexico_City',
+          status: 'scheduled',
+          notification_minutes: 60, // 1 hora antes
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('[TRANSACTIONAL] Error creating event:', error);
+        return {
+          toolUsed: 'calendar_create',
+          toolReason: 'Database error',
+          toolResult: `❌ Error al crear el evento: ${error.message}`,
+          toolFailed: true,
+          toolError: error.message
+        };
+      }
+      
+      const formattedDate = eventInfo.startDate.toLocaleString('es-MX', {
+        timeZone: 'America/Mexico_City',
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      
+      return {
+        toolUsed: 'calendar_create',
+        toolReason: 'Event created successfully',
+        toolResult: `✅ **Evento agendado exitosamente:**
 
-⚠️ La creación automática de eventos está lista pero aún no implementada en el orchestrator.
+📅 **${eventInfo.title}**
+🕐 ${formattedDate}${eventInfo.location ? `\n📍 ${eventInfo.location}` : ''}
 
-Por ahora, usa el endpoint \`POST /api/calendar/events\` directamente con los detalles del evento.`,
-      toolFailed: false
-    };
+🔔 Recibirás una notificación 1 hora antes.`,
+        toolFailed: false
+      };
+      
+    } catch (error: any) {
+      console.error('[TRANSACTIONAL] Error creating calendar event:', error);
+      return {
+        toolUsed: 'calendar_create',
+        toolReason: 'Unexpected error',
+        toolResult: `❌ Error inesperado al crear el evento: ${error.message}`,
+        toolFailed: true,
+        toolError: error.message
+      };
+    }
   }
   
   // ═══════════════════════════════════════════════════════════════

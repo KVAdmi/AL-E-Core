@@ -951,5 +951,674 @@ router.patch('/message/:accountId/:messageUid/read', async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════
+// GET /api/mail/folders/:accountId - Listar carpetas IMAP
+// ═══════════════════════════════════════════════════════════════
+
+router.get('/folders/:accountId', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const ownerUserId = req.query.ownerUserId as string;
+    
+    if (!ownerUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_OWNER_USER_ID'
+      });
+    }
+    
+    // Leer folders de la DB
+    const { data: folders, error } = await supabase
+      .from('email_folders')
+      .select('*')
+      .eq('account_id', accountId)
+      .eq('owner_user_id', ownerUserId)
+      .order('sort_order', { ascending: true });
+    
+    if (error) {
+      console.error('[MAIL] Error fetching folders:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'DATABASE_ERROR',
+        message: error.message
+      });
+    }
+    
+    return res.json({
+      success: true,
+      folders: folders || []
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL] Error in GET /folders:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'INTERNAL_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// POST /api/mail/folders - Crear carpeta personalizada
+// ═══════════════════════════════════════════════════════════════
+
+router.post('/folders', async (req, res) => {
+  try {
+    const { accountId, ownerUserId, folderName, imapPath, icon, color } = req.body;
+    
+    if (!accountId || !ownerUserId || !folderName || !imapPath) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_REQUIRED_FIELDS'
+      });
+    }
+    
+    const { data: newFolder, error } = await supabase
+      .from('email_folders')
+      .insert({
+        account_id: accountId,
+        owner_user_id: ownerUserId,
+        folder_name: folderName,
+        folder_type: 'custom',
+        imap_path: imapPath,
+        icon: icon || 'folder',
+        color: color || null,
+        sort_order: 100
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('[MAIL] Error creating folder:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'DATABASE_ERROR',
+        message: error.message
+      });
+    }
+    
+    return res.json({
+      success: true,
+      folder: newFolder
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL] Error in POST /folders:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'INTERNAL_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// GET /api/mail/drafts - Listar borradores
+// ═══════════════════════════════════════════════════════════════
+
+router.get('/drafts', async (req, res) => {
+  try {
+    const { accountId, ownerUserId } = req.query;
+    
+    if (!ownerUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_OWNER_USER_ID'
+      });
+    }
+    
+    let query = supabase
+      .from('email_drafts')
+      .select('*')
+      .eq('owner_user_id', ownerUserId as string)
+      .order('updated_at', { ascending: false });
+    
+    if (accountId) {
+      query = query.eq('account_id', accountId as string);
+    }
+    
+    const { data: drafts, error } = await query;
+    
+    if (error) {
+      console.error('[MAIL] Error fetching drafts:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'DATABASE_ERROR',
+        message: error.message
+      });
+    }
+    
+    return res.json({
+      success: true,
+      drafts: drafts || []
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL] Error in GET /drafts:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'INTERNAL_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// POST /api/mail/drafts - Crear borrador
+// ═══════════════════════════════════════════════════════════════
+
+router.post('/drafts', async (req, res) => {
+  try {
+    const {
+      accountId,
+      ownerUserId,
+      toAddresses,
+      ccAddresses,
+      bccAddresses,
+      subject,
+      bodyText,
+      bodyHtml,
+      inReplyTo,
+      references,
+      isScheduled,
+      scheduledFor
+    } = req.body;
+    
+    if (!accountId || !ownerUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_REQUIRED_FIELDS'
+      });
+    }
+    
+    const { data: newDraft, error } = await supabase
+      .from('email_drafts')
+      .insert({
+        account_id: accountId,
+        owner_user_id: ownerUserId,
+        to_addresses: toAddresses || [],
+        cc_addresses: ccAddresses || [],
+        bcc_addresses: bccAddresses || [],
+        subject: subject || '',
+        body_text: bodyText || '',
+        body_html: bodyHtml || '',
+        in_reply_to: inReplyTo || null,
+        references: references || [],
+        is_scheduled: isScheduled || false,
+        scheduled_for: scheduledFor || null
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('[MAIL] Error creating draft:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'DATABASE_ERROR',
+        message: error.message
+      });
+    }
+    
+    return res.json({
+      success: true,
+      draft: newDraft
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL] Error in POST /drafts:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'INTERNAL_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// PATCH /api/mail/drafts/:id - Actualizar borrador
+// ═══════════════════════════════════════════════════════════════
+
+router.patch('/drafts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ownerUserId, ...updates } = req.body;
+    
+    if (!ownerUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_OWNER_USER_ID'
+      });
+    }
+    
+    const { data: updatedDraft, error } = await supabase
+      .from('email_drafts')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .eq('owner_user_id', ownerUserId)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('[MAIL] Error updating draft:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'DATABASE_ERROR',
+        message: error.message
+      });
+    }
+    
+    return res.json({
+      success: true,
+      draft: updatedDraft
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL] Error in PATCH /drafts/:id:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'INTERNAL_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// DELETE /api/mail/drafts/:id - Eliminar borrador
+// ═══════════════════════════════════════════════════════════════
+
+router.delete('/drafts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ownerUserId } = req.query;
+    
+    if (!ownerUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_OWNER_USER_ID'
+      });
+    }
+    
+    const { error } = await supabase
+      .from('email_drafts')
+      .delete()
+      .eq('id', id)
+      .eq('owner_user_id', ownerUserId as string);
+    
+    if (error) {
+      console.error('[MAIL] Error deleting draft:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'DATABASE_ERROR',
+        message: error.message
+      });
+    }
+    
+    return res.json({
+      success: true,
+      message: 'Draft deleted successfully'
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL] Error in DELETE /drafts/:id:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'INTERNAL_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// POST /api/mail/drafts/:id/send - Enviar borrador
+// ═══════════════════════════════════════════════════════════════
+
+router.post('/drafts/:id/send', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ownerUserId } = req.body;
+    
+    if (!ownerUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_OWNER_USER_ID'
+      });
+    }
+    
+    // Obtener el borrador
+    const { data: draft, error: draftError } = await supabase
+      .from('email_drafts')
+      .select('*')
+      .eq('id', id)
+      .eq('owner_user_id', ownerUserId)
+      .single();
+    
+    if (draftError || !draft) {
+      return res.status(404).json({
+        success: false,
+        error: 'DRAFT_NOT_FOUND'
+      });
+    }
+    
+    // Obtener la cuenta de email
+    const { data: account, error: accountError } = await supabase
+      .from('email_accounts')
+      .select('*')
+      .eq('id', draft.account_id)
+      .single();
+    
+    if (accountError || !account) {
+      return res.status(404).json({
+        success: false,
+        error: 'ACCOUNT_NOT_FOUND'
+      });
+    }
+    
+    // Desencriptar contraseña SMTP
+    const smtpPass = decrypt(account.smtp_pass_enc);
+    
+    // Crear transporter de nodemailer
+    const transporter = nodemailer.createTransport({
+      host: account.smtp_host,
+      port: account.smtp_port,
+      secure: account.smtp_port === 465,
+      auth: {
+        user: account.smtp_user,
+        pass: smtpPass
+      }
+    });
+    
+    // Enviar email
+    const mailOptions: any = {
+      from: `"${account.from_name}" <${account.from_email}>`,
+      to: draft.to_addresses.join(', '),
+      subject: draft.subject,
+      text: draft.body_text,
+      html: draft.body_html || draft.body_text
+    };
+    
+    if (draft.cc_addresses && draft.cc_addresses.length > 0) {
+      mailOptions.cc = draft.cc_addresses.join(', ');
+    }
+    
+    if (draft.bcc_addresses && draft.bcc_addresses.length > 0) {
+      mailOptions.bcc = draft.bcc_addresses.join(', ');
+    }
+    
+    if (draft.in_reply_to) {
+      mailOptions.inReplyTo = draft.in_reply_to;
+    }
+    
+    if (draft.references && draft.references.length > 0) {
+      mailOptions.references = draft.references.join(' ');
+    }
+    
+    const info = await transporter.sendMail(mailOptions);
+    
+    console.log('[MAIL] ✓ Email enviado:', info.messageId);
+    
+    // Guardar en mail_messages (como "sent")
+    await supabase
+      .from('mail_messages')
+      .insert({
+        account_id: draft.account_id,
+        owner_user_id: ownerUserId,
+        to_email: draft.to_addresses[0],
+        subject: draft.subject,
+        body_text: draft.body_text,
+        body_html: draft.body_html,
+        status: 'sent',
+        sent_at: new Date().toISOString()
+      });
+    
+    // Eliminar el borrador
+    await supabase
+      .from('email_drafts')
+      .delete()
+      .eq('id', id);
+    
+    return res.json({
+      success: true,
+      messageId: info.messageId,
+      message: 'Email sent successfully'
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL] Error sending draft:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'SEND_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// POST /api/mail/attachments/upload - Subir attachment a Supabase Storage
+// ═══════════════════════════════════════════════════════════════
+
+import multer from 'multer';
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } }); // 25MB max
+
+router.post('/attachments/upload', upload.single('file'), async (req, res) => {
+  try {
+    const { ownerUserId, messageId, draftId } = req.body;
+    const file = req.file;
+    
+    if (!ownerUserId || !file) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_REQUIRED_FIELDS'
+      });
+    }
+    
+    if (!messageId && !draftId) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_MESSAGE_OR_DRAFT_ID'
+      });
+    }
+    
+    // Subir a Supabase Storage
+    const fileName = `${ownerUserId}/${Date.now()}_${file.originalname}`;
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('email-attachments')
+      .upload(fileName, file.buffer, {
+        contentType: file.mimetype,
+        cacheControl: '3600',
+        upsert: false
+      });
+    
+    if (uploadError) {
+      console.error('[MAIL] Error uploading to storage:', uploadError);
+      return res.status(500).json({
+        success: false,
+        error: 'STORAGE_ERROR',
+        message: uploadError.message
+      });
+    }
+    
+    // Obtener URL pública (firmada por 1 año)
+    const { data: urlData } = await supabase.storage
+      .from('email-attachments')
+      .createSignedUrl(fileName, 365 * 24 * 60 * 60); // 1 año
+    
+    // Guardar registro en email_attachments
+    const { data: attachment, error: dbError } = await supabase
+      .from('email_attachments')
+      .insert({
+        message_id: messageId || null,
+        draft_id: draftId || null,
+        owner_user_id: ownerUserId,
+        filename: file.originalname,
+        content_type: file.mimetype,
+        size_bytes: file.size,
+        storage_path: fileName,
+        download_url: urlData?.signedUrl || null
+      })
+      .select()
+      .single();
+    
+    if (dbError) {
+      console.error('[MAIL] Error saving attachment metadata:', dbError);
+      return res.status(500).json({
+        success: false,
+        error: 'DATABASE_ERROR',
+        message: dbError.message
+      });
+    }
+    
+    return res.json({
+      success: true,
+      attachment
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL] Error in POST /attachments/upload:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'INTERNAL_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// GET /api/mail/attachments/:id/download - Descargar attachment
+// ═══════════════════════════════════════════════════════════════
+
+router.get('/attachments/:id/download', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ownerUserId } = req.query;
+    
+    if (!ownerUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_OWNER_USER_ID'
+      });
+    }
+    
+    // Obtener attachment metadata
+    const { data: attachment, error: dbError } = await supabase
+      .from('email_attachments')
+      .select('*')
+      .eq('id', id)
+      .eq('owner_user_id', ownerUserId as string)
+      .single();
+    
+    if (dbError || !attachment) {
+      return res.status(404).json({
+        success: false,
+        error: 'ATTACHMENT_NOT_FOUND'
+      });
+    }
+    
+    // Obtener archivo de Supabase Storage
+    const { data: fileData, error: storageError } = await supabase.storage
+      .from('email-attachments')
+      .download(attachment.storage_path);
+    
+    if (storageError) {
+      console.error('[MAIL] Error downloading from storage:', storageError);
+      return res.status(500).json({
+        success: false,
+        error: 'STORAGE_ERROR',
+        message: storageError.message
+      });
+    }
+    
+    // Convertir Blob a Buffer
+    const buffer = Buffer.from(await fileData.arrayBuffer());
+    
+    // Enviar archivo
+    res.setHeader('Content-Type', attachment.content_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${attachment.filename}"`);
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
+    
+  } catch (error: any) {
+    console.error('[MAIL] Error in GET /attachments/:id/download:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'INTERNAL_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// DELETE /api/mail/attachments/:id - Eliminar attachment
+// ═══════════════════════════════════════════════════════════════
+
+router.delete('/attachments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ownerUserId } = req.query;
+    
+    if (!ownerUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_OWNER_USER_ID'
+      });
+    }
+    
+    // Obtener attachment metadata
+    const { data: attachment, error: dbError } = await supabase
+      .from('email_attachments')
+      .select('*')
+      .eq('id', id)
+      .eq('owner_user_id', ownerUserId as string)
+      .single();
+    
+    if (dbError || !attachment) {
+      return res.status(404).json({
+        success: false,
+        error: 'ATTACHMENT_NOT_FOUND'
+      });
+    }
+    
+    // Eliminar de Supabase Storage
+    const { error: storageError } = await supabase.storage
+      .from('email-attachments')
+      .remove([attachment.storage_path]);
+    
+    if (storageError) {
+      console.error('[MAIL] Error deleting from storage:', storageError);
+    }
+    
+    // Eliminar registro de DB
+    const { error: deleteError } = await supabase
+      .from('email_attachments')
+      .delete()
+      .eq('id', id);
+    
+    if (deleteError) {
+      console.error('[MAIL] Error deleting attachment metadata:', deleteError);
+      return res.status(500).json({
+        success: false,
+        error: 'DATABASE_ERROR',
+        message: deleteError.message
+      });
+    }
+    
+    return res.json({
+      success: true,
+      message: 'Attachment deleted successfully'
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL] Error in DELETE /attachments/:id:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'INTERNAL_ERROR',
+      message: error.message
+    });
+  }
+});
+
 export default router;
 
