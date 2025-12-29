@@ -64,24 +64,17 @@ const VERIFICATION_PATTERNS = {
 // ═══════════════════════════════════════════════════════════════
 // PATTERNS DE ACCIONES TRANSACCIONALES
 // ═══════════════════════════════════════════════════════════════
+// P0: Detectores SIMPLES - El transactionalExecutor maneja los regexes específicos
 
 const TRANSACTIONAL_PATTERNS = {
-  // Gmail - Lectura: TODO lenguaje natural para revisar correos
-  gmail_read: /\b(revisa|revisar|checa|checka|échale|echale|check|ve|ver|vete a|mira|mirar|échale un ojo|echale un ojo|consulta|consultame|busca|buscame|lee|leer|último|ultima|recibí|recibi|llegó|llego|tengo|tienes?|hay|habrá|habra|muestra|mostrar|muéstrame|muestrame|trae|traeme|dame|dime|ve a|ayudame a ver|ayúdame a ver|puedes ir|puedes ver|favor|pls|plz|porfavor|por favor)\b.{0,100}\b(correo|email|emails|gmail|mail|mails|inbox|bandeja|mensajes?|mensaje)\b|\b(correo|email|gmail|mail|inbox|bandeja|mensajes?)\b.{0,100}\b(revisa|revisar|checa|checka|ve|ver|mira|último|ultima|recibí|recibi|llegó|llego|hay|tengo|dame|dime|trae)\b/i,
+  // Email (cualquier acción relacionada con correo)
+  email_action: /\b(correo|email|emails|gmail|mail|mails|inbox|bandeja|mensaje|mensajes|smtp|imap)\b/i,
   
-  // Gmail - Envío: TODO lenguaje natural para enviar correos
-  gmail_send: /\b(envía|enviá|enviar|manda|mandá|mandar|mandame|mándame|send|escribe|escribí|escribir|redacta|redactá|responde|respondé|responder|contesta|contestá|contestar|dispara|disparar|comunícate|comunicate|contacta|contactá|avísale|avisale|dile)\b.{0,80}\b(correo|email|mensaje|mail|un email|un correo|un mail|un mensaje)\b|\b(correo|email|mail|mensaje)\b.{0,50}\b(a|para|al|pa)\b/i,
+  // Calendar (cualquier acción relacionada con agenda/eventos)
+  calendar_action: /\b(agenda|calendario|calendar|cita|citas|evento|eventos|meet|meets|meeting|meetings|junta|juntas|reunión|reunion|reuniones|videollamada|video call|llamada)\b/i,
   
-  // Calendar - Lectura: TODO lenguaje natural para ver agenda
-  calendar_read: /\b(revisa|revisá|revisar|checa|checá|checka|ve|vé|ver|mira|mirá|mirar|échale|échale un ojo|echale un ojo|consulta|consultá|consultame|muestra|mostrá|mostrar|muéstrame|muestrame|dame|dime|trae|traeme|qué tengo|que tengo|qué hay|que hay)\b.{0,100}\b(agenda|calendario|calendar|citas?|eventos?|pendientes?|compromisos?|juntas?|reuniones?|meets?|meetings?)\b|\b(agenda|calendario|citas?|eventos?|juntas?|reuniones?)\b.{0,80}\b(revisa|checa|ve|mira|tengo|tienes?|hay|dame|dime|trae|hoy|mañana|semana|mes)\b/i,
-  
-  // Calendar - Creación: TODO lenguaje natural para crear eventos
-  // P0 FIX: MEGA EXPANSIÓN - "meet", "ayudame", "porfavor", "flaca", etc.
-  calendar_create: /\b(agenda|agendá|agendar|agendame|pon|poné|poner|ponme|crea|creá|crear|creame|añade|añadí|añadir|añademe|agrega|agregá|agregar|agregame|apunta|apuntá|apuntar|apuntame|programa|programá|programar|programame|separa|separá|separar|sepárame|reserva|reservá|reservar|reservame|book|schedule|ayúdame|ayudame|ayúdame a|ayudame a|me ayudas|me ayudás|puedes|podés|por favor|porfavor|porfa|pls|plz|favor de|necesito|quiero|quisiera)\b.{0,150}\b(cita|evento|meet|meeting|junta|juntar|reunión|reunion|videollamada|video|call|llamada|sesión|sesion|compromiso|pendiente|agendar|crear|poner)\b|\b(cita|evento|meet|meeting|junta|reunión|reunion|videollamada|call)\b.{0,100}\b(con|para|al|a|el|este|próximo|proximo|siguiente|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo|mañana|hoy|pasado)\b/i,
-  
-  // Detectores genéricos (cualquier mención)
-  has_gmail_action: /\b(correo|email|emails|gmail|mail|mails|inbox|bandeja|mensaje|mensajes)\b/i,
-  has_calendar_action: /\b(agenda|agendá|calendario|calendar|cita|citas|evento|eventos|meet|meets|meeting|meetings|junta|juntas|reunión|reunion|reuniones|videollamada|video call)\b/i
+  // Telegram (cualquier acción relacionada con Telegram)
+  telegram_action: /\b(telegram|telegrama|bot|notifica|notificar|avisa|avisar)\b/i
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -185,29 +178,24 @@ export function classifyIntent(message: string): IntentClassification {
   }
   
   // ═══════════════════════════════════════════════════════════════
-  // SCORE: Transactional (Gmail/Calendar)
+  // SCORE: Transactional (Email/Calendar/Telegram)
   // ═══════════════════════════════════════════════════════════════
   
   let transactionalScore = 0;
   
-  if (TRANSACTIONAL_PATTERNS.gmail_read.test(lowerMsg)) {
+  if (TRANSACTIONAL_PATTERNS.email_action.test(lowerMsg)) {
     transactionalScore += 10; // MÁXIMA PRIORIDAD
-    reasoning.push('🔴 Lectura de Gmail detectada');
+    reasoning.push('🔴 Acción de Email detectada');
   }
   
-  if (TRANSACTIONAL_PATTERNS.gmail_send.test(lowerMsg)) {
+  if (TRANSACTIONAL_PATTERNS.calendar_action.test(lowerMsg)) {
     transactionalScore += 10; // MÁXIMA PRIORIDAD
-    reasoning.push('🔴 Envío de Gmail detectado');
+    reasoning.push('🔴 Acción de Calendario detectada');
   }
   
-  if (TRANSACTIONAL_PATTERNS.calendar_read.test(lowerMsg)) {
+  if (TRANSACTIONAL_PATTERNS.telegram_action.test(lowerMsg)) {
     transactionalScore += 10; // MÁXIMA PRIORIDAD
-    reasoning.push('🔴 Lectura de Calendar detectada');
-  }
-  
-  if (TRANSACTIONAL_PATTERNS.calendar_create.test(lowerMsg)) {
-    transactionalScore += 10; // MÁXIMA PRIORIDAD
-    reasoning.push('🔴 Creación de Calendar detectada');
+    reasoning.push('🔴 Acción de Telegram detectada');
   }
   
   // ═══════════════════════════════════════════════════════════════
@@ -250,27 +238,24 @@ export function classifyIntent(message: string): IntentClassification {
   let fallback_strategy: IntentClassification['fallback_strategy'];
   let confidence: number;
   
-  // PRIORIDAD 1: Transactional (Gmail/Calendar) - SIEMPRE gana
+  // PRIORIDAD 1: Transactional (Email/Calendar/Telegram) - SIEMPRE gana
   if (transactionalScore >= 10) {
     intent_type = 'transactional';
     
-    // Determinar herramientas específicas
-    if (TRANSACTIONAL_PATTERNS.gmail_read.test(lowerMsg)) {
-      tools_required.push('gmail_read');
+    // Determinar herramientas específicas (genéricas - el executor maneja detalles)
+    if (TRANSACTIONAL_PATTERNS.email_action.test(lowerMsg)) {
+      tools_required.push('email');
     }
-    if (TRANSACTIONAL_PATTERNS.gmail_send.test(lowerMsg)) {
-      tools_required.push('gmail_send');
+    if (TRANSACTIONAL_PATTERNS.calendar_action.test(lowerMsg)) {
+      tools_required.push('calendar');
     }
-    if (TRANSACTIONAL_PATTERNS.calendar_read.test(lowerMsg)) {
-      tools_required.push('calendar_read');
-    }
-    if (TRANSACTIONAL_PATTERNS.calendar_create.test(lowerMsg)) {
-      tools_required.push('calendar_create');
+    if (TRANSACTIONAL_PATTERNS.telegram_action.test(lowerMsg)) {
+      tools_required.push('telegram');
     }
     
     fallback_strategy = 'none'; // Sin fallback - DEBE ejecutar o rechazar
     confidence = 1.0; // Máxima confianza en detección
-    reasoning.push('→ Intent: TRANSACTIONAL (Gmail/Calendar action detected)');
+    reasoning.push('→ Intent: TRANSACTIONAL (Email/Calendar/Telegram action detected)');
     
   } else if (verificationScore >= 4) {
     // PRIORIDAD 2: VERIFICACIÓN EXPLÍCITA

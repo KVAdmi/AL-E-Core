@@ -274,6 +274,368 @@ Configura al menos una integración para continuar.`,
       const { executeTransactionalAction } = await import('../services/transactionalExecutor');
       return await executeTransactionalAction(userMessage, userId, intent, integrations);
       
+      /* CÓDIGO COMENTADO - GMAIL/CALENDAR ELIMINADO
+      
+      // CRÍTICO: Usar action parser para extraer parámetros
+      const { detectActionIntent } = await import('../services/actionParser');
+      const actionIntent = detectActionIntent(userMessage);
+      
+      console.log(`[ORCH] 📋 Action Parser - Confidence: ${actionIntent.confidence}, Actions: ${actionIntent.actions.length}`);
+      
+      if (actionIntent.confidence < 0.6) {
+        // Confianza baja - falta info crítica
+        return {
+          toolUsed: 'none',
+          toolReason: 'Insufficient parameters for action execution',
+          toolResult: `Para ejecutar esta acción necesito más información:
+- Fecha específica (ej: "lunes", "mañana", "15 de enero")
+- Hora (ej: "a las 12", "15:30")
+
+¿Puedes darme más detalles?`,
+          toolFailed: true,
+          toolError: 'MISSING_PARAMETERS'
+        };
+      }
+      
+      // EJECUTAR ACCIONES (sin preguntar)
+      const results: string[] = [];
+      let anySuccess = false;
+      
+      for (const action of actionIntent.actions) {
+        if (action.action === 'check_email') {
+          const { readGmail } = await import('../services/gmailService');
+          const result = await readGmail(userId, action.query, 10);
+          
+          if (result.success) {
+            anySuccess = true;
+            
+            if (result.emails && result.emails.length > 0) {
+              const emailList = result.emails.slice(0, 3).map(e => 
+                `- De: ${e.from}\n  Asunto: ${e.subject}\n  Fecha: ${e.date}`
+              ).join('\n\n');
+              
+              // P0 FIX: Hacer el toolResult IMPERATIVO y NO IGNORABLE
+              results.push(`
+═══════════════════════════════════════════════════════════════
+⚠️ RESULTADOS DE GMAIL (DATOS REALES - OBLIGATORIO USAR) ⚠️
+═══════════════════════════════════════════════════════════════
+
+Acabas de ejecutar exitosamente Gmail API.
+Los siguientes correos fueron obtenidos DIRECTAMENTE de la cuenta del usuario:
+
+${emailList}
+
+INSTRUCCIÓN CRÍTICA:
+- Estos son los ÚNICOS correos reales en la bandeja
+- NO inventes otros correos o remitentes
+- USA EXACTAMENTE estos datos (De/Asunto/Fecha)
+- Si el usuario pregunta "qué correo me llegó", responde con ESTOS datos
+- Si ninguno coincide con lo que busca, di "No encontré ese correo entre los recientes"
+
+═══════════════════════════════════════════════════════════════
+`);
+            } else {
+              results.push(result.message);
+            }
+          } else {
+            // Error OAuth - BLOQUEO DURO: devolver inmediatamente
+            if (result.error === 'OAUTH_NOT_CONNECTED') {
+              return {
+                toolUsed: 'gmail_read',
+                toolReason: 'OAuth not connected',
+                toolResult: `
+
+⛔ BLOQUEO ABSOLUTO: OAUTH NO CONECTADO ⛔
+
+El usuario NO tiene Gmail conectado.
+
+RESPONDE EXACTAMENTE ESTO (una sola línea):
+"No tienes Gmail conectado. Ve a tu perfil y autoriza el acceso."
+
+PROHIBIDO decir:
+❌ "Revisé tu correo"
+❌ "Estoy revisando"
+❌ "Acabo de revisar"
+❌ "Déjame conectarme"
+❌ "Conectando..."
+❌ Cualquier frase afirmativa sobre acciones de Gmail
+
+ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
+`,
+                toolFailed: true,
+                toolError: 'OAUTH_NOT_CONNECTED'
+              };
+            }
+            
+            // Error OAuth - tokens NULL (existe record pero sin tokens)
+            if (result.error === 'OAUTH_TOKENS_MISSING') {
+              return {
+                toolUsed: 'gmail_read',
+                toolReason: 'OAuth tokens missing',
+                toolResult: `
+
+⛔ BLOQUEO ABSOLUTO: TOKENS OAUTH VACÍOS ⛔
+
+La integración Gmail existe pero los tokens están vacíos (NULL).
+
+RESPONDE EXACTAMENTE ESTO (una sola línea):
+"Tu Gmail está conectado pero la autenticación expiró. Desconecta y vuelve a conectar desde tu perfil."
+
+PROHIBIDO decir:
+❌ "Revisé tu correo"
+❌ "Estoy revisando"
+❌ "Acabo de revisar"
+❌ "Déjame reconectar"
+❌ Cualquier frase afirmativa sobre acciones de Gmail
+
+ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
+`,
+                toolFailed: true,
+                toolError: 'OAUTH_TOKENS_MISSING'
+              };
+            }
+            
+            results.push(`Error: ${result.message}`);
+          }
+        }
+        
+        // ACCIÓN 2: SEND_EMAIL (enviar correo)
+        if (action.action === 'send_email') {
+          const { sendGmail } = await import('../services/gmailService');
+          const result = await sendGmail(userId, action.to, action.subject, action.body);
+          
+          if (result.success) {
+            anySuccess = true;
+            results.push(`Correo enviado a ${action.to}\nAsunto: ${action.subject}`);
+          } else {
+            // Error OAuth - BLOQUEO DURO
+            if (result.error === 'OAUTH_NOT_CONNECTED') {
+              return {
+                toolUsed: 'gmail_send',
+                toolReason: 'OAuth not connected',
+                toolResult: `
+
+⛔ BLOQUEO ABSOLUTO: OAUTH NO CONECTADO ⛔
+
+El usuario NO tiene Gmail conectado.
+
+RESPONDE EXACTAMENTE ESTO (una sola línea):
+"No tienes Gmail conectado. Ve a tu perfil y autoriza el acceso."
+
+PROHIBIDO decir:
+❌ "Envié tu correo"
+❌ "Mandé el email"
+❌ "Acabo de enviar"
+❌ "Estoy enviando"
+❌ Cualquier frase afirmativa sobre envío de correos
+
+ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
+`,
+                toolFailed: true,
+                toolError: 'OAUTH_NOT_CONNECTED'
+              };
+            }
+            
+            results.push(`Error: ${result.message}`);
+          }
+        }
+        
+        // ACCIÓN 3: READ_CALENDAR (leer eventos)
+        if (action.action === 'read_calendar') {
+          const { readCalendar } = await import('../services/calendarService');
+          
+          const startDate = new Date();
+          const endDate = new Date();
+          endDate.setDate(endDate.getDate() + (action.days_ahead || 7));
+          
+          const result = await readCalendar(userId, startDate, endDate);
+          
+          if (result.success) {
+            anySuccess = true;
+            
+            if (result.events && result.events.length > 0) {
+              const eventList = result.events.map(e => {
+                const dateStr = new Date(e.start).toLocaleDateString('es-MX', {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                });
+                const meetInfo = e.meet_link ? `\n  Meet: ${e.meet_link}` : '';
+                return `- ${e.summary}\n  ${dateStr}${meetInfo}`;
+              }).join('\n\n');
+              
+              results.push(`
+═══════════════════════════════════════════════════════════════
+⚠️ EVENTOS DE CALENDAR (DATOS REALES - OBLIGATORIO USAR) ⚠️
+═══════════════════════════════════════════════════════════════
+
+Acabas de ejecutar exitosamente Calendar API.
+Los siguientes eventos fueron obtenidos DIRECTAMENTE del calendario del usuario:
+
+${eventList}
+
+INSTRUCCIÓN CRÍTICA:
+- Estos son los ÚNICOS eventos reales en el calendario
+- NO inventes otros eventos o fechas
+- USA EXACTAMENTE estos datos (Título/Fecha/Meet)
+- Si el usuario pregunta "qué tengo en mi agenda", responde con ESTOS datos
+- Si ninguno coincide con lo que busca, di "No encontré ese evento"
+
+═══════════════════════════════════════════════════════════════
+`);
+            } else {
+              results.push(result.message || 'No tienes eventos próximos.');
+            }
+          } else {
+            // Error OAuth - BLOQUEO DURO
+            if (result.error === 'OAUTH_NOT_CONNECTED') {
+              return {
+                toolUsed: 'calendar_read',
+                toolReason: 'OAuth not connected',
+                toolResult: `
+
+⛔ BLOQUEO ABSOLUTO: OAUTH NO CONECTADO ⛔
+
+El usuario NO tiene Calendar conectado.
+
+RESPONDE EXACTAMENTE ESTO (una sola línea):
+"No tienes Calendar conectado. Ve a tu perfil y autoriza el acceso."
+
+PROHIBIDO decir:
+❌ "Revisé tu agenda"
+❌ "Consulté tu calendario"
+❌ "Vi tus eventos"
+❌ "Estoy revisando"
+❌ Cualquier frase afirmativa sobre lectura de calendario
+
+ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
+`,
+                toolFailed: true,
+                toolError: 'OAUTH_NOT_CONNECTED'
+              };
+            }
+            
+            results.push(`Error: ${result.message}`);
+          }
+        }
+        
+        // ACCIÓN 4: CREATE_CALENDAR_EVENT
+        if (action.action === 'create_calendar_event') {
+          const { createCalendarEvent } = await import('../services/calendarService');
+          
+          // Construir startTime y endTime
+          const startDateTime = new Date(action.date);
+          const [hours, minutes] = action.time_start.split(':').map(Number);
+          startDateTime.setHours(hours, minutes, 0, 0);
+          
+          const endDateTime = new Date(startDateTime);
+          endDateTime.setMinutes(endDateTime.getMinutes() + action.duration_minutes);
+          
+          const result = await createCalendarEvent(
+            userId,
+            action.title,
+            startDateTime,
+            endDateTime,
+            action.description
+          );
+          
+          if (result.success) {
+            anySuccess = true;
+            
+            const dateStr = startDateTime.toLocaleDateString('es-MX', { 
+              weekday: 'long', 
+              day: 'numeric', 
+              month: 'long' 
+            });
+            const timeStr = action.time_start;
+            
+            // FIX P0: Incluir meet_link real si existe
+            const meetInfo = result.meet_link ? `\n- Google Meet: ${result.meet_link}` : '';
+            
+            // FIX P0: Formato explícito para que el LLM lo detecte
+            results.push(`
+⚠️ EVENTO CREADO EN CALENDAR (DATOS REALES - OBLIGATORIO USAR) ⚠️
+
+✅ Evento creado exitosamente:
+- Título: ${action.title}
+- Fecha: ${dateStr}
+- Hora: ${timeStr}${meetInfo}
+
+INSTRUCCIÓN: Confirma al usuario que el evento fue creado y proporciona TODOS los detalles anteriores, especialmente el link de Google Meet si existe.
+`);
+          } else {
+            // Error OAuth Calendar - BLOQUEO DURO
+            if (result.error === 'OAUTH_NOT_CONNECTED') {
+              return {
+                toolUsed: 'calendar_create',
+                toolReason: 'OAuth not connected',
+                toolResult: `
+
+⛔ BLOQUEO ABSOLUTO: OAUTH NO CONECTADO ⛔
+
+El usuario NO tiene Calendar conectado.
+
+RESPONDE EXACTAMENTE ESTO (una sola línea):
+"No tienes Calendar conectado. Ve a tu perfil y autoriza el acceso."
+
+PROHIBIDO decir:
+❌ "Agendé tu evento"
+❌ "Ya creé la reunión"
+❌ "Estoy agendando"
+❌ "Acabo de agendar"
+❌ Cualquier frase afirmativa sobre creación de eventos
+
+ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
+`,
+                toolFailed: true,
+                toolError: 'OAUTH_NOT_CONNECTED'
+              };
+            }
+            
+            // Error OAuth Calendar - tokens NULL
+            if (result.error === 'OAUTH_TOKENS_MISSING') {
+              return {
+                toolUsed: 'calendar_create',
+                toolReason: 'OAuth tokens missing',
+                toolResult: `
+
+⛔ BLOQUEO ABSOLUTO: TOKENS OAUTH VACÍOS ⛔
+
+La integración Calendar existe pero los tokens están vacíos (NULL).
+
+RESPONDE EXACTAMENTE ESTO (una sola línea):
+"Tu Calendar está conectado pero la autenticación expiró. Desconecta y vuelve a conectar desde tu perfil."
+
+PROHIBIDO decir:
+❌ "Agendé tu evento"
+❌ "Ya creé la reunión"
+❌ "Estoy agendando"
+❌ "Acabo de agendar"
+❌ Cualquier frase afirmativa sobre creación de eventos
+
+ESTE ES UN BLOQUEO DURO. NO SIMULES EJECUCIÓN.
+`,
+                toolFailed: true,
+                toolError: 'OAUTH_TOKENS_MISSING'
+              };
+            }
+            
+            results.push(`Error Calendar: ${result.message}`);
+          }
+        }
+      }
+      
+      return {
+        toolUsed: actionIntent.actions.map(a => a.action).join(','),
+        toolReason: 'Action execution completed',
+        toolResult: results.join('\n\n'),
+        toolFailed: !anySuccess,
+        toolError: anySuccess ? undefined : 'ALL_ACTIONS_FAILED'
+      };
+      
+      FIN CÓDIGO COMENTADO - GMAIL/CALENDAR ELIMINADO */
     }
     
     // ═══════════════════════════════════════════════════════════════
