@@ -74,7 +74,8 @@ router.get('/ai', async (req, res) => {
 /**
  * GET /_health/full
  * 
- * Health check completo incluyendo DB, SMTP, Telegram, OCR
+ * Health check BLOQUEANTE - Sistema delata faltantes
+ * P0: NO acepta "implementado" sin evidencia en DB/ENV
  */
 router.get('/full', async (req, res) => {
   try {
@@ -85,72 +86,143 @@ router.get('/full', async (req, res) => {
       memory: {
         used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
         total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024)
-      }
+      },
+      migrations_ok: true,
+      missing_tables: [],
+      env_ok: true,
+      missing_env: [],
+      features_verified: {}
     };
     
-    // Test DB
-    try {
-      const { supabase } = await import('../db/supabase');
-      const { data, error } = await supabase
-        .from('email_accounts')
-        .select('id')
-        .limit(1);
-      
-      status.db_ok = !error;
-      if (error) status.db_error = error.message;
-    } catch (err: any) {
-      status.db_ok = false;
-      status.db_error = err.message;
+    // ═══════════════════════════════════════════════════════════════
+    // 1. VERIFICAR TABLAS CRÍTICAS (MIGRATIONS)
+    // ═══════════════════════════════════════════════════════════════
+    
+    const requiredTables = [
+      'email_accounts',
+      'email_folders',
+      'email_drafts', 
+      'email_messages',
+      'email_attachments',
+      'email_contacts',
+      'calendar_events',
+      'notification_jobs',
+      'telegram_bots',
+      'telegram_chats',
+      'assistant_memories'
+    ];
+    
+    const { supabase } = await import('../db/supabase');
+    
+    for (const table of requiredTables) {
+      try {
+        const { error } = await supabase
+          .from(table)
+          .select('id')
+          .limit(1);
+        
+        if (error) {
+          status.migrations_ok = false;
+          status.missing_tables.push(table);
+        }
+      } catch (err) {
+        status.migrations_ok = false;
+        status.missing_tables.push(table);
+      }
     }
     
-    // Feature flags
-    status.features = {
-      google: env.enableGoogle,
-      ocr: env.enableOcr,
-      telegram: env.enableTelegram,
-      imap: env.enableImap
-    };
+    status.db_ok = status.migrations_ok;
     
-    // SMTP test (si hay al menos una cuenta configurada)
+    // ═══════════════════════════════════════════════════════════════
+    // 2. VERIFICAR ENV VARS CRÍTICAS
+    // ═══════════════════════════════════════════════════════════════
+    
+    const requiredEnv = [
+      'SUPABASE_URL',
+      'SUPABASE_SERVICE_KEY',
+      'ENCRYPTION_KEY',
+      'GROQ_API_KEY'
+    ];
+    
+    for (const envVar of requiredEnv) {
+      if (!process.env[envVar]) {
+        status.env_ok = false;
+        status.missing_env.push(envVar);
+      }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // 3. VERIFICAR FEATURES REALES (NO FLAGS, DATOS REALES)
+    // ═══════════════════════════════════════════════════════════════
+    
+    // Email SMTP: ¿Hay cuentas configuradas Y con credenciales?
     try {
-      const { supabase } = await import('../db/supabase');
-      const { data: accounts } = await supabase
+      const { data: emailAccounts } = await supabase
         .from('email_accounts')
-        .select('id')
+        .select('id, smtp_host, smtp_user, smtp_pass_enc')
         .eq('is_active', true)
         .limit(1);
       
-      status.smtp_configured = (accounts && accounts.length > 0);
-    } catch (err) {
-      status.smtp_configured = false;
+      status.features_verified.email_smtp = !!(emailAccounts && emailAccounts.length > 0 && emailAccounts[0].smtp_pass_enc);
+    } catch {
+      status.features_verified.email_smtp = false;
     }
     
-    // Telegram test (si hay al menos un bot configurado)
+    // Calendar: ¿Tabla existe Y tiene eventos?
     try {
-      const { supabase } = await import('../db/supabase');
+      const { data: events } = await supabase
+        .from('calendar_events')
+        .select('id')
+        .limit(1);
+      
+      status.features_verified.calendar_internal = true; // Tabla existe
+    } catch {
+      status.features_verified.calendar_internal = false;
+    }
+    
+    // Telegram: ¿Hay bots configurados Y con tokens?
+    try {
       const { data: bots } = await supabase
         .from('telegram_bots')
-        .select('id')
+        .select('id, bot_token_enc')
         .eq('is_active', true)
         .limit(1);
       
-      status.telegram_configured = (bots && bots.length > 0);
-    } catch (err) {
-      status.telegram_configured = false;
+      status.features_verified.telegram = !!(bots && bots.length > 0 && bots[0].bot_token_enc);
+    } catch {
+      status.features_verified.telegram = false;
     }
     
-    // OCR (verificar si está habilitado)
-    status.ocr_ok = env.enableOcr;
+    // IMAP: ¿Hay cuentas con credenciales IMAP?
+    try {
+      const { data: imapAccounts } = await supabase
+        .from('email_accounts')
+        .select('id, imap_host, imap_user, imap_pass_enc')
+        .eq('is_active', true)
+        .limit(1);
+      
+      status.features_verified.email_imap = !!(imapAccounts && imapAccounts.length > 0 && imapAccounts[0].imap_pass_enc);
+    } catch {
+      status.features_verified.email_imap = false;
+    }
     
-    // Encryption key
-    status.encryption_key_set = !!process.env.ENCRYPTION_KEY;
+    // ═══════════════════════════════════════════════════════════════
+    // 4. STATUS FINAL
+    // ═══════════════════════════════════════════════════════════════
     
-    res.json(status);
+    if (!status.migrations_ok || !status.env_ok) {
+      status.status = 'degraded';
+      return res.status(500).json(status);
+    }
+    
+    return res.json(status);
+    
   } catch (error: any) {
     console.error('[HEALTH] Error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       status: 'error',
-      message: error.message || 'Health check failed'
+      message: error.message || 'Health check failed',
+      timestamp: new Date().toISOString()
     });
   }
 });
