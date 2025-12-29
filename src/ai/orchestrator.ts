@@ -238,32 +238,41 @@ export class Orchestrator {
     }
     
     // ═══════════════════════════════════════════════════════════════
-    // TRANSACTIONAL TOOLS ELIMINADOS (Google Gmail/Calendar)
+    // TRANSACTIONAL TOOLS (Email Manual + Calendar Interno + Telegram)
     // ═══════════════════════════════════════════════════════════════
-    // MIGRACIÓN P0: Todo reemplazado por Email manual + Calendar interno + Telegram
-    // Ver nuevos endpoints:
-    //   - /api/email/* (SMTP/IMAP manual)
-    //   - /api/calendar/* (calendario interno)
-    //   - /api/telegram/* (bot por usuario)
+    // P0 FIX: Verificar integraciones activas ANTES de responder "No tengo acceso"
     // ═══════════════════════════════════════════════════════════════
     
     if (intent.intent_type === 'transactional') {
-      console.log('[ORCH] 🔴 Intent: TRANSACTIONAL - DEPRECADO (Google eliminado)');
+      console.log('[ORCH] � Intent: TRANSACTIONAL - Verificando integraciones...');
       
-      return {
-        toolUsed: 'none',
-        toolReason: 'Google services removed - use new email/calendar/telegram endpoints',
-        toolResult: `⚠️ Gmail y Google Calendar han sido reemplazados.
+      // Verificar si hay cuentas configuradas (email, calendar, telegram)
+      const { checkIntegrations } = await import('../services/integrationChecker');
+      const integrations = await checkIntegrations(userId);
+      
+      console.log('[ORCH] 🔍 Integraciones:', integrations);
+      
+      // Si NO hay NINGUNA integración configurada
+      if (!integrations.hasEmail && !integrations.hasCalendar && !integrations.hasTelegram) {
+        return {
+          toolUsed: 'none',
+          toolReason: 'No integrations configured',
+          toolResult: `⚠️ No tienes integraciones configuradas.
 
-Ahora uso:
-✅ Email manual (SMTP/IMAP) - Configura tu cuenta en perfil
-✅ Calendario interno de AL-E
-✅ Telegram para notificaciones
+Para usar estas funcionalidades:
+✅ **Email**: Configura una cuenta SMTP/IMAP en tu perfil
+✅ **Calendario**: Ya está disponible (interno de AL-E)
+✅ **Telegram**: Conecta tu bot personal
 
-Por favor, configura tu cuenta de email en tu perfil para poder enviar correos.`,
-        toolFailed: true,
-        toolError: 'GOOGLE_SERVICES_REMOVED'
-      };
+Configura al menos una integración para continuar.`,
+          toolFailed: true,
+          toolError: 'NO_INTEGRATIONS_CONFIGURED'
+        };
+      }
+      
+      // Si HAY integraciones, ejecutar action parser y tools
+      const { executeTransactionalAction } = await import('../services/transactionalExecutor');
+      return await executeTransactionalAction(userMessage, userId, intent, integrations);
       
       /* CÓDIGO COMENTADO - GMAIL/CALENDAR ELIMINADO
       
