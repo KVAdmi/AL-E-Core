@@ -231,18 +231,21 @@ export function classifyIntent(message: string): IntentClassification {
   // DECISIÓN: Intent Type
   // ═══════════════════════════════════════════════════════════════
   
-  const maxScore = Math.max(timeSensitiveScore, verificationScore, stableKnowledgeScore, transactionalScore);
-  
   let intent_type: IntentType;
   let tools_required: string[] = [];
   let fallback_strategy: IntentClassification['fallback_strategy'];
   let confidence: number;
   
-  // PRIORIDAD 1: Transactional (Email/Calendar/Telegram) - SIEMPRE gana
-  if (transactionalScore >= 10) {
+  // ═══════════════════════════════════════════════════════════════
+  // 🔥 PRIORIDAD 1: TRANSACTIONAL (GANA SIEMPRE - SIN EXCEPCIÓN)
+  // ═══════════════════════════════════════════════════════════════
+  // Si hay CUALQUIER palabra de email/calendar/telegram → TRANSACTIONAL
+  // NO importa si hay "hoy", "ahora", "busca" → TRANSACTIONAL GANA
+  
+  if (transactionalScore > 0) {
     intent_type = 'transactional';
     
-    // Determinar herramientas específicas (genéricas - el executor maneja detalles)
+    // Determinar herramientas específicas
     if (TRANSACTIONAL_PATTERNS.email_action.test(lowerMsg)) {
       tools_required.push('email');
     }
@@ -253,20 +256,37 @@ export function classifyIntent(message: string): IntentClassification {
       tools_required.push('telegram');
     }
     
-    fallback_strategy = 'none'; // Sin fallback - DEBE ejecutar o rechazar
-    confidence = 1.0; // Máxima confianza en detección
-    reasoning.push('→ Intent: TRANSACTIONAL (Email/Calendar/Telegram action detected)');
+    fallback_strategy = 'none'; // Si falla, debe fallar explícitamente
+    confidence = 1.0; // MÁXIMA confianza - esto es una acción clara
     
-  } else if (verificationScore >= 4) {
-    // PRIORIDAD 2: VERIFICACIÓN EXPLÍCITA
+    const reasoningText = `🔴 Acción de ${tools_required.join('/')} detectada | ` + reasoning.join(' | ');
+    console.log(`[INTENT] ${reasoningText} → TRANSACTIONAL`);
+    
+    return {
+      intent_type,
+      tools_required,
+      confidence,
+      reasoning: reasoningText,
+      fallback_strategy
+    };
+  }
+  
+  // ═══════════════════════════════════════════════════════════════
+  // PRIORIDAD 2: VERIFICATION (búsqueda explícita)
+  // ═══════════════════════════════════════════════════════════════
+  
+  if (verificationScore >= 4) {
     intent_type = 'verification';
     tools_required = ['web_search'];
     fallback_strategy = 'verification_steps';
     confidence = Math.min(verificationScore / 5, 1.0);
     reasoning.push('→ Intent: VERIFICATION (explicit command)');
     
+  // ═══════════════════════════════════════════════════════════════
+  // PRIORIDAD 3: TIME SENSITIVE (requiere datos actuales)
+  // ═══════════════════════════════════════════════════════════════
+  
   } else if (timeSensitiveScore >= 3) {
-    // TIME SENSITIVE (requiere datos actuales)
     intent_type = 'time_sensitive';
     tools_required = ['web_search'];
     
