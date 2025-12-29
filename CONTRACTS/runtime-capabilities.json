@@ -1,0 +1,35 @@
+{
+  "email": {
+    "send": true,
+    "inbox": true,
+    "reply": true,
+    "delete": true,
+    "mark_read": true,
+    "folders": false,
+    "drafts": false,
+    "attachments": false,
+    "contacts": false
+  },
+  "calendar": {
+    "create": false,
+    "list": false,
+    "update": false,
+    "delete": false
+  },
+  "documents": {
+    "upload": false,
+    "read": false,
+    "summarize": false,
+    "search": false
+  },
+  "telegram": {
+    "send": false,
+    "receive": false,
+    "list_chats": false
+  },
+  "memory": {
+    "save": true,
+    "retrieve": true,
+    "search": true
+  }
+}
