@@ -71,7 +71,8 @@ const TRANSACTIONAL_PATTERNS = {
   email_action: /\b(correo|email|emails|gmail|mail|mails|inbox|bandeja|mensaje|mensajes|smtp|imap)\b/i,
   
   // Calendar (cualquier acción relacionada con agenda/eventos)
-  calendar_action: /\b(agenda|calendario|calendar|cita|citas|evento|eventos|meet|meets|meeting|meetings|junta|juntas|reunión|reunion|reuniones|videollamada|video call|llamada|zoom)\b/i,
+  // Pattern ULTRA FLEXIBLE: captura variaciones naturales del español mexicano
+  calendar_action: /(agenda(?:r(?:la|lo|las|los|me|te|se|nos)?)?|calendario|calendar|cita|citas|evento|eventos|meet|meets|meeting|meetings|junta|juntas|reunión|reunion|reuniones|videollamada|video call|llamada|zoom|intentar?\s+agendar?|ayud[ae]s?\s+a\s+agendar?|pue[ds]es?\s+agendar?)/i,
   
   // Telegram (cualquier acción relacionada con Telegram)
   telegram_action: /\b(telegram|telegrama|bot|notifica|notificar|avisa|avisar)\b/i

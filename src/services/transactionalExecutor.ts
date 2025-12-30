@@ -53,19 +53,26 @@ interface EventInfo {
 function extractEventInfo(userMessage: string): EventInfo {
   const lowerMsg = userMessage.toLowerCase();
   
-  // Extraer título (después de "agendar/crear/etc" y antes de fecha/hora)
+  // Extraer título - ULTRA SIMPLE: busca texto después de palabras clave comunes
   let title: string | null = null;
   
-  // Pattern mejorado para capturar "zoom", "meet", etc como parte del título
-  const titleMatches = userMessage.match(/\b(?:agenda|agendar|crea|crear|pon|poner)\s+(?:por favor|porfa|porfavor|plis)?\s*(?:una?\s+)?(?:cita|reunión|reunion|evento|llamada|zoom|meet|videollamada)?\s+(?:con|para|de|sobre|del?|un?)?\s+([^,.?!]+?)(?:\s+(?:para|el|a|en|por)\s+)/i);
-  if (titleMatches && titleMatches[1]) {
-    title = titleMatches[1].trim();
-  } else {
-    // Fallback: buscar cualquier texto descriptivo después de palabras clave
-    const fallbackMatch = userMessage.match(/\b(?:cita|reunión|reunion|evento|llamada|zoom|meet)\s+(?:con|para|de|sobre|del?)?\s+([^,.?!0-9]+)/i);
-    if (fallbackMatch && fallbackMatch[1]) {
-      title = fallbackMatch[1].trim();
+  // Si dice "cita X" o "zoom X" o "meet X", X es el título
+  const simpleMatch = userMessage.match(/(?:cita|zoom|meet|evento|reunión|reunion|llamada|videollamada)\s+([a-záéíóúñ\s]+?)(?:\s+(?:para|el|a las|por|porfa|porfavor|por favor)|\?|$)/i);
+  if (simpleMatch && simpleMatch[1]) {
+    title = simpleMatch[1].trim();
+  }
+  
+  // Si no encontró título simple, buscar patrón "agendar X para..."
+  if (!title) {
+    const agendarMatch = userMessage.match(/(?:agendar?l?[ao]?s?|crear?l?[ao]?s?|pon|poner)\s+(?:una?\s+)?(?:cita|evento|reunión|reunion)?\s*([^,.?!]+?)(?:\s+(?:para|el|a|en|por)\s+)/i);
+    if (agendarMatch && agendarMatch[1]) {
+      title = agendarMatch[1].trim();
     }
+  }
+  
+  // Fallback: si menciona palabras clave pero no tiene estructura, usa "Cita"
+  if (!title && (lowerMsg.includes('cita') || lowerMsg.includes('agenda') || lowerMsg.includes('zoom') || lowerMsg.includes('meet'))) {
+    title = 'Cita';
   }
   
   // Extraer ubicación (después de "en el/la")
@@ -185,7 +192,7 @@ export async function executeTransactionalActionV2(
   // CALENDAR - CREAR EVENTO
   // ═══════════════════════════════════════════════════════════════
   if (
-    lowerMsg.match(/\b(agenda|agendar|crea|crear|pon|poner|añade|añadir|agrega|agregar|programa|programar)\b.{0,100}\b(reunión|reunion|cita|evento|llamada|call|meet|zoom|videollamada)\b/i)
+    lowerMsg.match(/\b(agenda|agendar|agend[aá]r?l[ao]s?|crea|crear|cr[eé]al[ao]s?|pon|poner|añade|añadir|agrega|agregar|programa|programar|intenta|intentar)\b.{0,100}\b(reunión|reunion|cita|citas|evento|eventos|llamada|call|meet|zoom|videollamada)\b/i)
   ) {
     console.log('[TRANSACTIONAL-V2] Intent: CALENDAR_CREATE');
     
@@ -518,7 +525,7 @@ Por ahora, usa el endpoint \`POST /api/mail/send\` directamente con tu cuenta co
   // 4. CALENDAR - CREAR EVENTO (CON EVIDENCIA REAL)
   // ═══════════════════════════════════════════════════════════════
   if (
-    lowerMsg.match(/\b(agenda|agendar|crea|crear|pon|poner|añade|añadir|agrega|agregar|programa|programar)\b.{0,100}\b(reunión|reunion|cita|evento|llamada|call|meet|zoom|videollamada)\b/i)
+    lowerMsg.match(/\b(agenda|agendar|agend[aá]r?l[ao]s?|crea|crear|cr[eé]al[ao]s?|pon|poner|añade|añadir|agrega|agregar|programa|programar|intenta|intentar)\b.{0,100}\b(reunión|reunion|cita|citas|evento|eventos|llamada|call|meet|zoom|videollamada)\b/i)
   ) {
     console.log('[TRANSACTIONAL] Intent: CALENDAR_CREATE');
     
