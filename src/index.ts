@@ -13,6 +13,7 @@ import emailRouter from "./api/email"; // Email accounts (SMTP/IMAP manual)
 import mailRouter from "./api/mail"; // Mail send/inbox
 import calendarRouter from "./api/calendar"; // Calendario interno
 import telegramRouter from "./api/telegram"; // Telegram bot por usuario
+import runtimeCapabilitiesRouter from "./api/runtime-capabilities"; // Runtime capabilities
 import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
 import { startNotificationWorker } from "./workers/notificationWorker";
 
@@ -195,6 +196,7 @@ app.use("/api/mail", mailRouter); // Mail send/inbox
 app.use("/api/email", mailRouter); // Mail send/inbox TAMBIÉN en /api/email (para compatibilidad frontend)
 app.use("/api/calendar", calendarRouter); // Calendario interno
 app.use("/api/telegram", telegramRouter); // Telegram bot por usuario
+app.use("/api/runtime-capabilities", runtimeCapabilitiesRouter); // Runtime capabilities
 
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
@@ -207,6 +209,7 @@ console.log("[DEBUG] profileRouter montado en /api/profile");
 console.log("[DEBUG] emailRouter montado en /api/email");
 console.log("[DEBUG] mailRouter montado en /api/mail");
 console.log("[DEBUG] calendarRouter montado en /api/calendar");
+console.log("[DEBUG] runtimeCapabilitiesRouter montado en /api/runtime-capabilities");
 console.log("[DEBUG] telegramRouter montado en /api/telegram");
 
 const PORT = env.port || 4000;

@@ -507,34 +507,6 @@ INSTRUCCIÓN: Usa este conocimiento para fundamentar tus respuestas. Cita la fue
 GUARDRAILS OBLIGATORIOS (HARD RULES)
 ═══════════════════════════════════════════════════════════════
 
-🚨 REGLA SUPREMA - CAPACIDADES REALES (NO NEGOCIABLE):
-El archivo runtime-capabilities.json define qué capacidades están REALMENTE disponibles:
-- mail.send: false ✗ (AWS SES NO CONFIGURADO)
-- mail.inbox: false ✗
-- calendar.create: true ✓
-- calendar.list: true ✓
-- calendar.update: true ✓
-- calendar.delete: true ✓
-- documents.read: false ✗
-- web.search: true ✓
-- telegram: false ✗
-
-SI UNA CAPACIDAD ES FALSE:
-❌ NO LA MENCIONES como opción
-❌ NO LA SUGIERAS como solución
-❌ NO LA SIMULES o pretendas que funciona
-✅ RESPONDE ÚNICAMENTE: "Esta función aún no está disponible."
-
-🚨 REGLA ESPECIAL PARA mail.send:
-El envío de correos SOLO se confirma si existe un provider_message_id REAL.
-Si no hay proveedor configurado (AWS SES), responde:
-"El envío de correos aún no está configurado."
-❌ NO confirmes envío sin evidencia SMTP real
-❌ NO simules messageId
-❌ NO digas "se enviará"
-
-NO SE DISCUTE. NO SE SUAVIZA. NO SE IGNORA.
-
 PROHIBIDO ABSOLUTAMENTE (META-TRANSPARENCIA):
 ❌ Declarar si buscaste o no buscaste web
 ❌ Pedir al usuario que diga "busca/verifica/valida"

@@ -1,36 +1,13 @@
 /**
- * Transactional Executor - VERSIÓN REAL CON EVIDENCIA OBLIGATORIA
- * 
- * REGLA DE HIERRO:
- * - SI NO HAY DB WRITE REAL → success = false
- * - SI NO HAY ID REAL → success = false
- * - SI NO HAY LOG REAL → success = false
- * 
- * El LLM SOLO confirma si success=true Y evidence existe.
+ * Transactional Executor
+ * P0: Ejecuta acciones transaccionales (email, calendar, telegram)
+ * Reemplaza el código comentado de Gmail/Google Calendar
  */
 
 import { supabase } from '../db/supabase';
 import { UserIntegrations } from './integrationChecker';
 import { IntentClassification } from './intentClassifier';
 
-/**
- * Formato transaccional REAL con evidencia obligatoria
- */
-export interface TransactionalResult {
-  success: boolean;
-  action: string;
-  evidence: {
-    table: string;
-    id: string;
-  } | null;
-  userMessage: string;
-  reason?: string;
-}
-
-/**
- * DEPRECATED - Solo para compatibilidad con orchestrator
- * TODO: Migrar orchestrator a usar TransactionalResult
- */
 interface ToolExecutionResult {
   toolUsed: string;
   toolReason?: string;
@@ -166,184 +143,7 @@ function extractDateTime(userMessage: string): { startDate: Date | null; endDate
 }
 
 /**
- * ═══════════════════════════════════════════════════════════════
- * NUEVA FUNCIÓN TRANSACCIONAL CON EVIDENCIA OBLIGATORIA
- * ═══════════════════════════════════════════════════════════════
- */
-export async function executeTransactionalActionV2(
-  userMessage: string,
-  userId: string,
-  intent: IntentClassification,
-  integrations: UserIntegrations
-): Promise<TransactionalResult> {
-  
-  const lowerMsg = userMessage.toLowerCase();
-  
-  // ═══════════════════════════════════════════════════════════════
-  // CALENDAR - CREAR EVENTO
-  // ═══════════════════════════════════════════════════════════════
-  if (
-    lowerMsg.match(/\b(agenda|agendar|crea|crear|pon|poner|añade|añadir|agrega|agregar|programa|programar)\b.{0,100}\b(reunión|reunion|cita|evento|llamada|call|meet)\b/i)
-  ) {
-    console.log('[TRANSACTIONAL-V2] Intent: CALENDAR_CREATE');
-    
-    const eventInfo = extractEventInfo(userMessage);
-    
-    // Validar parámetros obligatorios
-    if (!eventInfo.title) {
-      return {
-        success: false,
-        action: 'calendar.create',
-        evidence: null,
-        userMessage: '¿Cuál es el nombre del evento que quieres agendar?',
-        reason: 'MISSING_TITLE'
-      };
-    }
-    
-    if (!eventInfo.startDate) {
-      return {
-        success: false,
-        action: 'calendar.create',
-        evidence: null,
-        userMessage: '¿Para qué fecha y hora quieres agendar el evento?',
-        reason: 'MISSING_DATE'
-      };
-    }
-    
-    try {
-      // ═══ TRANSACCIÓN REAL CON EVIDENCIA ═══
-      const { data: newEvent, error } = await supabase
-        .from('calendar_events')
-        .insert({
-          owner_user_id: userId,
-          title: eventInfo.title,
-          description: eventInfo.description || '',
-          location: eventInfo.location || '',
-          start_at: eventInfo.startDate.toISOString(),
-          end_at: eventInfo.endDate!.toISOString(),
-          timezone: 'America/Mexico_City',
-          status: 'scheduled',
-          notification_minutes: 60,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .select()
-        .single();
-      
-      // SI FALLA LA DB → success = false (OBLIGATORIO)
-      if (error || !newEvent || !newEvent.id) {
-        console.error('[TRANSACTIONAL-V2] ❌ DB WRITE FAILED:', error);
-        return {
-          success: false,
-          action: 'calendar.create',
-          evidence: null,
-          userMessage: 'No pude crear el evento en tu calendario.',
-          reason: error?.message || 'NO_ID_RETURNED'
-        };
-      }
-      
-      // ✅ ÉXITO REAL - SOLO SI HAY ID CONFIRMADO
-      console.log('[TRANSACTIONAL-V2] ✅ SUCCESS WITH EVIDENCE:', newEvent.id);
-      
-      const formattedDate = eventInfo.startDate.toLocaleString('es-MX', {
-        timeZone: 'America/Mexico_City',
-        weekday: 'long',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-      
-      return {
-        success: true,
-        action: 'calendar.create',
-        evidence: {
-          table: 'calendar_events',
-          id: newEvent.id
-        },
-        userMessage: `Evento agendado: ${eventInfo.title} - ${formattedDate}${eventInfo.location ? ` en ${eventInfo.location}` : ''}`
-      };
-      
-    } catch (error: any) {
-      console.error('[TRANSACTIONAL-V2] ❌ EXCEPTION:', error);
-      return {
-        success: false,
-        action: 'calendar.create',
-        evidence: null,
-        userMessage: 'No pude crear el evento en tu calendario.',
-        reason: error.message
-      };
-    }
-  }
-  
-  // ═══════════════════════════════════════════════════════════════
-  // EMAIL - ENVIAR (NO DISPONIBLE - AWS SES NO CONFIGURADO)
-  // ═══════════════════════════════════════════════════════════════
-  if (
-    lowerMsg.match(/\b(envía|enviar|manda|mandar|send|escribe|escribir)\b.{0,100}\b(correo|email|mail|mensaje)\b/i)
-  ) {
-    console.log('[TRANSACTIONAL-V2] Intent: EMAIL_SEND (NOT AVAILABLE - SMTP NOT CONFIGURED)');
-    
-    return {
-      success: false,
-      action: 'mail.send',
-      evidence: null,
-      userMessage: 'El envío de correos aún no está configurado.',
-      reason: 'SMTP_NOT_CONFIGURED'
-    };
-  }
-  
-  // ═══════════════════════════════════════════════════════════════
-  // EMAIL - LEER INBOX (NO DISPONIBLE)
-  // ═══════════════════════════════════════════════════════════════
-  if (
-    lowerMsg.match(/\b(revisa|revisar|checa|ve|ver|mira|consulta|busca|lee|leer)\b.{0,100}\b(correo|email|mail|inbox|bandeja)\b/i)
-  ) {
-    console.log('[TRANSACTIONAL-V2] Intent: EMAIL_READ (NOT AVAILABLE)');
-    
-    return {
-      success: false,
-      action: 'mail.inbox',
-      evidence: null,
-      userMessage: 'Esta función aún no está disponible.',
-      reason: 'CAPABILITY_DISABLED'
-    };
-  }
-  
-  // ═══════════════════════════════════════════════════════════════
-  // TELEGRAM (NO DISPONIBLE)
-  // ═══════════════════════════════════════════════════════════════
-  if (
-    lowerMsg.match(/\b(envía|enviar|manda|mandar|telegram|telegrama)\b/i)
-  ) {
-    console.log('[TRANSACTIONAL-V2] Intent: TELEGRAM_SEND (NOT AVAILABLE)');
-    
-    return {
-      success: false,
-      action: 'telegram',
-      evidence: null,
-      userMessage: 'Esta función aún no está disponible.',
-      reason: 'CAPABILITY_DISABLED'
-    };
-  }
-  
-  // ═══════════════════════════════════════════════════════════════
-  // NO TRANSACCIONAL
-  // ═══════════════════════════════════════════════════════════════
-  return {
-    success: false,
-    action: 'none',
-    evidence: null,
-    userMessage: 'No detecté una acción transaccional clara.',
-    reason: 'NO_TRANSACTIONAL_INTENT'
-  };
-}
-
-/**
- * ═══════════════════════════════════════════════════════════════
- * FUNCIÓN LEGACY (MANTENER PARA COMPATIBILIDAD)
- * TODO: Migrar orchestrator a usar executeTransactionalActionV2
- * ═══════════════════════════════════════════════════════════════
+ * Ejecuta acción transaccional según el intent
  */
 export async function executeTransactionalAction(
   userMessage: string,
@@ -513,7 +313,7 @@ Por ahora, usa el endpoint \`POST /api/mail/send\` directamente con tu cuenta co
   }
   
   // ═══════════════════════════════════════════════════════════════
-  // 4. CALENDAR - CREAR EVENTO (CON EVIDENCIA REAL)
+  // 4. CALENDAR - CREAR EVENTO
   // ═══════════════════════════════════════════════════════════════
   if (
     lowerMsg.match(/\b(agenda|agendar|crea|crear|pon|poner|añade|añadir|agrega|agregar|programa|programar)\b.{0,100}\b(reunión|reunion|cita|evento|llamada|call|meet)\b/i)
@@ -544,7 +344,7 @@ Por ahora, usa el endpoint \`POST /api/mail/send\` directamente con tu cuenta co
     }
     
     try {
-      // ═══ TRANSACCIÓN REAL CON EVIDENCIA ═══
+      // Crear evento en la base de datos
       const { data: newEvent, error } = await supabase
         .from('calendar_events')
         .insert({
@@ -556,33 +356,23 @@ Por ahora, usa el endpoint \`POST /api/mail/send\` directamente con tu cuenta co
           end_at: eventInfo.endDate.toISOString(),
           timezone: 'America/Mexico_City',
           status: 'scheduled',
-          notification_minutes: 60,
+          notification_minutes: 60, // 1 hora antes
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
         .select()
         .single();
       
-      // SI FALLA LA DB → success = false
-      if (error || !newEvent || !newEvent.id) {
-        console.error('[TRANSACTIONAL] ❌ CALENDAR CREATE FAILED:', error);
+      if (error) {
+        console.error('[TRANSACTIONAL] Error creating event:', error);
         return {
           toolUsed: 'calendar_create',
-          toolReason: error?.message || 'No ID returned from DB',
-          toolResult: JSON.stringify({
-            success: false,
-            action: 'calendar.create',
-            evidence: null,
-            userMessage: 'No pude crear el evento en tu calendario.',
-            reason: error?.message || 'NO_ID_RETURNED'
-          }),
+          toolReason: 'Database error',
+          toolResult: `❌ Error al crear el evento: ${error.message}`,
           toolFailed: true,
-          toolError: error?.message || 'NO_ID_RETURNED'
+          toolError: error.message
         };
       }
-      
-      // ✅ ÉXITO REAL CON EVIDENCIA
-      console.log('[TRANSACTIONAL] ✅ CALENDAR CREATE SUCCESS:', newEvent.id);
       
       const formattedDate = eventInfo.startDate.toLocaleString('es-MX', {
         timeZone: 'America/Mexico_City',
@@ -596,31 +386,22 @@ Por ahora, usa el endpoint \`POST /api/mail/send\` directamente con tu cuenta co
       
       return {
         toolUsed: 'calendar_create',
-        toolReason: 'Event created with evidence',
-        toolResult: JSON.stringify({
-          success: true,
-          action: 'calendar.create',
-          evidence: {
-            table: 'calendar_events',
-            id: newEvent.id
-          },
-          userMessage: `Evento agendado: ${eventInfo.title} - ${formattedDate}${eventInfo.location ? ` en ${eventInfo.location}` : ''}`
-        }),
+        toolReason: 'Event created successfully',
+        toolResult: `✅ **Evento agendado exitosamente:**
+
+📅 **${eventInfo.title}**
+🕐 ${formattedDate}${eventInfo.location ? `\n📍 ${eventInfo.location}` : ''}
+
+🔔 Recibirás una notificación 1 hora antes.`,
         toolFailed: false
       };
       
     } catch (error: any) {
-      console.error('[TRANSACTIONAL] ❌ CALENDAR CREATE EXCEPTION:', error);
+      console.error('[TRANSACTIONAL] Error creating calendar event:', error);
       return {
         toolUsed: 'calendar_create',
-        toolReason: 'Exception',
-        toolResult: JSON.stringify({
-          success: false,
-          action: 'calendar.create',
-          evidence: null,
-          userMessage: 'No pude crear el evento en tu calendario.',
-          reason: error.message
-        }),
+        toolReason: 'Unexpected error',
+        toolResult: `❌ Error inesperado al crear el evento: ${error.message}`,
         toolFailed: true,
         toolError: error.message
       };

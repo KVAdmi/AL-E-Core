@@ -18,6 +18,7 @@ const email_1 = __importDefault(require("./api/email")); // Email accounts (SMTP
 const mail_1 = __importDefault(require("./api/mail")); // Mail send/inbox
 const calendar_1 = __importDefault(require("./api/calendar")); // Calendario interno
 const telegram_1 = __importDefault(require("./api/telegram")); // Telegram bot por usuario
+const runtime_capabilities_1 = __importDefault(require("./api/runtime-capabilities")); // Runtime capabilities
 const documentText_1 = require("./utils/documentText");
 const notificationWorker_1 = require("./workers/notificationWorker");
 const app = (0, express_1.default)();
@@ -181,6 +182,7 @@ app.use("/api/mail", mail_1.default); // Mail send/inbox
 app.use("/api/email", mail_1.default); // Mail send/inbox TAMBIÉN en /api/email (para compatibilidad frontend)
 app.use("/api/calendar", calendar_1.default); // Calendario interno
 app.use("/api/telegram", telegram_1.default); // Telegram bot por usuario
+app.use("/api/runtime-capabilities", runtime_capabilities_1.default); // Runtime capabilities
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
@@ -192,6 +194,7 @@ console.log("[DEBUG] profileRouter montado en /api/profile");
 console.log("[DEBUG] emailRouter montado en /api/email");
 console.log("[DEBUG] mailRouter montado en /api/mail");
 console.log("[DEBUG] calendarRouter montado en /api/calendar");
+console.log("[DEBUG] runtimeCapabilitiesRouter montado en /api/runtime-capabilities");
 console.log("[DEBUG] telegramRouter montado en /api/telegram");
 const PORT = env_1.env.port || 4000;
 app.listen(PORT, "0.0.0.0", () => {

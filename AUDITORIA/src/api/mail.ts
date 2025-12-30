@@ -1,26 +1,16 @@
 /**
  * =====================================================
- * MAIL SEND API - AL-E CORE (DESHABILITADO)
+ * MAIL SEND/INBOX API - AL-E CORE
  * =====================================================
  * 
- * ⚠️ AWS SES NO ESTÁ IMPLEMENTADO AÚN.
+ * Envío y recepción de emails via SMTP/IMAP
+ * Reemplaza Gmail API send/read
  * 
- * REGLAS OBLIGATORIAS:
- * 1. NO CONFIRMES ENVÍO DE CORREOS
- * 2. NO SIMULES SMTP
- * 3. NO GENERES messageId FALSO
- * 
- * mail.send DEBE RESPONDER SIEMPRE:
- * {
- *   "success": false,
- *   "action": "mail.send",
- *   "evidence": null,
- *   "userMessage": "El envío de correos aún no está configurado.",
- *   "reason": "SMTP_NOT_CONFIGURED"
- * }
- * 
- * CUANDO AWS SES ESTÉ REAL, SE REACTIVA.
- * HASTA ENTONCES, CERO HUMO.
+ * Endpoints:
+ * - POST /api/mail/send - Enviar email
+ * - GET /api/mail/inbox - Leer emails (IMAP)
+ * - GET /api/mail/threads - Listar hilos
+ * - GET /api/mail/messages - Listar mensajes
  * =====================================================
  */
 
@@ -30,24 +20,152 @@ import { decrypt } from '../utils/encryption';
 import nodemailer from 'nodemailer';
 import Imap from 'imap';
 import { simpleParser } from 'mailparser';
-import { requireAuth } from '../middleware/auth';
 
 const router = express.Router();
 
 // ═══════════════════════════════════════════════════════════════
-// POST /api/mail/send - DESHABILITADO (AWS SES NO CONFIGURADO)
+// POST /api/mail/send - Enviar email por SMTP
 // ═══════════════════════════════════════════════════════════════
 
-router.post('/send', requireAuth, async (req, res) => {
-  console.log('[MAIL] ❌ SEND DISABLED - AWS SES not configured');
-  
-  return res.status(501).json({
-    success: false,
-    action: 'mail.send',
-    evidence: null,
-    userMessage: 'El envío de correos aún no está configurado.',
-    reason: 'SMTP_NOT_CONFIGURED'
-  });
+router.post('/send', async (req, res) => {
+  try {
+    const {
+      ownerUserId,
+      accountId,
+      to,
+      subject,
+      text,
+      html,
+      cc,
+      bcc
+    } = req.body;
+    
+    // Validaciones
+    if (!ownerUserId || !accountId || !to || !subject || !text) {
+      return res.status(400).json({
+        ok: false,
+        error: 'MISSING_REQUIRED_FIELDS',
+        message: 'Campos requeridos: ownerUserId, accountId, to, subject, text'
+      });
+    }
+    
+    console.log(`[MAIL] Enviando email - User: ${ownerUserId}, To: ${Array.isArray(to) ? to.join(', ') : to}`);
+    
+    // Obtener cuenta de email
+    const { data: account, error: accountError } = await supabase
+      .from('email_accounts')
+      .select('*')
+      .eq('id', accountId)
+      .eq('owner_user_id', ownerUserId)
+      .eq('is_active', true)
+      .single();
+    
+    if (accountError || !account) {
+      return res.status(404).json({
+        ok: false,
+        error: 'ACCOUNT_NOT_FOUND',
+        message: 'Cuenta de email no encontrada o inactiva'
+      });
+    }
+    
+    // Desencriptar password SMTP
+    const smtpPass = decrypt(account.smtp_pass_enc);
+    
+    // Crear transporter de Nodemailer
+    const transporter = nodemailer.createTransport({
+      host: account.smtp_host,
+      port: account.smtp_port,
+      secure: account.smtp_secure,
+      auth: {
+        user: account.smtp_user,
+        pass: smtpPass
+      }
+    });
+    
+    // Preparar destinatarios
+    const toArray = Array.isArray(to) ? to : [to];
+    const ccArray = cc ? (Array.isArray(cc) ? cc : [cc]) : undefined;
+    const bccArray = bcc ? (Array.isArray(bcc) ? bcc : [bcc]) : undefined;
+    
+    // Enviar email
+    let sendResult;
+    let providerMessageId;
+    let status = 'sent';
+    let errorText = null;
+    
+    try {
+      sendResult = await transporter.sendMail({
+        from: `"${account.from_name}" <${account.from_email}>`,
+        to: toArray.join(', '),
+        cc: ccArray?.join(', '),
+        bcc: bccArray?.join(', '),
+        subject,
+        text,
+        html: html || undefined
+      });
+      
+      providerMessageId = sendResult.messageId;
+      console.log(`[MAIL] ✓ Email enviado - Message ID: ${providerMessageId}`);
+      
+    } catch (error: any) {
+      console.error('[MAIL] ✗ Error enviando email:', error);
+      status = 'failed';
+      errorText = error.message;
+    }
+    
+    // Guardar en DB
+    const { data: message, error: dbError } = await supabase
+      .from('mail_messages')
+      .insert({
+        owner_user_id: ownerUserId,
+        account_id: accountId,
+        direction: 'outbound',
+        from_email: account.from_email,
+        to_emails_json: toArray,
+        cc_json: ccArray || null,
+        bcc_json: bccArray || null,
+        subject,
+        text_body: text,
+        html_body: html || null,
+        provider_message_id: providerMessageId || null,
+        status,
+        error_text: errorText
+      })
+      .select()
+      .single();
+    
+    if (dbError) {
+      console.error('[MAIL] Warning: Email sent but failed to save to DB:', dbError);
+    }
+    
+    if (status === 'failed') {
+      return res.status(500).json({
+        ok: false,
+        error: 'SMTP_ERROR',
+        message: 'Error enviando email',
+        details: errorText
+      });
+    }
+    
+    return res.json({
+      ok: true,
+      message: 'Email enviado exitosamente',
+      messageId: providerMessageId,
+      sent: {
+        to: toArray,
+        subject,
+        from: account.from_email
+      }
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL] Error:', error);
+    return res.status(500).json({
+      ok: false,
+      error: 'INTERNAL_ERROR',
+      message: error.message
+    });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════
