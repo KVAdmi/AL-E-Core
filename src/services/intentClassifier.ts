@@ -111,6 +111,8 @@ const STABLE_KNOWLEDGE_PATTERNS = {
 export function classifyIntent(message: string): IntentClassification {
   const lowerMsg = message.toLowerCase();
   
+  console.log(`[INTENT] 🔍 Analyzing message: "${message.substring(0, 80)}..."`);
+  
   let timeSensitiveScore = 0;
   let verificationScore = 0;
   let stableKnowledgeScore = 0;
@@ -186,17 +188,22 @@ export function classifyIntent(message: string): IntentClassification {
   if (TRANSACTIONAL_PATTERNS.email_action.test(lowerMsg)) {
     transactionalScore += 10; // MÁXIMA PRIORIDAD
     reasoning.push('🔴 Acción de Email detectada');
+    console.log(`[INTENT] ✓ EMAIL ACTION detected in: "${lowerMsg.substring(0, 50)}..."`);
   }
   
   if (TRANSACTIONAL_PATTERNS.calendar_action.test(lowerMsg)) {
     transactionalScore += 10; // MÁXIMA PRIORIDAD
     reasoning.push('🔴 Acción de Calendario detectada');
+    console.log(`[INTENT] ✓ CALENDAR ACTION detected in: "${lowerMsg.substring(0, 50)}..."`);
   }
   
   if (TRANSACTIONAL_PATTERNS.telegram_action.test(lowerMsg)) {
     transactionalScore += 10; // MÁXIMA PRIORIDAD
     reasoning.push('🔴 Acción de Telegram detectada');
+    console.log(`[INTENT] ✓ TELEGRAM ACTION detected in: "${lowerMsg.substring(0, 50)}..."`);
   }
+  
+  console.log(`[INTENT] 📊 Scores - Transactional: ${transactionalScore}, TimeSensitive: ${timeSensitiveScore}, Verification: ${verificationScore}, Stable: ${stableKnowledgeScore}`);
   
   // ═══════════════════════════════════════════════════════════════
   // SCORE: Stable Knowledge
