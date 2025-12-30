@@ -207,7 +207,10 @@ export class Orchestrator {
    * Determina el tipo de conocimiento requerido y la estrategia de respuesta
    */
   private classifyUserIntent(userMessage: string): IntentClassification {
-    return classifyIntent(userMessage);
+    console.log(`[ORCH] 📩 Calling classifyIntent with message: "${userMessage.substring(0, 100)}"`);
+    const result = classifyIntent(userMessage);
+    console.log(`[ORCH] 📊 Intent result: type=${result.intent_type}, confidence=${result.confidence}, tools=${result.tools_required.join(',')}`);
+    return result;
   }
   
   /**
