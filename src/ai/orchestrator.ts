@@ -247,7 +247,7 @@ export class Orchestrator {
     // ═══════════════════════════════════════════════════════════════
     
     if (intent.intent_type === 'transactional') {
-      console.log('[ORCH] � Intent: TRANSACTIONAL - Verificando integraciones...');
+      console.log('[ORCH] 🔥 Intent: TRANSACTIONAL - Ejecutando tools...');
       
       // Verificar si hay cuentas configuradas (email, calendar, telegram)
       const { checkIntegrations } = await import('../services/integrationChecker');
@@ -255,28 +255,12 @@ export class Orchestrator {
       
       console.log('[ORCH] 🔍 Integraciones:', integrations);
       
-      // Si NO hay NINGUNA integración configurada
-      if (!integrations.hasEmail && !integrations.hasCalendar && !integrations.hasTelegram) {
-        return {
-          toolUsed: 'none',
-          toolReason: 'No integrations configured',
-          toolResult: `⚠️ No tienes integraciones configuradas.
-
-Para usar estas funcionalidades:
-✅ **Email**: Configura una cuenta SMTP/IMAP en tu perfil
-✅ **Calendario**: Ya está disponible (interno de AL-E)
-✅ **Telegram**: Conecta tu bot personal
-
-Configura al menos una integración para continuar.`,
-          toolFailed: true,
-          toolError: 'NO_INTEGRATIONS_CONFIGURED'
-        };
-      }
+      // P0 FIX: Calendar interno SIEMPRE está disponible (hasCalendar=true)
+      // Solo bloqueamos si NO hay NINGUNA integración Y se requiere email/telegram específicamente
       
-      // Si HAY integraciones, ejecutar action parser y tools
+      // Si HAY al menos UNA integración (calendar siempre=true), ejecutar
       const { executeTransactionalAction } = await import('../services/transactionalExecutor');
       return await executeTransactionalAction(userMessage, userId, intent, integrations);
-      
     }
     
     // ═══════════════════════════════════════════════════════════════

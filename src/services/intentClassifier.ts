@@ -49,13 +49,13 @@ const TIME_SENSITIVE_PATTERNS = {
 
 const VERIFICATION_PATTERNS = {
   // Comandos explícitos de búsqueda
-  explicit_commands: /\b(busca|buscar|búsqueda|busqueda|search|investiga|averigua|encuentra|verifica|checa|confirma|valida|validar|consulta|échale un ojo|ve a|accede a|mira en)\b/i,
+  explicit_commands: /\b(busca|buscar|búsqueda|busqueda|search|investiga|averigua|encuentra|verifica|checa|confirma|valida|validar|consulta|échale un ojo|ve a|accede a|mira en|ayudame a ver|ayúdame a ver|qué te encuentras|que te encuentras|qué sabes|que sabes|cuéntame|cuentame|dime)\b/i,
   
   // Preguntas sobre existencia
   existence: /\b(existe|existencia|tiene (página|web|sitio|url|dominio)|hay (página|web|sitio))\b/i,
   
-  // Información sobre entidades
-  entity_info: /\b(información sobre|info sobre|datos sobre|qué es|que es|quién es|quien es|dónde está|donde esta)\b/i,
+  // Información sobre entidades (ULTRA FLEXIBLE - captura "sobre X", "de X", "acerca de X")
+  entity_info: /\b(información sobre|info sobre|datos sobre|qué es|que es|quién es|quien es|dónde está|donde esta|sobre (la|el|los|las)?\s*(empresa|compañía|organizacion|organización|negocio|startup|proyecto|producto|servicio)|acerca de|acerca del|referente a|con respecto a)\b/i,
   
   // Datos actuales/en tiempo real (NUEVO: tipo de cambio, precios, clima, etc)
   real_time_data: /\b(tipo de cambio|precio del dólar|dólar hoy|cotización|cuánto está|cuanto esta|cuánto vale|cuanto vale|clima|temperatura|weather|tráfico|trafico|stock|bolsa|cripto)\b/i
