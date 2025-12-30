@@ -55,12 +55,14 @@ function extractEventInfo(userMessage: string): EventInfo {
   
   // Extraer título (después de "agendar/crear/etc" y antes de fecha/hora)
   let title: string | null = null;
-  const titleMatches = userMessage.match(/\b(?:agenda|agendar|crea|crear|pon|poner)\s+(?:una?\s+)?(?:cita|reunión|reunion|evento|llamada)?\s+(?:con|para|de|sobre|el)?\s+([^,.?!]+?)(?:\s+(?:para|el|a|en)\s+)/i);
+  
+  // Pattern mejorado para capturar "zoom", "meet", etc como parte del título
+  const titleMatches = userMessage.match(/\b(?:agenda|agendar|crea|crear|pon|poner)\s+(?:por favor|porfa|porfavor|plis)?\s*(?:una?\s+)?(?:cita|reunión|reunion|evento|llamada|zoom|meet|videollamada)?\s+(?:con|para|de|sobre|del?|un?)?\s+([^,.?!]+?)(?:\s+(?:para|el|a|en|por)\s+)/i);
   if (titleMatches && titleMatches[1]) {
     title = titleMatches[1].trim();
   } else {
-    // Fallback: buscar cualquier texto descriptivo
-    const fallbackMatch = userMessage.match(/\b(?:cita|reunión|reunion|evento|llamada)\s+(?:con|para|de|sobre|el)?\s+([^,.?!0-9]+)/i);
+    // Fallback: buscar cualquier texto descriptivo después de palabras clave
+    const fallbackMatch = userMessage.match(/\b(?:cita|reunión|reunion|evento|llamada|zoom|meet)\s+(?:con|para|de|sobre|del?)?\s+([^,.?!0-9]+)/i);
     if (fallbackMatch && fallbackMatch[1]) {
       title = fallbackMatch[1].trim();
     }
@@ -183,7 +185,7 @@ export async function executeTransactionalActionV2(
   // CALENDAR - CREAR EVENTO
   // ═══════════════════════════════════════════════════════════════
   if (
-    lowerMsg.match(/\b(agenda|agendar|crea|crear|pon|poner|añade|añadir|agrega|agregar|programa|programar)\b.{0,100}\b(reunión|reunion|cita|evento|llamada|call|meet)\b/i)
+    lowerMsg.match(/\b(agenda|agendar|crea|crear|pon|poner|añade|añadir|agrega|agregar|programa|programar)\b.{0,100}\b(reunión|reunion|cita|evento|llamada|call|meet|zoom|videollamada)\b/i)
   ) {
     console.log('[TRANSACTIONAL-V2] Intent: CALENDAR_CREATE');
     
@@ -516,7 +518,7 @@ Por ahora, usa el endpoint \`POST /api/mail/send\` directamente con tu cuenta co
   // 4. CALENDAR - CREAR EVENTO (CON EVIDENCIA REAL)
   // ═══════════════════════════════════════════════════════════════
   if (
-    lowerMsg.match(/\b(agenda|agendar|crea|crear|pon|poner|añade|añadir|agrega|agregar|programa|programar)\b.{0,100}\b(reunión|reunion|cita|evento|llamada|call|meet)\b/i)
+    lowerMsg.match(/\b(agenda|agendar|crea|crear|pon|poner|añade|añadir|agrega|agregar|programa|programar)\b.{0,100}\b(reunión|reunion|cita|evento|llamada|call|meet|zoom|videollamada)\b/i)
   ) {
     console.log('[TRANSACTIONAL] Intent: CALENDAR_CREATE');
     

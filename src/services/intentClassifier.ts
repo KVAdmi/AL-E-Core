@@ -71,7 +71,7 @@ const TRANSACTIONAL_PATTERNS = {
   email_action: /\b(correo|email|emails|gmail|mail|mails|inbox|bandeja|mensaje|mensajes|smtp|imap)\b/i,
   
   // Calendar (cualquier acción relacionada con agenda/eventos)
-  calendar_action: /\b(agenda|calendario|calendar|cita|citas|evento|eventos|meet|meets|meeting|meetings|junta|juntas|reunión|reunion|reuniones|videollamada|video call|llamada)\b/i,
+  calendar_action: /\b(agenda|calendario|calendar|cita|citas|evento|eventos|meet|meets|meeting|meetings|junta|juntas|reunión|reunion|reuniones|videollamada|video call|llamada|zoom)\b/i,
   
   // Telegram (cualquier acción relacionada con Telegram)
   telegram_action: /\b(telegram|telegrama|bot|notifica|notificar|avisa|avisar)\b/i
