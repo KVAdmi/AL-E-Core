@@ -215,7 +215,7 @@ export class Orchestrator {
   
   /**
    * STEP 5: Decidir herramienta (tool decision) y ejecutarla
-   * CRÍTICO: Intent-driven tool execution con fallback resiliente
+   * P0 HOY: ACTION GATEWAY - Core manda, LLM obedece
    */
   private async decideAndExecuteTool(
     userMessage: string,
@@ -241,97 +241,31 @@ export class Orchestrator {
     }
     
     // ═══════════════════════════════════════════════════════════════
-    // TRANSACTIONAL TOOLS (Email Manual + Calendar Interno + Telegram)
-    // ═══════════════════════════════════════════════════════════════
-    // P0 FIX: Verificar integraciones activas ANTES de responder "No tengo acceso"
+    // P0 HOY: ACTION GATEWAY (Core manda)
     // ═══════════════════════════════════════════════════════════════
     
-    if (intent.intent_type === 'transactional') {
-      console.log('[ORCH] 🔥 Intent: TRANSACTIONAL - Ejecutando tools...');
-      
-      // Verificar si hay cuentas configuradas (email, calendar, telegram)
-      const { checkIntegrations } = await import('../services/integrationChecker');
-      const integrations = await checkIntegrations(userId);
-      
-      console.log('[ORCH] 🔍 Integraciones:', integrations);
-      
-      // P0 FIX: Calendar interno SIEMPRE está disponible (hasCalendar=true)
-      // Solo bloqueamos si NO hay NINGUNA integración Y se requiere email/telegram específicamente
-      
-      // Si HAY al menos UNA integración (calendar siempre=true), ejecutar
-      const { executeTransactionalAction } = await import('../services/transactionalExecutor');
-      return await executeTransactionalAction(userMessage, userId, intent, integrations);
+    console.log('[ORCH] 🔥 ACTION GATEWAY - Core ejecuta tools obligatoriamente...');
+    
+    const { executeAction } = await import('../services/actionGateway');
+    const actionResult = await executeAction(intent, userMessage, {
+      userId,
+      workspaceId: 'default', // TODO: pasar workspaceId real
+      projectId: undefined
+    });
+    
+    console.log(`[ORCH] Action result: success=${actionResult.success}, action=${actionResult.action}, evidence=${!!actionResult.evidence}`);
+    
+    // Si hay evidence, loggear para debugging
+    if (actionResult.evidence) {
+      console.log('[ORCH] Evidence:', JSON.stringify(actionResult.evidence));
     }
     
-    // ═══════════════════════════════════════════════════════════════
-    // EJECUTAR WEB SEARCH (Tavily)
-    // ═══════════════════════════════════════════════════════════════
-    
-    if (intent.tools_required.includes('web_search')) {
-      try {
-        console.log('[ORCH] 🔍 Tool: web_search (Tavily) - Intent-driven execution...');
-        const searchResponse = await webSearch({
-          query: userMessage,
-          searchDepth: 'basic',
-          maxResults: 5
-        });
-        
-        if (searchResponse.success && searchResponse.results.length > 0) {
-          const formattedResults = formatTavilyResults(searchResponse);
-          console.log(`[ORCH] ✓ Tavily: ${searchResponse.results.length} resultados obtenidos`);
-          
-          return {
-            toolUsed: 'web_search',
-            toolReason: 'Web search executed successfully',
-            toolResult: formattedResults,
-            toolFailed: false,
-            tavilyResponse: searchResponse
-          };
-          
-        } else {
-          // Tavily respondió pero sin resultados
-          console.warn('[ORCH] ⚠️ Tavily: búsqueda sin resultados');
-          
-          const fallbackContext = generateFallbackContext(
-            intent,
-            userMessage,
-            'No results found'
-          );
-          
-          return {
-            toolUsed: 'web_search',
-            toolReason: 'Web search executed but no results found',
-            toolResult: fallbackContext,
-            toolFailed: true,
-            toolError: 'No results found'
-          };
-        }
-        
-      } catch (error: any) {
-        // Tavily falló completamente (timeout, rate limit, etc.)
-        console.error('[ORCH] ❌ Tavily error:', error.message);
-        
-        const fallbackContext = generateFallbackContext(
-          intent,
-          userMessage,
-          error.message
-        );
-        
-        return {
-          toolUsed: 'web_search',
-          toolReason: 'Web search attempted but failed',
-          toolResult: fallbackContext,
-          toolFailed: true,
-          toolError: error.message
-        };
-      }
-    }
-    
-    // Default: no tool executed
     return {
-      toolUsed: 'none',
-      toolReason: 'No tool execution required',
-      toolFailed: false
+      toolUsed: actionResult.action,
+      toolReason: actionResult.reason || (actionResult.success ? 'Action executed successfully' : 'Action failed'),
+      toolResult: actionResult.userMessage || undefined,
+      toolFailed: !actionResult.success,
+      toolError: actionResult.reason
     };
   }
   
