@@ -17,6 +17,8 @@ function extractEventInfo(userMessage: string): {
   endDate: Date | null;
   description?: string;
 } {
+  console.log(`[CALENDAR_INTERNAL] 🔍 extractEventInfo - Input: "${userMessage}"`);
+  
   const lowerMsg = userMessage.toLowerCase();
   
   // Extraer título - busca después de palabras clave
@@ -96,11 +98,23 @@ export async function executeCalendarAction(
   userId: string
 ): Promise<ActionResult> {
   
+  console.log('[CALENDAR_INTERNAL] ========================================');
+  console.log('[CALENDAR_INTERNAL] 🚀 INICIO executeCalendarAction');
+  console.log(`[CALENDAR_INTERNAL] 🚀 User: ${userId}`);
+  console.log(`[CALENDAR_INTERNAL] 🚀 Message: "${userMessage}"`);
+  console.log('[CALENDAR_INTERNAL] ========================================');
+  
   console.log('[CALENDAR_INTERNAL] Extracting event info...');
   
   const eventInfo = extractEventInfo(userMessage);
   
+  console.log('[CALENDAR_INTERNAL] Event info extracted:');
+  console.log(`[CALENDAR_INTERNAL]   - Title: ${eventInfo.title}`);
+  console.log(`[CALENDAR_INTERNAL]   - Start: ${eventInfo.startDate?.toISOString()}`);
+  console.log(`[CALENDAR_INTERNAL]   - End: ${eventInfo.endDate?.toISOString()}`);
+  
   if (!eventInfo.title || !eventInfo.startDate) {
+    console.log('[CALENDAR_INTERNAL] ❌ Missing required fields (title or date)');
     return {
       success: false,
       action: 'calendar.create',
@@ -110,10 +124,11 @@ export async function executeCalendarAction(
     };
   }
   
-  console.log(`[CALENDAR_INTERNAL] Creating event: "${eventInfo.title}" at ${eventInfo.startDate.toISOString()}`);
+  console.log(`[CALENDAR_INTERNAL] ✅ Creating event: "${eventInfo.title}" at ${eventInfo.startDate.toISOString()}`);
   
   try {
     // ═══ DB WRITE CON EVIDENCIA OBLIGATORIA ═══
+    console.log('[CALENDAR_INTERNAL] 💾 Inserting into DB...');
     const { data: newEvent, error } = await supabase
       .from('calendar_events')
       .insert({
@@ -135,6 +150,7 @@ export async function executeCalendarAction(
     // SI NO HAY eventId → FAIL
     if (error || !newEvent || !newEvent.id) {
       console.error('[CALENDAR_INTERNAL] ❌ DB WRITE FAILED:', error);
+      console.error('[CALENDAR_INTERNAL] ❌ Error details:', JSON.stringify(error));
       return {
         success: false,
         action: 'calendar.create',
@@ -146,6 +162,7 @@ export async function executeCalendarAction(
     
     // ✅ SUCCESS CON EVIDENCIA
     console.log(`[CALENDAR_INTERNAL] ✅ Event created with ID: ${newEvent.id}`);
+    console.log(`[CALENDAR_INTERNAL] ✅ Event data:`, JSON.stringify(newEvent));
     
     const formattedDate = eventInfo.startDate.toLocaleString('es-MX', {
       timeZone: 'America/Mexico_City',
@@ -155,6 +172,9 @@ export async function executeCalendarAction(
       hour: '2-digit',
       minute: '2-digit'
     });
+    
+    console.log(`[CALENDAR_INTERNAL] ✅ Formatted date: ${formattedDate}`);
+    console.log(`[CALENDAR_INTERNAL] ✅ Returning success with evidence`);
     
     return {
       success: true,
@@ -171,6 +191,7 @@ export async function executeCalendarAction(
     
   } catch (error: any) {
     console.error('[CALENDAR_INTERNAL] ❌ Unexpected error:', error);
+    console.error('[CALENDAR_INTERNAL] ❌ Stack:', error.stack);
     return {
       success: false,
       action: 'calendar.create',

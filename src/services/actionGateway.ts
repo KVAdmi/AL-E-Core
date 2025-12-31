@@ -58,7 +58,11 @@ export async function executeAction(
   ctx: ActionContext
 ): Promise<ActionResult> {
   
-  console.log(`[ACTION_GATEWAY] Intent: ${intent.intent_type}, tools: ${intent.tools_required.join(',')}`);
+  console.log(`[ACTION_GATEWAY] ========================================`);
+  console.log(`[ACTION_GATEWAY] 🚀 INICIO - Intent: ${intent.intent_type}, tools: [${intent.tools_required.join(', ')}]`);
+  console.log(`[ACTION_GATEWAY] 🚀 User message: "${userMessage.substring(0, 100)}"`);
+  console.log(`[ACTION_GATEWAY] 🚀 Context: userId=${ctx.userId}, workspaceId=${ctx.workspaceId}`);
+  console.log(`[ACTION_GATEWAY] ========================================`);
   
   // ═══════════════════════════════════════════════════════════════
   // CALENDAR ACTIONS
@@ -66,7 +70,10 @@ export async function executeAction(
   
   if (intent.intent_type === 'transactional' && intent.tools_required.includes('calendar')) {
     
+    console.log('[ACTION_GATEWAY] 🔍 Detected TRANSACTIONAL intent with CALENDAR tool');
+    
     if (!CAPABILITIES['calendar.create']) {
+      console.log('[ACTION_GATEWAY] ❌ calendar.create CAPABILITY DISABLED');
       return {
         success: false,
         action: 'calendar.create',
@@ -76,6 +83,7 @@ export async function executeAction(
       };
     }
     
+    console.log('[ACTION_GATEWAY] ✅ calendar.create CAPABILITY ENABLED');
     console.log('[ACTION_GATEWAY] 🔥 FORCING calendar.create execution...');
     
     // Importar y ejecutar calendario interno
