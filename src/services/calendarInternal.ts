@@ -21,40 +21,133 @@ function extractEventInfo(userMessage: string): {
   
   const lowerMsg = userMessage.toLowerCase();
   
-  // Extraer título - busca después de palabras clave
+  // ═══════════════════════════════════════════════════════════════
+  // EXTRAER TÍTULO
+  // ═══════════════════════════════════════════════════════════════
   let title: string | null = null;
   
-  const titleMatch = userMessage.match(/(?:cena|comida|desayuno|reunión|reunion|cita|llamada|evento|junta|dentista|zoom|meet|videollamada)\s+(?:con|para|de)?\s*([a-záéíóúñ\s]+?)(?:\s+(?:hoy|mañana|el|a las|a la|por|en|para)|$)/i);
-  if (titleMatch && titleMatch[1]) {
-    title = titleMatch[1].trim();
+  // Opción 1: Buscar "para [hacer algo]" o "para ir a/al [lugar]"
+  const purposeMatch = userMessage.match(/\bpara\s+(?:ir\s+)?(?:al?|con|ver)\s+([a-záéíóúñ\s]{3,35}?)(?:\s+(?:hoy|mañana|el|a las|a la|próximo|prox|sig|siguiente|pasado|dentro|en|$))/i);
+  if (purposeMatch && purposeMatch[1]) {
+    title = purposeMatch[1].trim();
+    console.log(`[CALENDAR_INTERNAL] 🔍 Title (purpose): "${title}"`);
   }
   
-  // Si no encontró, usar palabra clave como título
+  // Opción 2: Buscar "con el/la [persona]"
   if (!title) {
-    const keywordMatch = userMessage.match(/\b(cena|comida|desayuno|reunión|reunion|cita|llamada|evento|junta|dentista|zoom|meet)\b/i);
-    if (keywordMatch) {
-      title = keywordMatch[1].charAt(0).toUpperCase() + keywordMatch[1].slice(1);
+    const withMatch = userMessage.match(/\b(?:con|cita\s+con|reunión\s+con|reunion\s+con)\s+(?:el|la)?\s*([a-záéíóúñ\s]{3,35}?)(?:\s+(?:hoy|mañana|el|a las|a la|próximo|prox|sig|siguiente|pasado|dentro|en|$))/i);
+    if (withMatch && withMatch[1]) {
+      title = withMatch[1].trim();
+      console.log(`[CALENDAR_INTERNAL] 🔍 Title (with person): "${title}"`);
     }
   }
   
-  // Fallback final
+  // Opción 3: Buscar palabra clave sola (dentista, doctor, etc)
   if (!title) {
-    title = 'Evento';
+    const keywordMatch = userMessage.match(/\b(cena|comida|desayuno|almuerzo|reunión|reunion|cita|llamada|evento|junta|dentista|doctor|médico|medico|gimnasio|entrenamiento|clase|curso|zoom|meet|videollamada)\b/i);
+    if (keywordMatch) {
+      title = keywordMatch[1].charAt(0).toUpperCase() + keywordMatch[1].slice(1);
+      console.log(`[CALENDAR_INTERNAL] 🔍 Title (keyword): "${title}"`);
+    }
   }
   
-  // Extraer fecha y hora
+  // Fallback final: usar texto completo resumido
+  if (!title) {
+    // Tomar primeras 3-5 palabras como título
+    const words = userMessage.split(/\s+/).filter(w => w.length > 2 && !w.match(/^(el|la|los|las|de|del|para|por|en|con|hoy|mañana)$/i));
+    title = words.slice(0, 3).join(' ') || 'Evento';
+    console.log(`[CALENDAR_INTERNAL] 🔍 Title (fallback): "${title}"`);
+  }
+  
+  // Limpiar título: capitalizar primera letra
+  title = title.charAt(0).toUpperCase() + title.slice(1);
+  
+  // ═══════════════════════════════════════════════════════════════
+  // EXTRAER FECHA
+  // ═══════════════════════════════════════════════════════════════
   const now = new Date();
   const mexicoNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
   
   let targetDate = new Date(mexicoNow);
+  let dateDetected = false;
   
-  // Detectar "hoy" o "mañana"
-  if (lowerMsg.includes('mañana')) {
-    targetDate.setDate(targetDate.getDate() + 1);
+  // 1. "pasado mañana"
+  if (lowerMsg.match(/\b(pasado\s+mañana|pasadomañana)\b/)) {
+    targetDate.setDate(targetDate.getDate() + 2);
+    console.log('[CALENDAR_INTERNAL] 🔍 Date: pasado mañana (+2 días)');
+    dateDetected = true;
   }
   
-  // Extraer hora
-  const timeMatch = userMessage.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.?m\.?|p\.?m\.?)?/i);
+  // 2. "mañana"
+  else if (lowerMsg.match(/\b(mañana)\b/)) {
+    targetDate.setDate(targetDate.getDate() + 1);
+    console.log('[CALENDAR_INTERNAL] 🔍 Date: mañana (+1 día)');
+    dateDetected = true;
+  }
+  
+  // 3. "hoy"
+  else if (lowerMsg.match(/\b(hoy)\b/)) {
+    console.log('[CALENDAR_INTERNAL] 🔍 Date: hoy');
+    dateDetected = true;
+  }
+  
+  // 4. "dentro de X días/semanas"
+  const withinMatch = lowerMsg.match(/\b(?:dentro\s+de|en)\s+(\d+)\s+(día|dias|día|días|semana|semanas)\b/);
+  if (!dateDetected && withinMatch) {
+    const amount = parseInt(withinMatch[1]);
+    const unit = withinMatch[2];
+    
+    if (unit.includes('semana')) {
+      targetDate.setDate(targetDate.getDate() + (amount * 7));
+      console.log(`[CALENDAR_INTERNAL] 🔍 Date: dentro de ${amount} semana(s) (+${amount * 7} días)`);
+    } else {
+      targetDate.setDate(targetDate.getDate() + amount);
+      console.log(`[CALENDAR_INTERNAL] 🔍 Date: dentro de ${amount} día(s)`);
+    }
+    dateDetected = true;
+  }
+  
+  // 5. Día de la semana con modificadores: "próximo/siguiente/este martes"
+  if (!dateDetected) {
+    const dayMatch = lowerMsg.match(/(?:próximo|prox|siguiente|sig|este|esta|el)\s+(lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)/i);
+    if (dayMatch) {
+      const dayName = dayMatch[1].toLowerCase();
+      const dayMap: { [key: string]: number } = {
+        'domingo': 0, 'lunes': 1, 'martes': 2, 'miércoles': 3, 'miercoles': 3,
+        'jueves': 4, 'viernes': 5, 'sábado': 6, 'sabado': 6
+      };
+      
+      const targetDay = dayMap[dayName];
+      const currentDay = targetDate.getDay();
+      
+      // Calcular días hasta el próximo día de la semana
+      let daysToAdd = targetDay - currentDay;
+      if (daysToAdd <= 0) {
+        daysToAdd += 7; // Ir a la próxima semana
+      }
+      
+      targetDate.setDate(targetDate.getDate() + daysToAdd);
+      console.log(`[CALENDAR_INTERNAL] 🔍 Date: próximo ${dayName} (+${daysToAdd} días)`);
+      dateDetected = true;
+    }
+  }
+  
+  // 6. "la próxima semana" o "la semana que viene"
+  if (!dateDetected && lowerMsg.match(/\b(la\s+próxima\s+semana|la\s+semana\s+que\s+viene|próxima\s+semana)\b/)) {
+    targetDate.setDate(targetDate.getDate() + 7);
+    console.log('[CALENDAR_INTERNAL] 🔍 Date: la próxima semana (+7 días)');
+    dateDetected = true;
+  }
+  
+  // 7. Default: hoy (si no se detectó ninguna fecha específica)
+  if (!dateDetected) {
+    console.log('[CALENDAR_INTERNAL] 🔍 Date: default (hoy)');
+  }
+  
+  // ═══════════════════════════════════════════════════════════════
+  // EXTRAER HORA
+  // ═══════════════════════════════════════════════════════════════
+  const timeMatch = userMessage.match(/(?:a las?|de las?)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.?m\.?|p\.?m\.?)?/i);
   let hours = 12;
   let minutes = 0;
   
@@ -63,19 +156,25 @@ function extractEventInfo(userMessage: string): {
     minutes = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
     
     const meridiem = timeMatch[3]?.toLowerCase();
-    if (meridiem && meridiem.includes('pm') && hours < 12) {
+    
+    // Si no hay meridiem explícito, asumir PM para horas de tarde comunes
+    if (!meridiem && hours >= 1 && hours <= 11) {
+      hours += 12; // Default a PM
+      console.log(`[CALENDAR_INTERNAL] 🔍 Time: ${timeMatch[1]} (asumiendo PM) → ${hours}:${minutes.toString().padStart(2, '0')}`);
+    } else if (meridiem && meridiem.includes('pm') && hours < 12) {
       hours += 12;
+      console.log(`[CALENDAR_INTERNAL] 🔍 Time: ${timeMatch[1]} ${meridiem} → ${hours}:${minutes.toString().padStart(2, '0')}`);
     } else if (meridiem && meridiem.includes('am') && hours === 12) {
       hours = 0;
+      console.log(`[CALENDAR_INTERNAL] 🔍 Time: ${timeMatch[1]} ${meridiem} → ${hours}:${minutes.toString().padStart(2, '0')}`);
+    } else {
+      console.log(`[CALENDAR_INTERNAL] 🔍 Time: ${hours}:${minutes.toString().padStart(2, '0')}`);
     }
+  } else {
+    console.log('[CALENDAR_INTERNAL] 🔍 Time: default (12:00)');
   }
   
   targetDate.setHours(hours, minutes, 0, 0);
-  
-  // Si la fecha ya pasó hoy, agregar 1 día
-  if (targetDate < mexicoNow) {
-    targetDate.setDate(targetDate.getDate() + 1);
-  }
   
   // End date: 1 hora después
   const endDate = new Date(targetDate);
