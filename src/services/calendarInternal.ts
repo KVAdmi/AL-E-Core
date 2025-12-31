@@ -19,32 +19,45 @@ function extractEventInfo(userMessage: string): {
 } {
   console.log(`[CALENDAR_INTERNAL] 🔍 extractEventInfo - Input: "${userMessage}"`);
   
-  const lowerMsg = userMessage.toLowerCase();
+  // LIMPIAR PREFIJOS (pgaribay:, luma:, etc) ANTES de parsear
+  const cleanMessage = userMessage.replace(/^[a-z]+:\s*/i, '').trim();
+  console.log(`[CALENDAR_INTERNAL] 🧹 Cleaned message: "${cleanMessage}"`);
+  
+  const lowerMsg = cleanMessage.toLowerCase();
   
   // ═══════════════════════════════════════════════════════════════
   // EXTRAER TÍTULO
   // ═══════════════════════════════════════════════════════════════
   let title: string | null = null;
   
-  // Opción 1: Buscar "para [hacer algo]" o "para ir a/al [lugar]"
-  const purposeMatch = userMessage.match(/\bpara\s+(?:ir\s+)?(?:al?|con|ver)\s+([a-záéíóúñ\s]{3,35}?)(?:\s+(?:hoy|mañana|el|a las|a la|próximo|prox|sig|siguiente|pasado|dentro|en|$))/i);
-  if (purposeMatch && purposeMatch[1]) {
-    title = purposeMatch[1].trim();
-    console.log(`[CALENDAR_INTERNAL] 🔍 Title (purpose): "${title}"`);
+  // Opción 1: Buscar "llamar/hablar/contactar a [persona]"
+  const callMatch = cleanMessage.match(/\b(?:llamar|hablar|contactar)\s+(?:a|con)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+(?:hoy|mañana|el|a las|a la|próximo|prox|sig|siguiente|pasado|dentro|en|$|\?))/i);
+  if (callMatch && callMatch[1]) {
+    title = callMatch[1].trim();
+    console.log(`[CALENDAR_INTERNAL] 🔍 Title (call pattern): "${title}"`);
   }
   
-  // Opción 2: Buscar "con el/la [persona]"
+  // Opción 2: Buscar "para [hacer algo]" o "para ir a/al [lugar]"
   if (!title) {
-    const withMatch = userMessage.match(/\b(?:con|cita\s+con|reunión\s+con|reunion\s+con)\s+(?:el|la)?\s*([a-záéíóúñ\s]{3,35}?)(?:\s+(?:hoy|mañana|el|a las|a la|próximo|prox|sig|siguiente|pasado|dentro|en|$))/i);
+    const purposeMatch = cleanMessage.match(/\bpara\s+(?:ir\s+)?(?:al?|con|ver)\s+([a-záéíóúñ\s]{3,35}?)(?:\s+(?:hoy|mañana|el|a las|a la|próximo|prox|sig|siguiente|pasado|dentro|en|$))/i);
+    if (purposeMatch && purposeMatch[1]) {
+      title = purposeMatch[1].trim();
+      console.log(`[CALENDAR_INTERNAL] 🔍 Title (purpose): "${title}"`);
+    }
+  }
+  
+  // Opción 3: Buscar "con el/la [persona]"
+  if (!title) {
+    const withMatch = cleanMessage.match(/\b(?:con|cita\s+con|reunión\s+con|reunion\s+con)\s+(?:el|la)?\s*([a-záéíóúñ\s]{3,35}?)(?:\s+(?:hoy|mañana|el|a las|a la|próximo|prox|sig|siguiente|pasado|dentro|en|$))/i);
     if (withMatch && withMatch[1]) {
       title = withMatch[1].trim();
       console.log(`[CALENDAR_INTERNAL] 🔍 Title (with person): "${title}"`);
     }
   }
   
-  // Opción 3: Buscar palabra clave sola (dentista, doctor, etc)
+  // Opción 4: Buscar palabra clave sola (dentista, doctor, etc)
   if (!title) {
-    const keywordMatch = userMessage.match(/\b(cena|comida|desayuno|almuerzo|reunión|reunion|cita|llamada|evento|junta|dentista|doctor|médico|medico|gimnasio|entrenamiento|clase|curso|zoom|meet|videollamada)\b/i);
+    const keywordMatch = cleanMessage.match(/\b(cena|comida|desayuno|almuerzo|reunión|reunion|cita|llamada|evento|junta|dentista|doctor|médico|medico|gimnasio|entrenamiento|clase|curso|zoom|meet|videollamada)\b/i);
     if (keywordMatch) {
       title = keywordMatch[1].charAt(0).toUpperCase() + keywordMatch[1].slice(1);
       console.log(`[CALENDAR_INTERNAL] 🔍 Title (keyword): "${title}"`);
@@ -54,7 +67,7 @@ function extractEventInfo(userMessage: string): {
   // Fallback final: usar texto completo resumido
   if (!title) {
     // Tomar primeras 3-5 palabras como título
-    const words = userMessage.split(/\s+/).filter(w => w.length > 2 && !w.match(/^(el|la|los|las|de|del|para|por|en|con|hoy|mañana)$/i));
+    const words = cleanMessage.split(/\s+/).filter(w => w.length > 2 && !w.match(/^(el|la|los|las|de|del|para|por|en|con|hoy|mañana)$/i));
     title = words.slice(0, 3).join(' ') || 'Evento';
     console.log(`[CALENDAR_INTERNAL] 🔍 Title (fallback): "${title}"`);
   }
@@ -147,7 +160,7 @@ function extractEventInfo(userMessage: string): {
   // ═══════════════════════════════════════════════════════════════
   // EXTRAER HORA
   // ═══════════════════════════════════════════════════════════════
-  const timeMatch = userMessage.match(/(?:a las?|de las?)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.?m\.?|p\.?m\.?)?/i);
+  const timeMatch = cleanMessage.match(/(?:a las?|de las?)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.?m\.?|p\.?m\.?)?/i);
   let hours = 12;
   let minutes = 0;
   
@@ -157,16 +170,17 @@ function extractEventInfo(userMessage: string): {
     
     const meridiem = timeMatch[3]?.toLowerCase();
     
-    // Si no hay meridiem explícito, asumir PM para horas de tarde comunes
-    if (!meridiem && hours >= 1 && hours <= 11) {
-      hours += 12; // Default a PM
-      console.log(`[CALENDAR_INTERNAL] 🔍 Time: ${timeMatch[1]} (asumiendo PM) → ${hours}:${minutes.toString().padStart(2, '0')}`);
-    } else if (meridiem && meridiem.includes('pm') && hours < 12) {
+    // Convertir a formato 24 horas según meridiem
+    if (meridiem && meridiem.includes('pm') && hours < 12) {
       hours += 12;
       console.log(`[CALENDAR_INTERNAL] 🔍 Time: ${timeMatch[1]} ${meridiem} → ${hours}:${minutes.toString().padStart(2, '0')}`);
     } else if (meridiem && meridiem.includes('am') && hours === 12) {
       hours = 0;
       console.log(`[CALENDAR_INTERNAL] 🔍 Time: ${timeMatch[1]} ${meridiem} → ${hours}:${minutes.toString().padStart(2, '0')}`);
+    } else if (!meridiem && hours >= 1 && hours <= 11) {
+      // Sin meridiem explícito: asumir PM para horas 1-11
+      hours += 12;
+      console.log(`[CALENDAR_INTERNAL] 🔍 Time: ${timeMatch[1]} (asumiendo PM) → ${hours}:${minutes.toString().padStart(2, '0')}`);
     } else {
       console.log(`[CALENDAR_INTERNAL] 🔍 Time: ${hours}:${minutes.toString().padStart(2, '0')}`);
     }
@@ -174,17 +188,29 @@ function extractEventInfo(userMessage: string): {
     console.log('[CALENDAR_INTERNAL] 🔍 Time: default (12:00)');
   }
   
-  targetDate.setHours(hours, minutes, 0, 0);
+  // CRÍTICO: Construir fecha en timezone México usando ISO string
+  // Para evitar problemas de conversión UTC
+  const year = targetDate.getFullYear();
+  const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+  const day = String(targetDate.getDate()).padStart(2, '0');
+  const hourStr = String(hours).padStart(2, '0');
+  const minuteStr = String(minutes).padStart(2, '0');
+  
+  // Crear fecha en México time (ISO format con timezone offset)
+  const mexicoDateStr = `${year}-${month}-${day}T${hourStr}:${minuteStr}:00`;
+  const finalStartDate = new Date(mexicoDateStr);
+  
+  console.log(`[CALENDAR_INTERNAL] 🕐 Final start date: ${finalStartDate.toISOString()} (${mexicoDateStr} México)`);
   
   // End date: 1 hora después
-  const endDate = new Date(targetDate);
-  endDate.setHours(targetDate.getHours() + 1);
+  const endDate = new Date(finalStartDate);
+  endDate.setHours(finalStartDate.getHours() + 1);
   
   return {
     title,
-    startDate: targetDate,
+    startDate: finalStartDate,
     endDate,
-    description: userMessage
+    description: cleanMessage
   };
 }
 
