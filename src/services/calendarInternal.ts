@@ -188,19 +188,24 @@ function extractEventInfo(userMessage: string): {
     console.log('[CALENDAR_INTERNAL] 🔍 Time: default (12:00)');
   }
   
-  // CRÍTICO: Construir fecha en timezone México usando ISO string
-  // Para evitar problemas de conversión UTC
+  // CRÍTICO: Construir fecha en timezone México y convertir a UTC
+  // México = UTC-6, entonces 11:30 PM México → 5:30 AM UTC del día siguiente
+  
+  targetDate.setHours(hours, minutes, 0, 0);
+  
+  // Crear el string ISO con timezone offset de México (-06:00)
   const year = targetDate.getFullYear();
   const month = String(targetDate.getMonth() + 1).padStart(2, '0');
   const day = String(targetDate.getDate()).padStart(2, '0');
   const hourStr = String(hours).padStart(2, '0');
   const minuteStr = String(minutes).padStart(2, '0');
   
-  // Crear fecha en México time (ISO format con timezone offset)
-  const mexicoDateStr = `${year}-${month}-${day}T${hourStr}:${minuteStr}:00`;
-  const finalStartDate = new Date(mexicoDateStr);
+  // Construir fecha con offset explícito de México
+  const mexicoISOString = `${year}-${month}-${day}T${hourStr}:${minuteStr}:00-06:00`;
+  const finalStartDate = new Date(mexicoISOString);
   
-  console.log(`[CALENDAR_INTERNAL] 🕐 Final start date: ${finalStartDate.toISOString()} (${mexicoDateStr} México)`);
+  console.log(`[CALENDAR_INTERNAL] 🕐 México time: ${hours}:${minutes.toString().padStart(2, '0')} (${year}-${month}-${day})`);
+  console.log(`[CALENDAR_INTERNAL] 🕐 UTC time (stored): ${finalStartDate.toISOString()}`);
   
   // End date: 1 hora después
   const endDate = new Date(finalStartDate);
