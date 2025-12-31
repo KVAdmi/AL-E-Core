@@ -604,6 +604,8 @@ AL-E: "No tengo capacidad de acceder a internet..."
     console.log('[ORCH] STEP 4.5: Classifying intent...');
     const intent = this.classifyUserIntent(lastUserMessage);
     console.log(`[ORCH] STEP 4.5: ✓ Intent: ${intent.intent_type}, confidence: ${intent.confidence}, tools: ${intent.tools_required.join(',')}`);
+    console.log(`[ORCH] STEP 4.5: 🔍 DEBUG - Full message: "${lastUserMessage}"`);
+    console.log(`[ORCH] STEP 4.5: 🔍 DEBUG - Tools required: [${intent.tools_required.join(', ')}]`);
     
     // STEP 5: Tool decision & execution (intent-driven)
     console.log('[ORCH] STEP 5: Tool execution...');

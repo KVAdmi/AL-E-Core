@@ -569,6 +569,35 @@ Ejemplo malo: "Visita https://... para ver el precio."` },
       }
       
       answer = guardrailResult.text;
+      
+      // ============================================
+      // C4.5) GUARDRAIL ANTI-MENTIRAS CON EVIDENCIA (P0 HOY)
+      // ============================================
+      
+      const { validateLLMResponse } = await import('../services/responseValidator');
+      const { executeAction } = await import('../services/actionGateway');
+      
+      // Reconstruir actionResult desde orchestratorContext
+      const actionResultFromContext = orchestratorContext.toolUsed !== 'none' ? {
+        success: !orchestratorContext.toolFailed,
+        action: orchestratorContext.toolUsed,
+        evidence: null, // TODO: pasar evidence desde orchestrator
+        userMessage: orchestratorContext.toolResult || '',
+        reason: orchestratorContext.toolError
+      } : undefined;
+      
+      const validationResult = validateLLMResponse(
+        answer,
+        orchestratorContext.intent,
+        actionResultFromContext
+      );
+      
+      if (!validationResult.valid) {
+        console.error(`[RESPONSE_VALIDATOR] ❌ LLM RESPONSE REJECTED: ${validationResult.reason}`);
+        answer = validationResult.correctedResponse || answer;
+        console.log(`[RESPONSE_VALIDATOR] ✓ Response corrected to: "${answer.substring(0, 100)}..."`);
+      }
+      
       assistantTokens = llmResponse.response.tokens_out || estimateTokens(answer);
       
       // Actualizar output tokens en context
