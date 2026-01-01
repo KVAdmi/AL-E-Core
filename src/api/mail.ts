@@ -35,19 +35,150 @@ import { requireAuth } from '../middleware/auth';
 const router = express.Router();
 
 // ═══════════════════════════════════════════════════════════════
-// POST /api/mail/send - DESHABILITADO (AWS SES NO CONFIGURADO)
+// POST /api/mail/send - AWS SES (P0 VALIDACIÓN REAL)
 // ═══════════════════════════════════════════════════════════════
+/**
+ * REGLAS OBLIGATORIAS (NO NEGOCIABLES):
+ * 1. SOLO success=true si hay provider_message_id REAL
+ * 2. SIEMPRE registrar en email_audit_log
+ * 3. NO confirmar envío sin evidencia SMTP
+ * 4. NO simular messageId
+ * 5. NO success=true sin registro en DB
+ */
 
 router.post('/send', requireAuth, async (req, res) => {
-  console.log('[MAIL] ❌ SEND DISABLED - AWS SES not configured');
-  
-  return res.status(501).json({
-    success: false,
-    action: 'mail.send',
-    evidence: null,
-    userMessage: 'El envío de correos aún no está configurado.',
-    reason: 'SMTP_NOT_CONFIGURED'
-  });
+  try {
+    const { to, subject, body, html } = req.body;
+    const userId = (req as any).user?.id;
+    
+    // Validar campos requeridos
+    if (!to || !subject || (!body && !html)) {
+      return res.status(400).json({
+        success: false,
+        action: 'mail.send',
+        evidence: null,
+        userMessage: 'Campos requeridos: to, subject, body o html',
+        reason: 'MISSING_REQUIRED_FIELDS'
+      });
+    }
+    
+    console.log('[MAIL] 📧 Enviando correo...');
+    console.log(`[MAIL] To: ${to}`);
+    console.log(`[MAIL] Subject: ${subject}`);
+    
+    // Verificar configuración de SMTP
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpPort = process.env.SMTP_PORT;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    const emailFrom = process.env.EMAIL_FROM_DEFAULT || 'notificaciones@al-eon.com';
+    const emailFromName = process.env.EMAIL_FROM_NAME || 'AL-E';
+    
+    if (!smtpHost || !smtpPort || !smtpUser || !smtpPass) {
+      console.error('[MAIL] ❌ SMTP not configured in environment');
+      return res.status(501).json({
+        success: false,
+        action: 'mail.send',
+        evidence: null,
+        userMessage: 'El envío de correos no está configurado. Contacta al administrador.',
+        reason: 'SMTP_NOT_CONFIGURED'
+      });
+    }
+    
+    // Crear transporter con AWS SES
+    console.log('[MAIL] 🔧 Configurando transporter AWS SES...');
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: parseInt(smtpPort),
+      secure: process.env.SMTP_SECURE === 'true', // false para port 587
+      auth: {
+        user: smtpUser,
+        pass: smtpPass
+      }
+    });
+    
+    // Enviar correo REAL
+    console.log('[MAIL] 📤 Enviando a AWS SES...');
+    const info = await transporter.sendMail({
+      from: `"${emailFromName}" <${emailFrom}>`,
+      to: to,
+      subject: subject,
+      text: body,
+      html: html || body
+    });
+    
+    console.log('[MAIL] ✅ Correo enviado por AWS SES');
+    console.log(`[MAIL] Message ID: ${info.messageId}`);
+    console.log(`[MAIL] Response: ${info.response}`);
+    
+    // P0 CRÍTICO: Validar que hay messageId REAL
+    if (!info.messageId) {
+      console.error('[MAIL] ❌ NO MESSAGE ID - Envío falló');
+      return res.status(500).json({
+        success: false,
+        action: 'mail.send',
+        evidence: null,
+        userMessage: 'Error al enviar correo: sin confirmación del proveedor.',
+        reason: 'NO_MESSAGE_ID'
+      });
+    }
+    
+    // P0 CRÍTICO: Registrar en email_audit_log
+    console.log('[MAIL] 💾 Registrando en email_audit_log...');
+    const { data: auditLog, error: auditError } = await supabase
+      .from('email_audit_log')
+      .insert({
+        to: to,
+        from: emailFrom,
+        subject: subject,
+        body_text: body,
+        body_html: html || null,
+        provider: 'aws_ses',
+        provider_message_id: info.messageId,
+        status: 'sent',
+        sent_by_user_id: userId || null,
+        sent_at: new Date().toISOString()
+      })
+      .select('id')
+      .single();
+    
+    if (auditError || !auditLog) {
+      console.error('[MAIL] ❌ Error registrando en audit log:', auditError);
+      // CRÍTICO: Si no se pudo registrar, NO confirmar éxito
+      return res.status(500).json({
+        success: false,
+        action: 'mail.send',
+        evidence: null,
+        userMessage: 'Correo enviado pero no se pudo registrar en auditoría. Contacta al administrador.',
+        reason: 'AUDIT_LOG_FAILED'
+      });
+    }
+    
+    console.log(`[MAIL] ✅ Audit log creado: ${auditLog.id}`);
+    
+    // P0 SUCCESS: SOLO si hay messageId + auditLog
+    return res.status(200).json({
+      success: true,
+      action: 'mail.send',
+      evidence: {
+        table: 'email_audit_log',
+        id: auditLog.id,
+        provider_message_id: info.messageId
+      },
+      userMessage: `Correo enviado exitosamente a ${to}`,
+      messageId: info.messageId
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL] ❌ Error enviando correo:', error);
+    return res.status(500).json({
+      success: false,
+      action: 'mail.send',
+      evidence: null,
+      userMessage: `Error al enviar correo: ${error.message}`,
+      reason: error.code || 'SMTP_ERROR'
+    });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════
