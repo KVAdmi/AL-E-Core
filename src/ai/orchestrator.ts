@@ -18,6 +18,7 @@ import { supabase } from '../db/supabase';
 import { retrieveRelevantChunks } from '../services/chunkRetrieval';
 import { webSearch, formatTavilyResults, shouldUseWebSearch, TavilySearchResponse } from '../services/tavilySearch';
 import { classifyIntent, generateFallbackContext, IntentClassification } from '../services/intentClassifier';
+import { selectResponseMode, ResponseMode, ModeClassification } from '../services/modeSelector';
 import crypto from 'crypto';
 
 // ═══════════════════════════════════════════════════════════════
@@ -68,6 +69,10 @@ export interface OrchestratorContext {
   
   // Intent Classification (NUEVO)
   intent: IntentClassification;
+  
+  // Mode Classification (P0 CORE)
+  responseMode: ResponseMode;
+  modeClassification: ModeClassification;
   
   // Tools
   toolUsed: string;
@@ -220,7 +225,8 @@ export class Orchestrator {
   private async decideAndExecuteTool(
     userMessage: string,
     intent: IntentClassification,
-    userId: string
+    userId: string,
+    modeClassification: ModeClassification
   ): Promise<{ 
     toolUsed: string; 
     toolReason?: string;
@@ -230,7 +236,37 @@ export class Orchestrator {
     tavilyResponse?: TavilySearchResponse;
   }> {
     
-    // Si el intent NO requiere tools, skip
+    // ═══════════════════════════════════════════════════════════════
+    // P0 CORE: MODE SELECTOR (Prioridad sobre intent)
+    // ═══════════════════════════════════════════════════════════════
+    
+    // MODE A: KNOWLEDGE_GENERAL - NO TOOLS (70-85% queries)
+    if (modeClassification.mode === 'KNOWLEDGE_GENERAL') {
+      console.log('[ORCH] 🧠 MODE A: KNOWLEDGE_GENERAL - Using model knowledge, NO tools');
+      return {
+        toolUsed: 'none',
+        toolReason: 'General knowledge query - no external tools needed',
+        toolFailed: false
+      };
+    }
+    
+    // MODE B: RESEARCH_RECENT - FORCE WEB_SEARCH (10-25% queries)
+    if (modeClassification.mode === 'RESEARCH_RECENT') {
+      console.log('[ORCH] 🔍 MODE B: RESEARCH_RECENT - Forcing web_search');
+      // Override intent to force web_search
+      intent.tools_required = ['web_search'];
+    }
+    
+    // MODE C: CRITICAL_DATA_OR_ACTION - FORCE TOOLS + REQUIRE EVIDENCE (5-10% queries)
+    if (modeClassification.mode === 'CRITICAL_DATA_OR_ACTION') {
+      console.log('[ORCH] ⚡ MODE C: CRITICAL_DATA_OR_ACTION - Forcing tools + evidence required');
+      // Ensure tools are executed
+      if (modeClassification.toolsRequired.length > 0) {
+        intent.tools_required = modeClassification.toolsRequired;
+      }
+    }
+    
+    // Si el intent NO requiere tools después de MODE override, skip
     if (intent.tools_required.length === 0) {
       console.log('[ORCH] ℹ️ Intent: stable knowledge - no tools required');
       return {
@@ -258,6 +294,20 @@ export class Orchestrator {
     // Si hay evidence, loggear para debugging
     if (actionResult.evidence) {
       console.log('[ORCH] Evidence:', JSON.stringify(actionResult.evidence));
+    }
+    
+    // MODE C: Validate evidence requirement
+    if (modeClassification.evidenceRequired && !actionResult.evidence) {
+      const { getNoEvidenceError } = await import('../services/modeSelector');
+      const errorMsg = getNoEvidenceError(modeClassification.mode);
+      console.log(`[ORCH] ⚠️ MODE C: Evidence required but not provided - ${errorMsg}`);
+      return {
+        toolUsed: actionResult.action,
+        toolReason: errorMsg,
+        toolResult: errorMsg,
+        toolFailed: true,
+        toolError: errorMsg
+      };
     }
     
     return {
@@ -302,7 +352,8 @@ export class Orchestrator {
     memories: Array<any>,
     chunks: Array<any>,
     basePrompt: string,
-    toolResult?: string
+    toolResult?: string,
+    modeClassification?: ModeClassification
   ): string {
     let systemPrompt = basePrompt;
     
@@ -334,6 +385,59 @@ NO uses tu conocimiento de entrenamiento. Esta es la fecha/hora real del sistema
 ═══════════════════════════════════════════════════════════════
 `;
     console.log('[ORCH] ✓ Temporal context injected:', mexicoTime);
+    
+    // 0.5 MODE-AWARE INSTRUCTIONS (P0 CORE)
+    if (modeClassification) {
+      systemPrompt += `
+
+═══════════════════════════════════════════════════════════════
+🎯 MODO DE RESPUESTA (P0 CORE - EXECUTIVE VIP)
+═══════════════════════════════════════════════════════════════
+
+Modo actual: ${modeClassification.mode}
+Confianza: ${modeClassification.confidence}%
+Razonamiento: ${modeClassification.reasoning}
+
+`;
+      
+      if (modeClassification.mode === 'KNOWLEDGE_GENERAL') {
+        systemPrompt += `
+🧠 MODO A: CONOCIMIENTO GENERAL
+- INSTRUCCIÓN: Responde usando tu conocimiento general de entrenamiento
+- NO menciones búsquedas web, herramientas o acciones externas
+- NO digas "busqué", "consulté", "verifiqué" - simplemente RESPONDE
+- Sé natural, conversacional y directo
+- Si necesitas información actual que NO tienes, admítelo honestamente
+- Ejemplos: recetas, historia, estrategia, explicaciones, análisis conceptual
+`;
+      } else if (modeClassification.mode === 'RESEARCH_RECENT') {
+        systemPrompt += `
+🔍 MODO B: INVESTIGACIÓN RECIENTE
+- INSTRUCCIÓN: DEBES citar las fuentes web proporcionadas abajo
+- Menciona de dónde obtuviste la información (ej: "Según [fuente]...")
+- Compara múltiples fuentes cuando estén disponibles
+- Si la información web es insuficiente, DILO claramente
+- NO inventes datos - solo reporta lo que las fuentes dicen
+- Ejemplos: noticias, tendencias, precios actuales, eventos recientes
+`;
+      } else if (modeClassification.mode === 'CRITICAL_DATA_OR_ACTION') {
+        systemPrompt += `
+⚡ MODO C: DATOS CRÍTICOS O ACCIÓN
+- INSTRUCCIÓN SUPREMA: SOLO confirma acciones si hay evidence.id en el resultado
+- SI NO hay evidence.id → Di: "No pude completar [acción]. [Razón específica]"
+- NO digas "creé", "agendé", "envié" sin evidencia comprobable
+- Para datos financieros/críticos: REQUIERE precisión absoluta o admite limitación
+- NO aproximes, NO inventes, NO asumas éxito sin confirmación
+- Ejemplos: precios exactos, agenda, correos, operaciones financieras
+- CALIDAD VIP: Ejecutivos no toleran imprecisión - mejor admitir limitación que mentir
+`;
+      }
+      
+      systemPrompt += `
+═══════════════════════════════════════════════════════════════
+`;
+      console.log(`[ORCH] ✓ MODE-AWARE instructions injected: ${modeClassification.mode}`);
+    }
     
     // 1. Tool result (si se ejecutó alguna herramienta) - VA PRIMERO
   if (toolResult) {
@@ -607,10 +711,17 @@ AL-E: "No tengo capacidad de acceder a internet..."
     console.log(`[ORCH] STEP 4.5: 🔍 DEBUG - Full message: "${lastUserMessage}"`);
     console.log(`[ORCH] STEP 4.5: 🔍 DEBUG - Tools required: [${intent.tools_required.join(', ')}]`);
     
-    // STEP 5: Tool decision & execution (intent-driven)
+    // STEP 4.6: Mode Selection (P0 CORE)
+    console.log('[ORCH] STEP 4.6: Selecting response mode...');
+    const modeClassification = selectResponseMode(lastUserMessage);
+    console.log(`[ORCH] STEP 4.6: ✓ Mode: ${modeClassification.mode}, confidence: ${modeClassification.confidence}`);
+    console.log(`[ORCH] STEP 4.6: 📊 Reasoning: ${modeClassification.reasoning}`);
+    console.log(`[ORCH] STEP 4.6: 🔧 Tools: [${modeClassification.toolsRequired.join(', ')}], Evidence required: ${modeClassification.evidenceRequired}`);
+    
+    // STEP 5: Tool decision & execution (intent-driven + MODE-aware)
     console.log('[ORCH] STEP 5: Tool execution...');
     const { toolUsed, toolReason, toolResult, toolFailed, toolError, tavilyResponse } = 
-      await this.decideAndExecuteTool(lastUserMessage, intent, userId);
+      await this.decideAndExecuteTool(lastUserMessage, intent, userId, modeClassification);
     console.log(`[ORCH] STEP 5: ✓ Tool: ${toolUsed}, failed: ${toolFailed}`);
     
     // STEP 6: Model decision (ahora Groq by default)
@@ -620,7 +731,7 @@ AL-E: "No tengo capacidad de acceder a internet..."
     
     // STEP 7: Build system prompt (incluye tool result si existe)
     console.log('[ORCH] STEP 7: Building system prompt...');
-    const systemPrompt = this.buildSystemPrompt(userIdentity, memories, chunks, basePrompt, toolResult);
+    const systemPrompt = this.buildSystemPrompt(userIdentity, memories, chunks, basePrompt, toolResult, modeClassification);
     console.log(`[ORCH] STEP 7: ✓ Prompt built (${systemPrompt.length} chars)`);
     
     // Métricas
@@ -664,6 +775,8 @@ AL-E: "No tengo capacidad de acceder a internet..."
       memories,
       chunks,
       intent,
+      responseMode: modeClassification.mode,
+      modeClassification,
       toolUsed,
       toolReason,
       toolResult,
