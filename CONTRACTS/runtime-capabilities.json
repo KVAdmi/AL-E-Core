@@ -1,5 +1,5 @@
 {
-  "mail.send": false,
+  "mail.send": true,
   "mail.inbox": false,
   "calendar.create": true,
   "calendar.list": true,
