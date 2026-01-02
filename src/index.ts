@@ -14,6 +14,7 @@ import mailRouter from "./api/mail"; // Mail send/inbox
 import calendarRouter from "./api/calendar"; // Calendario interno
 import telegramRouter from "./api/telegram"; // Telegram bot por usuario
 import runtimeCapabilitiesRouter from "./api/runtime-capabilities"; // Runtime capabilities
+import p0Router from "./api/p0"; // P0 internal testing endpoint
 import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
 import { startNotificationWorker } from "./workers/notificationWorker";
 
@@ -197,6 +198,7 @@ app.use("/api/email", mailRouter); // Mail send/inbox TAMBIÉN en /api/email (pa
 app.use("/api/calendar", calendarRouter); // Calendario interno
 app.use("/api/telegram", telegramRouter); // Telegram bot por usuario
 app.use("/api/runtime-capabilities", runtimeCapabilitiesRouter); // Runtime capabilities
+app.use("/api/p0", p0Router); // P0 internal testing (service role only)
 
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
