@@ -11,6 +11,8 @@ import profileRouter from "./api/profile"; // Personalización de usuario
 import healthRouter from "./api/health"; // Health checks
 import emailRouter from "./api/email"; // Email accounts (SMTP/IMAP manual)
 import mailRouter from "./api/mail"; // Mail send/inbox
+import mailWebhookRouter from "./api/mail-webhook"; // AWS SES webhook
+import mailInboundRouter from "./api/mail-inbound"; // Mail inbound (SES→S3→Lambda→Core)
 import calendarRouter from "./api/calendar"; // Calendario interno
 import telegramRouter from "./api/telegram"; // Telegram bot por usuario
 import runtimeCapabilitiesRouter from "./api/runtime-capabilities"; // Runtime capabilities
@@ -194,6 +196,8 @@ app.use("/api/memory", memoryRouter); // Memoria explícita (acuerdos/decisiones
 app.use("/api/profile", profileRouter); // Personalización de usuario
 app.use("/api/email", emailRouter); // Email accounts (SMTP/IMAP manual)
 app.use("/api/mail", mailRouter); // Mail send/inbox
+app.use("/api/mail", mailWebhookRouter); // AWS SES webhook (same prefix)
+app.use("/api/mail", mailInboundRouter); // Mail inbound (SES+S3)
 app.use("/api/email", mailRouter); // Mail send/inbox TAMBIÉN en /api/email (para compatibilidad frontend)
 app.use("/api/calendar", calendarRouter); // Calendario interno
 app.use("/api/telegram", telegramRouter); // Telegram bot por usuario

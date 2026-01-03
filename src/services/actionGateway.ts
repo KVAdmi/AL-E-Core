@@ -38,8 +38,8 @@ const CAPABILITIES = {
   'calendar.update': true,
   'calendar.delete': true,
   'web.search': true,
-  'mail.send': false,
-  'mail.inbox': false,
+  'mail.send': true,
+  'mail.inbox': true,
   'telegram': false,
   'documents.read': false
 };
@@ -89,6 +89,29 @@ export async function executeAction(
     // Importar y ejecutar calendario interno
     const { executeCalendarAction } = await import('./calendarInternal');
     return await executeCalendarAction(userMessage, ctx.userId);
+  }
+  
+  // ═══════════════════════════════════════════════════════════════
+  // MAIL ACTIONS
+  // ═══════════════════════════════════════════════════════════════
+  
+  if (intent.tools_required.includes('mail_inbox') || intent.tools_required.includes('email')) {
+    
+    if (!CAPABILITIES['mail.inbox']) {
+      return {
+        success: false,
+        action: 'mail.inbox',
+        evidence: null,
+        userMessage: 'Esta función aún no está disponible.',
+        reason: 'CAPABILITY_DISABLED'
+      };
+    }
+    
+    console.log('[ACTION_GATEWAY] 🔥 FORCING mail.inbox execution...');
+    
+    // Importar y ejecutar acción de mail
+    const { executeMailAction } = await import('./mailInternal');
+    return await executeMailAction(userMessage, ctx.userId);
   }
   
   // ═══════════════════════════════════════════════════════════════

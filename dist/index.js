@@ -16,9 +16,12 @@ const profile_1 = __importDefault(require("./api/profile")); // Personalización
 const health_1 = __importDefault(require("./api/health")); // Health checks
 const email_1 = __importDefault(require("./api/email")); // Email accounts (SMTP/IMAP manual)
 const mail_1 = __importDefault(require("./api/mail")); // Mail send/inbox
+const mail_webhook_1 = __importDefault(require("./api/mail-webhook")); // AWS SES webhook
+const mail_inbound_1 = __importDefault(require("./api/mail-inbound")); // Mail inbound (SES→S3→Lambda→Core)
 const calendar_1 = __importDefault(require("./api/calendar")); // Calendario interno
 const telegram_1 = __importDefault(require("./api/telegram")); // Telegram bot por usuario
 const runtime_capabilities_1 = __importDefault(require("./api/runtime-capabilities")); // Runtime capabilities
+const p0_1 = __importDefault(require("./api/p0")); // P0 internal testing endpoint
 const documentText_1 = require("./utils/documentText");
 const notificationWorker_1 = require("./workers/notificationWorker");
 const app = (0, express_1.default)();
@@ -179,10 +182,13 @@ app.use("/api/memory", memory_1.default); // Memoria explícita (acuerdos/decisi
 app.use("/api/profile", profile_1.default); // Personalización de usuario
 app.use("/api/email", email_1.default); // Email accounts (SMTP/IMAP manual)
 app.use("/api/mail", mail_1.default); // Mail send/inbox
+app.use("/api/mail", mail_webhook_1.default); // AWS SES webhook (same prefix)
+app.use("/api/mail", mail_inbound_1.default); // Mail inbound (SES+S3)
 app.use("/api/email", mail_1.default); // Mail send/inbox TAMBIÉN en /api/email (para compatibilidad frontend)
 app.use("/api/calendar", calendar_1.default); // Calendario interno
 app.use("/api/telegram", telegram_1.default); // Telegram bot por usuario
 app.use("/api/runtime-capabilities", runtime_capabilities_1.default); // Runtime capabilities
+app.use("/api/p0", p0_1.default); // P0 internal testing (service role only)
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");

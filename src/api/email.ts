@@ -32,6 +32,8 @@ router.post('/accounts', async (req, res) => {
     const {
       ownerUserId,
       providerLabel,
+      provider, // NUEVO: ses_inbound, ses, gmail, outlook, smtp, imap
+      domain, // NUEVO: para AWS SES
       fromName,
       fromEmail,
       smtpHost,
@@ -43,44 +45,101 @@ router.post('/accounts', async (req, res) => {
       imapPort,
       imapSecure,
       imapUser,
-      imapPass
+      imapPass,
+      // NUEVO: AWS SES específico
+      awsRegion,
+      awsAccessKeyId,
+      awsSecretAccessKey,
+      s3Bucket,
+      // NUEVO: Configuración extendida (firma, spam, banderas)
+      config
     } = req.body;
     
-    // Validaciones
-    if (!ownerUserId || !fromName || !fromEmail || !smtpHost || !smtpPort || !smtpUser || !smtpPass) {
+    // Validaciones según proveedor
+    const effectiveProvider = provider || 'smtp';
+    
+    if (!ownerUserId) {
       return res.status(400).json({
         ok: false,
-        error: 'MISSING_REQUIRED_FIELDS',
-        message: 'Campos requeridos: ownerUserId, fromName, fromEmail, smtpHost, smtpPort, smtpUser, smtpPass'
+        error: 'MISSING_OWNER_USER_ID',
+        message: 'ownerUserId es requerido'
       });
     }
     
-    console.log(`[EMAIL] Creando cuenta para user: ${ownerUserId}, email: ${fromEmail}`);
+    // Validar campos según tipo de proveedor
+    if (effectiveProvider === 'ses_inbound' || effectiveProvider === 'ses') {
+      if (!domain || !awsRegion || !awsAccessKeyId || !awsSecretAccessKey) {
+        return res.status(400).json({
+          ok: false,
+          error: 'MISSING_AWS_SES_FIELDS',
+          message: 'Para AWS SES se requiere: domain, awsRegion, awsAccessKeyId, awsSecretAccessKey'
+        });
+      }
+    } else {
+      // SMTP/IMAP tradicional
+      if (!fromName || !fromEmail || !smtpHost || !smtpPort || !smtpUser || !smtpPass) {
+        return res.status(400).json({
+          ok: false,
+          error: 'MISSING_SMTP_FIELDS',
+          message: 'Para SMTP se requiere: fromName, fromEmail, smtpHost, smtpPort, smtpUser, smtpPass'
+        });
+      }
+    }
+    
+    console.log(`[EMAIL] Creando cuenta para user: ${ownerUserId}, provider: ${effectiveProvider}`);
     
     // Encriptar passwords
-    const smtpPassEnc = encrypt(smtpPass);
+    const smtpPassEnc = smtpPass ? encrypt(smtpPass) : null;
     const imapPassEnc = imapPass ? encrypt(imapPass) : null;
+    const awsSecretEnc = awsSecretAccessKey ? encrypt(awsSecretAccessKey) : null;
+    
+    // Construir objeto de inserción
+    const insertData: any = {
+      owner_user_id: ownerUserId,
+      provider_label: providerLabel || effectiveProvider.toUpperCase(),
+      provider: effectiveProvider,
+      from_name: fromName || null,
+      from_email: fromEmail || null,
+      is_active: true,
+      status: 'active'
+    };
+    
+    // Campos SMTP (si aplica)
+    if (smtpHost) {
+      insertData.smtp_host = smtpHost;
+      insertData.smtp_port = smtpPort;
+      insertData.smtp_secure = smtpSecure || false;
+      insertData.smtp_user = smtpUser;
+      insertData.smtp_pass_enc = smtpPassEnc;
+    }
+    
+    // Campos IMAP (si aplica)
+    if (imapHost) {
+      insertData.imap_host = imapHost;
+      insertData.imap_port = imapPort;
+      insertData.imap_secure = imapSecure || true;
+      insertData.imap_user = imapUser;
+      insertData.imap_pass_enc = imapPassEnc;
+    }
+    
+    // Campos AWS SES (si aplica)
+    if (effectiveProvider === 'ses_inbound' || effectiveProvider === 'ses') {
+      insertData.domain = domain;
+      insertData.aws_region = awsRegion;
+      insertData.aws_access_key_id = awsAccessKeyId;
+      insertData.aws_secret_access_key_enc = awsSecretEnc;
+      insertData.s3_bucket = s3Bucket || null;
+    }
+    
+    // Configuración adicional (firma, spam, banderas)
+    if (config) {
+      insertData.config = config;
+    }
     
     // Insertar en DB
     const { data, error } = await supabase
       .from('email_accounts')
-      .insert({
-        owner_user_id: ownerUserId,
-        provider_label: providerLabel || 'Custom SMTP',
-        from_name: fromName,
-        from_email: fromEmail,
-        smtp_host: smtpHost,
-        smtp_port: smtpPort,
-        smtp_secure: smtpSecure || false,
-        smtp_user: smtpUser,
-        smtp_pass_enc: smtpPassEnc,
-        imap_host: imapHost || null,
-        imap_port: imapPort || null,
-        imap_secure: imapSecure || true,
-        imap_user: imapUser || null,
-        imap_pass_enc: imapPassEnc,
-        is_active: true
-      })
+      .insert(insertData)
       .select()
       .single();
     
@@ -96,7 +155,7 @@ router.post('/accounts', async (req, res) => {
     console.log(`[EMAIL] ✓ Cuenta creada: ${data.id}`);
     
     // Remover passwords encriptados de la respuesta
-    const { smtp_pass_enc, imap_pass_enc, ...safeData } = data;
+    const { smtp_pass_enc, imap_pass_enc, aws_secret_access_key_enc, ...safeData } = data;
     
     return res.json({
       ok: true,

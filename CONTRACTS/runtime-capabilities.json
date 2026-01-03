@@ -1,6 +1,6 @@
 {
   "mail.send": true,
-  "mail.inbox": false,
+  "mail.inbox": true,
   "calendar.create": true,
   "calendar.list": true,
   "calendar.update": true,
