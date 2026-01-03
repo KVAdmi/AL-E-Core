@@ -9,6 +9,9 @@
  */
 
 import { IntentClassification } from './intentClassifier';
+import { executeCalendarAction } from './calendarInternal';
+import { executeMailAction } from './mailInternal';
+import { webSearch, formatTavilyResults } from './tavilySearch';
 
 // ═══════════════════════════════════════════════════════════════
 // TIPOS
@@ -86,8 +89,7 @@ export async function executeAction(
     console.log('[ACTION_GATEWAY] ✅ calendar.create CAPABILITY ENABLED');
     console.log('[ACTION_GATEWAY] 🔥 FORCING calendar.create execution...');
     
-    // Importar y ejecutar calendario interno
-    const { executeCalendarAction } = await import('./calendarInternal');
+    // Ejecutar calendario interno
     return await executeCalendarAction(userMessage, ctx.userId);
   }
   
@@ -109,8 +111,7 @@ export async function executeAction(
     
     console.log('[ACTION_GATEWAY] 🔥 FORCING mail.inbox execution...');
     
-    // Importar y ejecutar acción de mail
-    const { executeMailAction } = await import('./mailInternal');
+    // Ejecutar acción de mail
     return await executeMailAction(userMessage, ctx.userId);
   }
   
@@ -132,9 +133,7 @@ export async function executeAction(
     
     console.log('[ACTION_GATEWAY] 🔥 FORCING web.search execution...');
     
-    // Importar y ejecutar Tavily
-    const { webSearch, formatTavilyResults } = await import('./tavilySearch');
-    
+    // Ejecutar Tavily
     try {
       const searchResponse = await webSearch({
         query: userMessage,
