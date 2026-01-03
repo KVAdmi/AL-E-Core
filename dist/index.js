@@ -18,12 +18,14 @@ const email_1 = __importDefault(require("./api/email")); // Email accounts (SMTP
 const mail_1 = __importDefault(require("./api/mail")); // Mail send/inbox
 const mail_webhook_1 = __importDefault(require("./api/mail-webhook")); // AWS SES webhook
 const mail_inbound_1 = __importDefault(require("./api/mail-inbound")); // Mail inbound (SES→S3→Lambda→Core)
+const emailHub_1 = __importDefault(require("./api/emailHub")); // Email Hub Universal (IMAP/SMTP cualquier proveedor)
 const calendar_1 = __importDefault(require("./api/calendar")); // Calendario interno
 const telegram_1 = __importDefault(require("./api/telegram")); // Telegram bot por usuario
 const runtime_capabilities_1 = __importDefault(require("./api/runtime-capabilities")); // Runtime capabilities
 const p0_1 = __importDefault(require("./api/p0")); // P0 internal testing endpoint
 const documentText_1 = require("./utils/documentText");
 const notificationWorker_1 = require("./workers/notificationWorker");
+const emailSyncWorker_1 = require("./workers/emailSyncWorker");
 const app = (0, express_1.default)();
 // Configurar multer para subida de archivos en memoria
 const upload = (0, multer_1.default)({
@@ -185,6 +187,8 @@ app.use("/api/mail", mail_1.default); // Mail send/inbox
 app.use("/api/mail", mail_webhook_1.default); // AWS SES webhook (same prefix)
 app.use("/api/mail", mail_inbound_1.default); // Mail inbound (SES+S3)
 app.use("/api/email", mail_1.default); // Mail send/inbox TAMBIÉN en /api/email (para compatibilidad frontend)
+app.use("/api/email", emailHub_1.default); // Email Hub Universal (IMAP/SMTP cualquier proveedor)
+app.use("/api/mail", emailHub_1.default); // Email Hub Universal TAMBIÉN en /api/mail (compatibilidad frontend)
 app.use("/api/calendar", calendar_1.default); // Calendario interno
 app.use("/api/telegram", telegram_1.default); // Telegram bot por usuario
 app.use("/api/runtime-capabilities", runtime_capabilities_1.default); // Runtime capabilities
@@ -199,6 +203,8 @@ console.log("[DEBUG] memoryRouter montado en /api/memory");
 console.log("[DEBUG] profileRouter montado en /api/profile");
 console.log("[DEBUG] emailRouter montado en /api/email");
 console.log("[DEBUG] mailRouter montado en /api/mail");
+console.log("[DEBUG] emailHubRouter (Universal IMAP/SMTP) montado en /api/email");
+console.log("[DEBUG] emailHubRouter (Universal IMAP/SMTP) montado en /api/mail");
 console.log("[DEBUG] calendarRouter montado en /api/calendar");
 console.log("[DEBUG] runtimeCapabilitiesRouter montado en /api/runtime-capabilities");
 console.log("[DEBUG] telegramRouter montado en /api/telegram");
@@ -212,4 +218,7 @@ app.listen(PORT, "0.0.0.0", () => {
     // Iniciar notification worker
     console.log('[AL-E CORE] Iniciando notification worker...');
     (0, notificationWorker_1.startNotificationWorker)();
+    // Iniciar email sync worker
+    console.log('[AL-E CORE] Iniciando email sync worker...');
+    (0, emailSyncWorker_1.startEmailSyncWorker)();
 });

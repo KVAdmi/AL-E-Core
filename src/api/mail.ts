@@ -343,7 +343,9 @@ router.get('/inbox/:accountId', async (req, res) => {
                     uid: attributes.uid,
                     from: fromAddr?.address || 'unknown',
                     fromName: fromAddr?.name || fromAddr?.address || 'Unknown',
-                    to: parsed.to?.value?.map((t: any) => t.address) || [],
+                    to: (parsed.to && !Array.isArray(parsed.to) && parsed.to.value) 
+                      ? parsed.to.value.map((t: any) => t.address) 
+                      : [],
                     subject: parsed.subject || '(Sin asunto)',
                     body: bodyText,
                     bodyPreview,
@@ -514,10 +516,17 @@ router.get('/inbox', async (req, res) => {
               try {
                 const parsed = await simpleParser(buffer);
                 
+                const fromText = parsed.from && !Array.isArray(parsed.from) && parsed.from.text 
+                  ? parsed.from.text 
+                  : 'Unknown';
+                const toText = parsed.to && !Array.isArray(parsed.to) && parsed.to.text 
+                  ? parsed.to.text 
+                  : '';
+                
                 emails.push({
                   id: seqno,
-                  from: parsed.from?.text || 'Unknown',
-                  to: parsed.to?.text || '',
+                  from: fromText,
+                  to: toText,
                   subject: parsed.subject || '(Sin asunto)',
                   text: parsed.text?.substring(0, 500) || '',
                   date: parsed.date?.toISOString() || new Date().toISOString(),
