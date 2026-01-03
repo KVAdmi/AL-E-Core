@@ -97,11 +97,9 @@ router.post('/accounts', async (req, res) => {
     const insertData: any = {
       owner_user_id: ownerUserId,
       provider_label: providerLabel || effectiveProvider.toUpperCase(),
-      provider: effectiveProvider,
       from_name: fromName || null,
       from_email: fromEmail || null,
-      is_active: true,
-      status: 'active'
+      is_active: true
     };
     
     // Campos SMTP (si aplica)
@@ -134,6 +132,16 @@ router.post('/accounts', async (req, res) => {
     // Configuración adicional (firma, spam, banderas)
     if (config) {
       insertData.config = config;
+    }
+    
+    // Campos de migración 018 (provider, status)
+    // Agregar solo si la migración fue ejecutada, si no, Supabase los ignorará
+    try {
+      insertData.provider = effectiveProvider;
+      insertData.status = 'active';
+    } catch (e) {
+      // Si las columnas no existen, continuar sin ellas
+      console.log('[EMAIL] Nota: Columnas provider/status no disponibles (migración 018 pendiente)');
     }
     
     // Insertar en DB
