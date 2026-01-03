@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# =====================================================
+# VERIFICAR Y REFRESCAR SCHEMA DE SUPABASE
+# =====================================================
+
+echo "🔍 Verificando columna 'provider' en Supabase..."
+echo ""
+echo "Opciones para refrescar el schema cache:"
+echo ""
+echo "OPCIÓN 1: Desde Supabase Dashboard (RECOMENDADO)"
+echo "  1. Ir a: https://supabase.com/dashboard"
+echo "  2. Seleccionar proyecto AL-E Core"
+echo "  3. Database → Replication (menú lateral)"
+echo "  4. Clic en 'Reload schema cache' o 'Refresh'"
+echo ""
+echo "OPCIÓN 2: Ejecutar SQL para refrescar cache"
+echo "  Ir a SQL Editor y ejecutar:"
+echo ""
+echo "  NOTIFY pgrst, 'reload schema';"
+echo ""
+echo "OPCIÓN 3: Reiniciar API de Supabase"
+echo "  1. Project Settings → API"
+echo "  2. Clic en 'Restart API' (si disponible)"
+echo ""
+echo "OPCIÓN 4: Verificar que la columna existe"
+echo "  Ejecutar en SQL Editor:"
+echo ""
+echo "  SELECT column_name, data_type, is_nullable"
+echo "  FROM information_schema.columns"
+echo "  WHERE table_name = 'email_accounts'"
+echo "  ORDER BY ordinal_position;"
+echo ""
+echo "✅ Una vez refrescado el schema, el error desaparecerá"
+echo ""
