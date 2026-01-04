@@ -17,7 +17,7 @@
 
 import express from 'express';
 import { supabase } from '../db/supabase';
-import { encrypt, decrypt } from '../utils/encryption';
+import { encryptCredential, decryptCredential } from '../utils/emailEncryption';
 import nodemailer from 'nodemailer';
 import Imap from 'imap';
 
@@ -89,9 +89,9 @@ router.post('/accounts', async (req, res) => {
     console.log(`[EMAIL] Creando cuenta para user: ${ownerUserId}, provider: ${effectiveProvider}`);
     
     // Encriptar passwords
-    const smtpPassEnc = smtpPass ? encrypt(smtpPass) : null;
-    const imapPassEnc = imapPass ? encrypt(imapPass) : null;
-    const awsSecretEnc = awsSecretAccessKey ? encrypt(awsSecretAccessKey) : null;
+    const smtpPassEnc = smtpPass ? encryptCredential(smtpPass) : null;
+    const imapPassEnc = imapPass ? encryptCredential(imapPass) : null;
+    const awsSecretEnc = awsSecretAccessKey ? encryptCredential(awsSecretAccessKey) : null;
     
     // Construir objeto de inserción
     const insertData: any = {
@@ -189,6 +189,8 @@ router.get('/accounts', async (req, res) => {
   try {
     const { ownerUserId } = req.query;
     
+    console.log('[EMAIL GET] ownerUserId:', ownerUserId);
+    
     if (!ownerUserId || typeof ownerUserId !== 'string') {
       return res.status(400).json({
         ok: false,
@@ -197,12 +199,16 @@ router.get('/accounts', async (req, res) => {
       });
     }
     
+    console.log('[EMAIL GET] Consultando email_accounts para:', ownerUserId);
+    
     const { data, error } = await supabase
       .from('email_accounts')
       .select('id, provider_label, from_name, from_email, smtp_host, smtp_port, smtp_secure, imap_host, imap_port, is_active, created_at, updated_at')
       .eq('owner_user_id', ownerUserId)
       .eq('is_active', true)
       .order('created_at', { ascending: false });
+    
+    console.log('[EMAIL GET] Resultado - data:', data, 'error:', error);
     
     if (error) {
       console.error('[EMAIL] Error fetching accounts:', error);
@@ -212,6 +218,8 @@ router.get('/accounts', async (req, res) => {
         message: error.message
       });
     }
+    
+    console.log('[EMAIL GET] Devolviendo', data?.length || 0, 'cuentas');
     
     return res.json({
       ok: true,
@@ -252,10 +260,10 @@ router.patch('/accounts/:id', async (req, res) => {
     
     // Passwords (encriptar si vienen)
     if (req.body.smtpPass) {
-      updates.smtp_pass_enc = encrypt(req.body.smtpPass);
+      updates.smtp_pass_enc = encryptCredential(req.body.smtpPass);
     }
     if (req.body.imapPass) {
-      updates.imap_pass_enc = encrypt(req.body.imapPass);
+      updates.imap_pass_enc = encryptCredential(req.body.imapPass);
     }
     
     if (Object.keys(updates).length === 0) {
@@ -377,7 +385,7 @@ router.post('/accounts/:id/test', async (req, res) => {
     
     // Test SMTP
     try {
-      const smtpPass = decrypt(account.smtp_pass_enc);
+      const smtpPass = decryptCredential(account.smtp_pass_enc);
       
       const transporter = nodemailer.createTransport({
         host: account.smtp_host,
@@ -401,7 +409,7 @@ router.post('/accounts/:id/test', async (req, res) => {
     // Test IMAP (si está configurado)
     if (account.imap_host && account.imap_user && account.imap_pass_enc) {
       try {
-        const imapPass = decrypt(account.imap_pass_enc);
+        const imapPass = decryptCredential(account.imap_pass_enc);
         
         const imap = new Imap({
           user: account.imap_user,

@@ -26,7 +26,7 @@
 
 import express from 'express';
 import { supabase } from '../db/supabase';
-import { decrypt } from '../utils/encryption';
+import { decryptCredential } from '../utils/emailEncryption';
 import nodemailer from 'nodemailer';
 import Imap from 'imap';
 import { simpleParser } from 'mailparser';
@@ -241,7 +241,7 @@ router.get('/inbox/:accountId', async (req, res) => {
     }
     
     // Desencriptar password IMAP
-    const imapPass = decrypt(account.imap_pass_enc);
+    const imapPass = decryptCredential(account.imap_pass_enc);
     
     // Conectar a IMAP
     const imap = new Imap({
@@ -464,7 +464,7 @@ router.get('/inbox', async (req, res) => {
     }
     
     // Desencriptar password IMAP
-    const imapPass = decrypt(account.imap_pass_enc);
+    const imapPass = decryptCredential(account.imap_pass_enc);
     
     // Conectar a IMAP
     const imap = new Imap({
@@ -680,7 +680,7 @@ router.post('/reply', async (req, res) => {
       });
     }
     
-    const smtpPass = decrypt(account.smtp_pass_enc);
+    const smtpPass = decryptCredential(account.smtp_pass_enc);
     
     const transporter = nodemailer.createTransport({
       host: account.smtp_host,
@@ -800,7 +800,7 @@ router.delete('/message/:accountId/:messageUid', async (req, res) => {
       });
     }
     
-    const imapPass = decrypt(account.imap_pass_enc);
+    const imapPass = decryptCredential(account.imap_pass_enc);
     
     // Conectar a IMAP y marcar como deleted
     const imap = new Imap({
@@ -911,7 +911,7 @@ router.patch('/message/:accountId/:messageUid/read', async (req, res) => {
       });
     }
     
-    const imapPass = decrypt(account.imap_pass_enc);
+    const imapPass = decryptCredential(account.imap_pass_enc);
     
     const imap = new Imap({
       user: account.imap_user,
@@ -1340,7 +1340,7 @@ router.post('/drafts/:id/send', async (req, res) => {
     }
     
     // Desencriptar contraseña SMTP
-    const smtpPass = decrypt(account.smtp_pass_enc);
+    const smtpPass = decryptCredential(account.smtp_pass_enc);
     
     // Crear transporter de nodemailer
     const transporter = nodemailer.createTransport({
