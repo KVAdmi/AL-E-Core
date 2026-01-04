@@ -235,17 +235,28 @@ export async function executeCalendarAction(
   console.log('[CALENDAR_INTERNAL] ========================================');
   
   // ═══════════════════════════════════════════════════════════════
-  // DETECTAR SI ES UPDATE (editar/cambiar/modificar)
+  // DETECTAR SI ES UPDATE (editar/cambiar/modificar/esa cita)
   // ═══════════════════════════════════════════════════════════════
   const lowerMsg = userMessage.toLowerCase();
-  const isUpdate = lowerMsg.match(/\b(edita|editar|cambia|cambiar|modifica|modificar|actualiza|actualizar)\b/);
+  
+  // Detectar palabras clave de edición
+  const editKeywords = lowerMsg.match(/\b(edita|editar|cambia|cambiar|modifica|modificar|actualiza|actualizar)\b/);
+  
+  // Detectar referencias a citas existentes
+  const referenceToExisting = lowerMsg.match(/\b(esa|esta|la|el)\s+(cita|evento|reunión|reunion|agenda)\b/);
+  
+  // Detectar frases como "no quedo bien", "sigue mal", "titulo mal"
+  const fixingExisting = lowerMsg.match(/\b(no\s+quedo|sigue\s+(mal|igual|con)|titulo\s+mal|está\s+mal|esta\s+mal)\b/);
+  
+  const isUpdate = editKeywords || referenceToExisting || fixingExisting;
   
   if (isUpdate) {
     console.log('[CALENDAR_INTERNAL] 🔍 Detected UPDATE intent');
+    console.log(`[CALENDAR_INTERNAL] 🔍 Reason: editKeywords=${!!editKeywords}, reference=${!!referenceToExisting}, fixing=${!!fixingExisting}`);
     return await executeCalendarUpdate(userMessage, userId);
   }
   
-  console.log('[CALENDAR_INTERNAL] Extracting event info...');
+  console.log('[CALENDAR_INTERNAL] Extracting event info for CREATE...');
   
   const eventInfo = extractEventInfo(userMessage);
   
@@ -387,16 +398,40 @@ async function executeCalendarUpdate(
     }
     
     console.log(`[CALENDAR_UPDATE] Found ${recentEvents.length} recent events`);
+    console.log(`[CALENDAR_UPDATE] Most recent event: "${recentEvents[0].title}" (${recentEvents[0].id})`);
     
     // 2. Extraer qué quiere cambiar (título, fecha, hora, etc.)
     const updates: any = {};
     const lowerMsg = userMessage.toLowerCase();
     
-    // Extraer nuevo título
-    const titleMatch = userMessage.match(/(?:titulo|título|nombre|llamar|llamarse|que\s+(?:se\s+)?llame?|cambiar\s+(?:el\s+)?titulo\s+a)\s+["']?([^"']{5,80})["']?/i);
+    // ═══ EXTRAER NUEVO TÍTULO (múltiples patrones) ═══
+    
+    // Patrón 1: "el título debe ser X" / "título es X" / "es tema X"
+    let titleMatch = userMessage.match(/(?:titulo|título)\s+(?:debe\s+ser|es|sea|que\s+sea)\s+(.{3,80}?)(?:\s+para|$)/i);
+    if (!titleMatch) {
+      titleMatch = userMessage.match(/\b(?:es\s+tema|tema\s+es)\s+(.{3,80}?)(?:\s+para|$)/i);
+    }
+    
+    // Patrón 2: "llamar X" / "que se llame X"
+    if (!titleMatch) {
+      titleMatch = userMessage.match(/(?:llamar|llamarse|que\s+se\s+llame)\s+["']?([^"']{5,80})["']?/i);
+    }
+    
+    // Patrón 3: "cambiar el título a X" / "editar título a X"
+    if (!titleMatch) {
+      titleMatch = userMessage.match(/(?:cambiar|editar)\s+(?:el\s+)?titulo\s+a\s+(.{3,80}?)(?:\s+por|$)/i);
+    }
+    
+    // Patrón 4: "pon como título: X" / "ponle de título X"
+    if (!titleMatch) {
+      titleMatch = userMessage.match(/\b(?:pon|poner|ponle)\s+(?:como|de)?\s*titulo[:\s]+(.{3,80}?)(?:\s+pls|$)/i);
+    }
+    
     if (titleMatch && titleMatch[1]) {
       updates.title = titleMatch[1].trim();
-      console.log(`[CALENDAR_UPDATE] New title detected: "${updates.title}"`);
+      console.log(`[CALENDAR_UPDATE] ✅ New title extracted: "${updates.title}"`);
+    } else {
+      console.log(`[CALENDAR_UPDATE] ⚠️ No title pattern matched in message`);
     }
     
     // Si no hay cambios específicos, retornar error
@@ -406,7 +441,7 @@ async function executeCalendarUpdate(
         success: false,
         action: 'calendar.update',
         evidence: null,
-        userMessage: '¿Qué quieres cambiar del evento? (título, fecha, hora, descripción)',
+        userMessage: '¿Qué quieres cambiar del evento? Por favor dime el nuevo título o fecha.',
         reason: 'NO_UPDATES_SPECIFIED'
       };
     }
