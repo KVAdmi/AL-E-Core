@@ -234,6 +234,17 @@ export async function executeCalendarAction(
   console.log(`[CALENDAR_INTERNAL] 🚀 Message: "${userMessage}"`);
   console.log('[CALENDAR_INTERNAL] ========================================');
   
+  // ═══════════════════════════════════════════════════════════════
+  // DETECTAR SI ES UPDATE (editar/cambiar/modificar)
+  // ═══════════════════════════════════════════════════════════════
+  const lowerMsg = userMessage.toLowerCase();
+  const isUpdate = lowerMsg.match(/\b(edita|editar|cambia|cambiar|modifica|modificar|actualiza|actualizar)\b/);
+  
+  if (isUpdate) {
+    console.log('[CALENDAR_INTERNAL] 🔍 Detected UPDATE intent');
+    return await executeCalendarUpdate(userMessage, userId);
+  }
+  
   console.log('[CALENDAR_INTERNAL] Extracting event info...');
   
   const eventInfo = extractEventInfo(userMessage);
@@ -327,6 +338,127 @@ export async function executeCalendarAction(
       action: 'calendar.create',
       evidence: null,
       userMessage: 'Hubo un error al crear el evento.',
+      reason: error.message
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EXECUTE CALENDAR UPDATE
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Ejecuta actualización de evento de calendario
+ * Busca el evento más reciente y lo actualiza
+ */
+async function executeCalendarUpdate(
+  userMessage: string,
+  userId: string
+): Promise<ActionResult> {
+  
+  console.log('[CALENDAR_UPDATE] ========================================');
+  console.log('[CALENDAR_UPDATE] 🚀 INICIO executeCalendarUpdate');
+  console.log(`[CALENDAR_UPDATE] 🚀 User: ${userId}`);
+  console.log(`[CALENDAR_UPDATE] 🚀 Message: "${userMessage}"`);
+  console.log('[CALENDAR_UPDATE] ========================================');
+  
+  try {
+    // 1. Buscar el evento más reciente del usuario (últimas 24 horas)
+    const oneDayAgo = new Date();
+    oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+    
+    const { data: recentEvents, error: fetchError } = await supabase
+      .from('calendar_events')
+      .select('*')
+      .eq('owner_user_id', userId)
+      .gte('created_at', oneDayAgo.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(5);
+    
+    if (fetchError || !recentEvents || recentEvents.length === 0) {
+      console.log('[CALENDAR_UPDATE] ❌ No recent events found');
+      return {
+        success: false,
+        action: 'calendar.update',
+        evidence: null,
+        userMessage: 'No encontré eventos recientes para editar. ¿Podrías ser más específico?',
+        reason: 'NO_RECENT_EVENTS'
+      };
+    }
+    
+    console.log(`[CALENDAR_UPDATE] Found ${recentEvents.length} recent events`);
+    
+    // 2. Extraer qué quiere cambiar (título, fecha, hora, etc.)
+    const updates: any = {};
+    const lowerMsg = userMessage.toLowerCase();
+    
+    // Extraer nuevo título
+    const titleMatch = userMessage.match(/(?:titulo|título|nombre|llamar|llamarse|que\s+(?:se\s+)?llame?|cambiar\s+(?:el\s+)?titulo\s+a)\s+["']?([^"']{5,80})["']?/i);
+    if (titleMatch && titleMatch[1]) {
+      updates.title = titleMatch[1].trim();
+      console.log(`[CALENDAR_UPDATE] New title detected: "${updates.title}"`);
+    }
+    
+    // Si no hay cambios específicos, retornar error
+    if (Object.keys(updates).length === 0) {
+      console.log('[CALENDAR_UPDATE] ❌ No updates detected in message');
+      return {
+        success: false,
+        action: 'calendar.update',
+        evidence: null,
+        userMessage: '¿Qué quieres cambiar del evento? (título, fecha, hora, descripción)',
+        reason: 'NO_UPDATES_SPECIFIED'
+      };
+    }
+    
+    updates.updated_at = new Date().toISOString();
+    
+    // 3. Actualizar el evento más reciente
+    const eventToUpdate = recentEvents[0];
+    console.log(`[CALENDAR_UPDATE] Updating event ID: ${eventToUpdate.id}`);
+    console.log(`[CALENDAR_UPDATE] Updates:`, JSON.stringify(updates));
+    
+    const { data: updatedEvent, error: updateError } = await supabase
+      .from('calendar_events')
+      .update(updates)
+      .eq('id', eventToUpdate.id)
+      .eq('owner_user_id', userId)
+      .select()
+      .single();
+    
+    if (updateError || !updatedEvent) {
+      console.error('[CALENDAR_UPDATE] ❌ Update failed:', updateError);
+      return {
+        success: false,
+        action: 'calendar.update',
+        evidence: null,
+        userMessage: 'No pude actualizar el evento.',
+        reason: updateError?.message || 'UPDATE_FAILED'
+      };
+    }
+    
+    console.log(`[CALENDAR_UPDATE] ✅ Event updated successfully`);
+    console.log(`[CALENDAR_UPDATE] Updated data:`, JSON.stringify(updatedEvent));
+    
+    // 4. Retornar éxito con evidencia
+    return {
+      success: true,
+      action: 'calendar.update',
+      evidence: {
+        eventId: updatedEvent.id,
+        title: updatedEvent.title,
+        changes: updates
+      },
+      userMessage: `Listo. Actualicé el evento "${updatedEvent.title}".`
+    };
+    
+  } catch (error: any) {
+    console.error('[CALENDAR_UPDATE] ❌ Unexpected error:', error);
+    return {
+      success: false,
+      action: 'calendar.update',
+      evidence: null,
+      userMessage: 'Hubo un error al actualizar el evento.',
       reason: error.message
     };
   }
