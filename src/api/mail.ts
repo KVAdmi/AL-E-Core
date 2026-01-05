@@ -48,135 +48,575 @@ const router = express.Router();
 
 router.post('/send', requireAuth, async (req, res) => {
   try {
-    const { to, subject, body, html } = req.body;
+    const { accountId, to, subject, body, html, cc, bcc, replyTo, inReplyTo } = req.body;
     const userId = (req as any).user?.id;
     
+    console.log('[MAIL.SEND] 📧 Request:', { userId, accountId, to, subject });
+    
     // Validar campos requeridos
+    if (!accountId) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_ACCOUNT_ID',
+        message: 'accountId es requerido'
+      });
+    }
+    
     if (!to || !subject || (!body && !html)) {
       return res.status(400).json({
         success: false,
-        action: 'mail.send',
-        evidence: null,
-        userMessage: 'Campos requeridos: to, subject, body o html',
-        reason: 'MISSING_REQUIRED_FIELDS'
+        error: 'MISSING_REQUIRED_FIELDS',
+        message: 'Campos requeridos: to, subject, body o html'
       });
     }
     
-    console.log('[MAIL] 📧 Enviando correo...');
-    console.log(`[MAIL] To: ${to}`);
-    console.log(`[MAIL] Subject: ${subject}`);
+    // Obtener cuenta SMTP del usuario
+    console.log('[MAIL.SEND] 🔍 Obteniendo cuenta:', accountId);
+    const { data: account, error: accountError } = await supabase
+      .from('email_accounts')
+      .select('*')
+      .eq('id', accountId)
+      .eq('owner_user_id', userId)
+      .eq('is_active', true)
+      .single();
     
-    // Verificar configuración de SMTP
-    const smtpHost = process.env.SMTP_HOST;
-    const smtpPort = process.env.SMTP_PORT;
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
-    const emailFrom = process.env.EMAIL_FROM_DEFAULT || 'notificaciones@al-eon.com';
-    const emailFromName = process.env.EMAIL_FROM_NAME || 'AL-E';
-    
-    if (!smtpHost || !smtpPort || !smtpUser || !smtpPass) {
-      console.error('[MAIL] ❌ SMTP not configured in environment');
-      return res.status(501).json({
+    if (accountError || !account) {
+      console.error('[MAIL.SEND] ❌ Cuenta no encontrada:', accountError);
+      return res.status(404).json({
         success: false,
-        action: 'mail.send',
-        evidence: null,
-        userMessage: 'El envío de correos no está configurado. Contacta al administrador.',
-        reason: 'SMTP_NOT_CONFIGURED'
+        error: 'ACCOUNT_NOT_FOUND',
+        message: 'Cuenta de correo no encontrada o inactiva'
       });
     }
     
-    // Crear transporter con AWS SES
-    console.log('[MAIL] 🔧 Configurando transporter AWS SES...');
+    // Descifrar password SMTP
+    console.log('[MAIL.SEND] 🔐 Descifrando credenciales SMTP...');
+    const smtpPass = decryptCredential(account.smtp_pass_enc);
+    
+    // Crear transporter con cuenta del usuario
+    console.log('[MAIL.SEND] 🔧 Configurando SMTP:', account.smtp_host);
     const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: parseInt(smtpPort),
-      secure: process.env.SMTP_SECURE === 'true', // false para port 587
+      host: account.smtp_host,
+      port: account.smtp_port,
+      secure: account.smtp_secure,
       auth: {
-        user: smtpUser,
+        user: account.smtp_user,
         pass: smtpPass
       }
     });
     
+    // Preparar destinatarios
+    const toArray = Array.isArray(to) ? to : [to];
+    const ccArray = cc ? (Array.isArray(cc) ? cc : [cc]) : undefined;
+    const bccArray = bcc ? (Array.isArray(bcc) ? bcc : [bcc]) : undefined;
+    
     // Enviar correo REAL
-    console.log('[MAIL] 📤 Enviando a AWS SES...');
+    console.log('[MAIL.SEND] 📤 Enviando correo...');
     const info = await transporter.sendMail({
-      from: `"${emailFromName}" <${emailFrom}>`,
-      to: to,
+      from: `"${account.from_name}" <${account.from_email}>`,
+      to: toArray.join(', '),
+      cc: ccArray?.join(', '),
+      bcc: bccArray?.join(', '),
+      replyTo: replyTo || account.from_email,
       subject: subject,
       text: body,
-      html: html || body
+      html: html || body,
+      inReplyTo: inReplyTo,
+      headers: inReplyTo ? {
+        'In-Reply-To': inReplyTo,
+        'References': inReplyTo
+      } : undefined
     });
     
-    console.log('[MAIL] ✅ Correo enviado por AWS SES');
-    console.log(`[MAIL] Message ID: ${info.messageId}`);
-    console.log(`[MAIL] Response: ${info.response}`);
+    console.log('[MAIL.SEND] ✅ Correo enviado');
+    console.log('[MAIL.SEND] Message ID:', info.messageId);
     
-    // P0 CRÍTICO: Validar que hay messageId REAL
+    // Validar messageId
     if (!info.messageId) {
-      console.error('[MAIL] ❌ NO MESSAGE ID - Envío falló');
+      console.error('[MAIL.SEND] ❌ Sin Message ID');
       return res.status(500).json({
         success: false,
-        action: 'mail.send',
-        evidence: null,
-        userMessage: 'Error al enviar correo: sin confirmación del proveedor.',
-        reason: 'NO_MESSAGE_ID'
+        error: 'NO_MESSAGE_ID',
+        message: 'Error: sin confirmación del proveedor SMTP'
       });
     }
     
-    // P0 CRÍTICO: Registrar en email_audit_log
-    console.log('[MAIL] 💾 Registrando en email_audit_log...');
-    const { data: auditLog, error: auditError } = await supabase
-      .from('email_audit_log')
+    // Obtener folder "Sent" (o crearlo si no existe)
+    let sentFolder;
+    const { data: folders } = await supabase
+      .from('email_folders')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('folder_type', 'sent')
+      .limit(1);
+    
+    if (folders && folders.length > 0) {
+      sentFolder = folders[0];
+    } else {
+      // Crear folder Sent si no existe
+      const { data: newFolder } = await supabase
+        .from('email_folders')
+        .insert({
+          account_id: accountId,
+          owner_user_id: userId,
+          folder_name: 'Sent',
+          folder_type: 'sent',
+          imap_path: 'INBOX.Sent'
+        })
+        .select('id')
+        .single();
+      sentFolder = newFolder;
+    }
+    
+    // Guardar mensaje enviado en email_messages
+    console.log('[MAIL.SEND] 💾 Guardando en DB...');
+    const { data: savedMessage, error: saveError } = await supabase
+      .from('email_messages')
       .insert({
-        to: to,
-        from: emailFrom,
+        account_id: accountId,
+        owner_user_id: userId,
+        folder_id: sentFolder?.id,
+        current_folder_id: sentFolder?.id,
+        message_id: info.messageId,
+        from_address: account.from_email,
+        from_name: account.from_name,
+        to_addresses: toArray,
+        cc_addresses: ccArray || [],
+        bcc_addresses: bccArray || [],
         subject: subject,
         body_text: body,
         body_html: html || null,
-        provider: 'aws_ses',
-        provider_message_id: info.messageId,
-        status: 'sent',
-        sent_by_user_id: userId || null,
-        sent_at: new Date().toISOString()
+        body_preview: body?.substring(0, 200),
+        has_attachments: false,
+        attachment_count: 0,
+        is_read: true,
+        date: new Date().toISOString(),
+        in_reply_to: inReplyTo,
+        size_bytes: (body?.length || 0) + (html?.length || 0)
       })
-      .select('id')
+      .select('id, message_id')
       .single();
     
-    if (auditError || !auditLog) {
-      console.error('[MAIL] ❌ Error registrando en audit log:', auditError);
-      // CRÍTICO: Si no se pudo registrar, NO confirmar éxito
-      return res.status(500).json({
-        success: false,
-        action: 'mail.send',
-        evidence: null,
-        userMessage: 'Correo enviado pero no se pudo registrar en auditoría. Contacta al administrador.',
-        reason: 'AUDIT_LOG_FAILED'
-      });
+    if (saveError) {
+      console.error('[MAIL.SEND] ⚠️ Error guardando mensaje:', saveError);
+      // No bloquear el envío si falla el guardado
     }
     
-    console.log(`[MAIL] ✅ Audit log creado: ${auditLog.id}`);
+    console.log('[MAIL.SEND] ✅ Completado');
     
-    // P0 SUCCESS: SOLO si hay messageId + auditLog
-    return res.status(200).json({
+    return res.json({
       success: true,
-      action: 'mail.send',
-      evidence: {
-        table: 'email_audit_log',
-        id: auditLog.id,
-        provider_message_id: info.messageId
-      },
-      userMessage: `Correo enviado exitosamente a ${to}`,
-      messageId: info.messageId
+      messageId: info.messageId,
+      savedMessageId: savedMessage?.id,
+      provider: account.smtp_host,
+      from: account.from_email,
+      to: toArray,
+      subject: subject
     });
     
   } catch (error: any) {
-    console.error('[MAIL] ❌ Error enviando correo:', error);
+    console.error('[MAIL.SEND] ❌ Error enviando correo:', error);
     return res.status(500).json({
       success: false,
-      action: 'mail.send',
-      evidence: null,
-      userMessage: `Error al enviar correo: ${error.message}`,
-      reason: error.code || 'SMTP_ERROR'
+      error: error.code || 'SMTP_ERROR',
+      message: `Error al enviar correo: ${error.message}`
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// POST /api/mail/accounts/:accountId/sync - Sincronizar mensajes IMAP
+// ═══════════════════════════════════════════════════════════════
+
+router.post('/accounts/:accountId/sync', requireAuth, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const { folder = 'INBOX', limit = 100 } = req.body;
+    const userId = (req as any).user?.id;
+    
+    console.log('[MAIL.SYNC] 🔄 Iniciando sync:', { userId, accountId, folder });
+    
+    // Obtener cuenta
+    const { data: account, error: accountError } = await supabase
+      .from('email_accounts')
+      .select('*')
+      .eq('id', accountId)
+      .eq('owner_user_id', userId)
+      .eq('is_active', true)
+      .single();
+    
+    if (accountError || !account) {
+      return res.status(404).json({
+        success: false,
+        error: 'ACCOUNT_NOT_FOUND',
+        message: 'Cuenta no encontrada'
+      });
+    }
+    
+    // Verificar IMAP configurado
+    if (!account.imap_host || !account.imap_user || !account.imap_pass_enc) {
+      return res.status(400).json({
+        success: false,
+        error: 'IMAP_NOT_CONFIGURED',
+        message: 'Esta cuenta no tiene IMAP configurado'
+      });
+    }
+    
+    // Descifrar password IMAP
+    console.log('[MAIL.SYNC] 🔐 Descifrando credenciales IMAP...');
+    const imapPass = decryptCredential(account.imap_pass_enc);
+    
+    // Obtener o crear folder
+    let folderId;
+    const { data: existingFolder } = await supabase
+      .from('email_folders')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('imap_path', folder)
+      .limit(1)
+      .single();
+    
+    if (existingFolder) {
+      folderId = existingFolder.id;
+    } else {
+      // Crear folder si no existe
+      const { data: newFolder, error: folderError } = await supabase
+        .from('email_folders')
+        .insert({
+          account_id: accountId,
+          owner_user_id: userId,
+          folder_name: folder,
+          folder_type: folder.toLowerCase() === 'inbox' ? 'inbox' : 'custom',
+          imap_path: folder
+        })
+        .select('id')
+        .single();
+      
+      if (folderError || !newFolder) {
+        return res.status(500).json({
+          success: false,
+          error: 'FOLDER_CREATE_FAILED',
+          message: 'Error creando folder'
+        });
+      }
+      
+      folderId = newFolder.id;
+    }
+    
+    // Configurar IMAP
+    const imap = new Imap({
+      user: account.imap_user,
+      password: imapPass,
+      host: account.imap_host,
+      port: account.imap_port || 993,
+      tls: account.imap_secure !== false,
+      tlsOptions: { rejectUnauthorized: false }
+    });
+    
+    let messagesFetched = 0;
+    let messagesNew = 0;
+    const messages: any[] = [];
+    
+    await new Promise<void>((resolve, reject) => {
+      imap.once('ready', () => {
+        console.log('[MAIL.SYNC] ✅ IMAP conectado');
+        
+        imap.openBox(folder, false, (err, box) => {
+          if (err) {
+            console.error('[MAIL.SYNC] ❌ Error abriendo folder:', err);
+            return reject(err);
+          }
+          
+          console.log('[MAIL.SYNC] 📬 Folder abierto:', box.messages.total, 'mensajes');
+          
+          if (box.messages.total === 0) {
+            imap.end();
+            return resolve();
+          }
+          
+          // Obtener últimos N mensajes
+          const start = Math.max(1, box.messages.total - (limit || 100) + 1);
+          const end = box.messages.total;
+          
+          console.log('[MAIL.SYNC] 📨 Fetching mensajes:', start, '-', end);
+          
+          const fetch = imap.seq.fetch(`${start}:${end}`, {
+            bodies: '',
+            struct: true
+          });
+          
+          fetch.on('message', (msg, seqno) => {
+            let buffer = '';
+            
+            msg.on('body', (stream) => {
+              stream.on('data', (chunk) => {
+                buffer += chunk.toString('utf8');
+              });
+            });
+            
+            msg.once('end', async () => {
+              try {
+                const parsed = await simpleParser(buffer);
+                
+                messages.push({
+                  seqno,
+                  messageId: parsed.messageId,
+                  from: parsed.from?.value[0],
+                  to: parsed.to?.value || [],
+                  cc: parsed.cc?.value || [],
+                  subject: parsed.subject || '(Sin asunto)',
+                  date: parsed.date,
+                  text: parsed.text,
+                  html: parsed.html,
+                  inReplyTo: parsed.inReplyTo,
+                  hasAttachments: (parsed.attachments?.length || 0) > 0,
+                  attachmentCount: parsed.attachments?.length || 0
+                });
+                
+                messagesFetched++;
+              } catch (parseError) {
+                console.error('[MAIL.SYNC] ⚠️ Error parsing mensaje:', parseError);
+              }
+            });
+          });
+          
+          fetch.once('error', (err) => {
+            console.error('[MAIL.SYNC] ❌ Error en fetch:', err);
+            reject(err);
+          });
+          
+          fetch.once('end', () => {
+            console.log('[MAIL.SYNC] ✅ Fetch completado');
+            imap.end();
+          });
+        });
+      });
+      
+      imap.once('error', (err) => {
+        console.error('[MAIL.SYNC] ❌ Error IMAP:', err);
+        reject(err);
+      });
+      
+      imap.once('end', () => {
+        console.log('[MAIL.SYNC] 🔌 IMAP desconectado');
+        resolve();
+      });
+      
+      imap.connect();
+    });
+    
+    // Guardar mensajes en DB
+    console.log('[MAIL.SYNC] 💾 Guardando', messages.length, 'mensajes en DB...');
+    
+    for (const msg of messages) {
+      // Verificar si ya existe
+      const { data: existing } = await supabase
+        .from('email_messages')
+        .select('id')
+        .eq('account_id', accountId)
+        .eq('message_id', msg.messageId)
+        .limit(1)
+        .single();
+      
+      if (existing) {
+        console.log('[MAIL.SYNC] ⏭️  Mensaje ya existe:', msg.messageId);
+        continue; // Skip duplicados
+      }
+      
+      // Insertar nuevo mensaje
+      const { error: insertError } = await supabase
+        .from('email_messages')
+        .insert({
+          account_id: accountId,
+          owner_user_id: userId,
+          folder_id: folderId,
+          current_folder_id: folderId,
+          message_id: msg.messageId,
+          from_address: msg.from?.address || '',
+          from_name: msg.from?.name || '',
+          to_addresses: msg.to.map((t: any) => t.address),
+          cc_addresses: msg.cc?.map((c: any) => c.address) || [],
+          subject: msg.subject,
+          body_text: msg.text,
+          body_html: msg.html,
+          body_preview: msg.text?.substring(0, 200),
+          has_attachments: msg.hasAttachments,
+          attachment_count: msg.attachmentCount,
+          is_read: false,
+          date: msg.date,
+          in_reply_to: msg.inReplyTo,
+          size_bytes: (msg.text?.length || 0) + (msg.html?.length || 0)
+        });
+      
+      if (insertError) {
+        console.error('[MAIL.SYNC] ⚠️ Error guardando mensaje:', insertError);
+      } else {
+        messagesNew++;
+      }
+    }
+    
+    console.log('[MAIL.SYNC] ✅ Sync completado:', messagesNew, 'mensajes nuevos');
+    
+    return res.json({
+      success: true,
+      sync: {
+        folder,
+        messages_fetched: messagesFetched,
+        messages_new: messagesNew
+      }
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL.SYNC] ❌ Error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.code || 'SYNC_ERROR',
+      message: `Error sincronizando: ${error.message}`
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// GET /api/mail/messages - Listar mensajes del usuario
+// ═══════════════════════════════════════════════════════════════
+
+router.get('/messages', requireAuth, async (req, res) => {
+  try {
+    const userId = (req as any).user?.id;
+    const { 
+      accountId, 
+      folder, 
+      cursor, 
+      limit = '50',
+      unreadOnly = 'false',
+      search 
+    } = req.query;
+    
+    console.log('[MAIL.MESSAGES] 📬 Listando mensajes:', { 
+      userId, 
+      accountId, 
+      folder, 
+      limit 
+    });
+    
+    // Construir query
+    let query = supabase
+      .from('email_messages')
+      .select('*')
+      .eq('owner_user_id', userId);
+    
+    // Filtrar por cuenta
+    if (accountId) {
+      query = query.eq('account_id', accountId);
+    }
+    
+    // Filtrar por folder
+    if (folder) {
+      // Buscar folder_id por nombre o tipo
+      const { data: folderData } = await supabase
+        .from('email_folders')
+        .select('id')
+        .eq('owner_user_id', userId)
+        .or(`folder_name.eq.${folder},folder_type.eq.${folder.toLowerCase()}`)
+        .limit(1)
+        .single();
+      
+      if (folderData) {
+        query = query.eq('current_folder_id', folderData.id);
+      }
+    }
+    
+    // Filtrar no leídos
+    if (unreadOnly === 'true') {
+      query = query.eq('is_read', false);
+    }
+    
+    // Buscar por texto
+    if (search && typeof search === 'string') {
+      query = query.or(`subject.ilike.%${search}%,body_text.ilike.%${search}%`);
+    }
+    
+    // Paginación
+    const limitNum = parseInt(limit as string) || 50;
+    query = query
+      .order('date', { ascending: false })
+      .limit(limitNum);
+    
+    if (cursor) {
+      query = query.lt('date', cursor as string);
+    }
+    
+    const { data: messages, error } = await query;
+    
+    if (error) {
+      console.error('[MAIL.MESSAGES] ❌ Error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'QUERY_ERROR',
+        message: 'Error obteniendo mensajes'
+      });
+    }
+    
+    console.log('[MAIL.MESSAGES] ✅ Retornando', messages?.length || 0, 'mensajes');
+    
+    return res.json({
+      success: true,
+      messages: messages || [],
+      hasMore: (messages?.length || 0) >= limitNum,
+      nextCursor: messages && messages.length > 0 
+        ? messages[messages.length - 1].date 
+        : null
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL.MESSAGES] ❌ Error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'SERVER_ERROR',
+      message: `Error: ${error.message}`
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// GET /api/mail/messages/:id - Obtener detalle de un mensaje
+// ═══════════════════════════════════════════════════════════════
+
+router.get('/messages/:id', requireAuth, async (req, res) => {
+  try {
+    const userId = (req as any).user?.id;
+    const { id } = req.params;
+    
+    console.log('[MAIL.MESSAGE] 📧 Obteniendo mensaje:', id);
+    
+    const { data: message, error } = await supabase
+      .from('email_messages')
+      .select('*')
+      .eq('id', id)
+      .eq('owner_user_id', userId)
+      .single();
+    
+    if (error || !message) {
+      return res.status(404).json({
+        success: false,
+        error: 'MESSAGE_NOT_FOUND',
+        message: 'Mensaje no encontrado'
+      });
+    }
+    
+    console.log('[MAIL.MESSAGE] ✅ Mensaje encontrado');
+    
+    return res.json({
+      success: true,
+      message
+    });
+    
+  } catch (error: any) {
+    console.error('[MAIL.MESSAGE] ❌ Error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'SERVER_ERROR',
+      message: `Error: ${error.message}`
     });
   }
 });
