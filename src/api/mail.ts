@@ -358,12 +358,27 @@ router.post('/accounts/:accountId/sync', requireAuth, async (req, res) => {
               try {
                 const parsed = await simpleParser(buffer);
                 
+                // Extraer from (puede ser un objeto o array)
+                const fromValue = Array.isArray(parsed.from) 
+                  ? parsed.from[0] 
+                  : parsed.from;
+                
+                // Extraer to (puede ser un objeto o array)
+                const toValue = parsed.to 
+                  ? (Array.isArray(parsed.to) ? parsed.to : [parsed.to])
+                  : [];
+                
+                // Extraer cc (puede ser un objeto o array)
+                const ccValue = parsed.cc 
+                  ? (Array.isArray(parsed.cc) ? parsed.cc : [parsed.cc])
+                  : [];
+                
                 messages.push({
                   seqno,
                   messageId: parsed.messageId,
-                  from: parsed.from?.value[0],
-                  to: parsed.to?.value || [],
-                  cc: parsed.cc?.value || [],
+                  from: fromValue,
+                  to: toValue,
+                  cc: ccValue,
                   subject: parsed.subject || '(Sin asunto)',
                   date: parsed.date,
                   text: parsed.text,
@@ -511,7 +526,7 @@ router.get('/messages', requireAuth, async (req, res) => {
     }
     
     // Filtrar por folder
-    if (folder) {
+    if (folder && typeof folder === 'string') {
       // Buscar folder_id por nombre o tipo
       const { data: folderData } = await supabase
         .from('email_folders')
