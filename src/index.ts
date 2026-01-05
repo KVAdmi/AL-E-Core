@@ -15,6 +15,7 @@ import systemMailRouter from "./api/systemMail"; // System mail (SES ONLY - corr
 import mailWebhookRouter from "./api/mail-webhook"; // AWS SES webhook
 import mailInboundRouter from "./api/mail-inbound"; // Mail inbound (SES→S3→Lambda→Core)
 import emailHubRouter from "./api/emailHub"; // Email Hub Universal (IMAP/SMTP cualquier proveedor)
+import knowledgeRouter from "./api/knowledge"; // Knowledge Core (RAG)
 import calendarRouter from "./api/calendar"; // Calendario interno
 import telegramRouter from "./api/telegram"; // Telegram bot por usuario
 import runtimeCapabilitiesRouter from "./api/runtime-capabilities"; // Runtime capabilities
@@ -198,6 +199,7 @@ app.use("/api/sessions", sessionsRouter);
 app.use("/api/memory", memoryRouter); // Memoria explícita (acuerdos/decisiones/hechos)
 app.use("/api/profile", profileRouter); // Personalización de usuario
 app.use("/api/system/mail", systemMailRouter); // System mail (SES ONLY - correos transaccionales)
+app.use("/api/knowledge", knowledgeRouter); // Knowledge Core (RAG)
 app.use("/api/email", emailRouter); // Email accounts (SMTP/IMAP manual)
 app.use("/api/mail", mailRouter); // Mail send/inbox
 app.use("/api/mail", mailWebhookRouter); // AWS SES webhook (same prefix)
@@ -219,6 +221,7 @@ console.log("[DEBUG] sessionsRouter montado en /api/sessions");
 console.log("[DEBUG] memoryRouter montado en /api/memory");
 console.log("[DEBUG] profileRouter montado en /api/profile");
 console.log("[DEBUG] systemMailRouter (SES ONLY) montado en /api/system/mail");
+console.log("[DEBUG] knowledgeRouter (RAG) montado en /api/knowledge");
 console.log("[DEBUG] emailRouter montado en /api/email");
 console.log("[DEBUG] mailRouter montado en /api/mail");
 console.log("[DEBUG] emailHubRouter (Universal IMAP/SMTP) montado en /api/email");
