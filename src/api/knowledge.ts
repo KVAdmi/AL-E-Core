@@ -10,8 +10,14 @@
 
 import express from 'express';
 import { searchKnowledge } from '../services/knowledgeIngest';
+import { processDocument } from '../services/documentParser';
+import { analyzeImage } from '../services/visionService';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 
 const router = express.Router();
+const upload = multer({ dest: '/tmp/uploads/' });
 
 // ═══════════════════════════════════════════════════════════════
 // POST /api/knowledge/search - Búsqueda semántica
@@ -55,6 +61,152 @@ router.post('/search', async (req, res) => {
     });
   }
 });
+
+// ═══════════════════════════════════════════════════════════════
+// POST /api/knowledge/ingest - Ingestar documento/imagen
+// ═══════════════════════════════════════════════════════════════
+
+router.post('/ingest', upload.single('file'), async (req, res) => {
+  try {
+    const { sourceType, repo, branch, workspaceId } = req.body;
+    const file = req.file;
+    
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_FILE',
+        message: 'Debes subir un archivo'
+      });
+    }
+    
+    console.log('[KNOWLEDGE] 📥 Ingesting:', file.originalname);
+    
+    const ext = path.extname(file.originalname).toLowerCase();
+    let text = '';
+    let metadata: any = {
+      filename: file.originalname,
+      size: file.size,
+      type: sourceType || 'upload'
+    };
+    
+    // Si es imagen → Vision OCR
+    if (['.png', '.jpg', '.jpeg', '.gif', '.bmp'].includes(ext)) {
+      console.log('[KNOWLEDGE] 📸 Procesando imagen con Vision...');
+      const imageBuffer = fs.readFileSync(file.path);
+      const visionResult = await analyzeImage(imageBuffer);
+      text = visionResult.fullText;
+      metadata.vision = {
+        requestId: visionResult.requestId,
+        imageHash: visionResult.imageHash,
+        entities: visionResult.entities,
+        structured: visionResult.structured
+      };
+    }
+    // Si es documento → Parser
+    else if (['.pdf', '.docx', '.txt', '.md'].includes(ext)) {
+      console.log('[KNOWLEDGE] 📄 Procesando documento...');
+      const { parsed, chunks } = await processDocument(file.path);
+      text = parsed.text;
+      metadata = { ...metadata, ...parsed.metadata };
+      
+      // Guardar chunks directamente
+      const { supabase } = await import('../db/supabase');
+      const sourceId = await saveSource(supabase, file.originalname, sourceType, repo, branch, text);
+      const savedChunks = await saveChunks(supabase, sourceId, chunks, metadata);
+      
+      // Limpiar archivo temporal
+      fs.unlinkSync(file.path);
+      
+      return res.json({
+        success: true,
+        sourceId,
+        chunksCount: savedChunks.length,
+        filename: file.originalname,
+        textLength: text.length
+      });
+    }
+    else {
+      fs.unlinkSync(file.path);
+      return res.status(400).json({
+        success: false,
+        error: 'UNSUPPORTED_TYPE',
+        message: `Tipo de archivo no soportado: ${ext}`
+      });
+    }
+    
+    // Para imágenes: guardar como chunk único
+    const { supabase } = await import('../db/supabase');
+    const sourceId = await saveSource(supabase, file.originalname, sourceType, repo, branch, text);
+    const chunks = [text]; // Imagen = 1 chunk
+    const savedChunks = await saveChunks(supabase, sourceId, chunks, metadata);
+    
+    // Limpiar archivo temporal
+    fs.unlinkSync(file.path);
+    
+    console.log('[KNOWLEDGE] ✅ Ingesta completada');
+    
+    return res.json({
+      success: true,
+      sourceId,
+      chunksCount: savedChunks.length,
+      filename: file.originalname,
+      textLength: text.length,
+      vision: metadata.vision
+    });
+    
+  } catch (error: any) {
+    console.error('[KNOWLEDGE] ❌ Error:', error);
+    
+    // Limpiar archivo temporal si existe
+    if (req.file) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {}
+    }
+    
+    return res.status(500).json({
+      success: false,
+      error: 'INGEST_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+async function saveSource(supabase: any, filename: string, type: string, repo: string | undefined, branch: string | undefined, content: string) {
+  const { data, error } = await supabase
+    .from('kb_sources')
+    .insert({
+      type: type || 'upload',
+      repo: repo || null,
+      path: filename,
+      content: content.substring(0, 10000) // Max 10k chars en source
+    })
+    .select('id')
+    .single();
+  
+  if (error) throw error;
+  return data.id;
+}
+
+async function saveChunks(supabase: any, sourceId: string, chunks: string[], metadata: any) {
+  const chunksToInsert = chunks.map(content => ({
+    source_id: sourceId,
+    content,
+    metadata
+  }));
+  
+  const { data, error } = await supabase
+    .from('kb_chunks')
+    .insert(chunksToInsert)
+    .select('id');
+  
+  if (error) throw error;
+  return data || [];
+}
 
 // ═══════════════════════════════════════════════════════════════
 // GET /api/knowledge/stats - Estadísticas del Knowledge Core
