@@ -26,6 +26,7 @@ export interface ParsedDocument {
  */
 export async function parsePDF(filePath: string): Promise<ParsedDocument> {
   const dataBuffer = fs.readFileSync(filePath);
+  // @ts-ignore - pdf-parse tiene problemas con tipos pero funciona
   const data = await pdf(dataBuffer);
   
   return {
