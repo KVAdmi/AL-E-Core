@@ -319,13 +319,15 @@ interface SESStats {
   totalBlocked: number;
   blockReasons: Record<string, number>;
   suppressionListSize: number;
+  blocked?: number; // Para logBlockedSESAttempt
 }
 
 const stats: SESStats = {
   totalAllowed: 0,
   totalBlocked: 0,
   blockReasons: {},
-  suppressionListSize: 0
+  suppressionListSize: 0,
+  blocked: 0
 };
 
 /**
@@ -394,6 +396,169 @@ export function sesHealthCheck(): {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// REGLAS ABSOLUTAS - PROTECCIÓN MÁXIMA SES
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Dominios del sistema permitidos para SES
+ * REGLA ABSOLUTA: SES SOLO puede enviar desde estos dominios
+ */
+const SYSTEM_DOMAINS = ['al-eon.com', 'infinitykode.com'];
+
+/**
+ * Valida si un dominio es del sistema
+ */
+export function isSystemDomain(email: string): boolean {
+  const domain = email.split('@')[1]?.toLowerCase();
+  return SYSTEM_DOMAINS.includes(domain);
+}
+
+/**
+ * REGLA ABSOLUTA: Bloquea cualquier intento de usar SES para correos de usuarios
+ * 
+ * @param provider - Proveedor de envío (debe ser 'SES' para validar)
+ * @param from - Email del remitente
+ * @param accountId - ID de cuenta de usuario (si existe, es correo de usuario)
+ * @returns {blocked: true, reason: string} si se debe bloquear
+ */
+export function blockUserEmailsInSES(params: {
+  provider: string;
+  from: string;
+  accountId?: string;
+}): { blocked: boolean; reason?: string } {
+  const { provider, from, accountId } = params;
+  
+  // Normalizar provider
+  const providerUpper = provider.toUpperCase();
+  
+  // Si el provider es SES
+  if (providerUpper === 'SES' || providerUpper === 'AWS_SES' || providerUpper === 'AMAZON_SES') {
+    // REGLA 1: Si hay accountId, es correo de usuario → BLOQUEAR
+    if (accountId) {
+      return {
+        blocked: true,
+        reason: 'SES_USER_EMAIL_BLOCKED: SES no puede usarse para correos de usuarios. Usa Gmail OAuth, Outlook OAuth o SMTP del usuario.'
+      };
+    }
+    
+    // REGLA 2: Si from no es dominio del sistema → BLOQUEAR
+    if (!isSystemDomain(from)) {
+      return {
+        blocked: true,
+        reason: `SES_INVALID_DOMAIN: SES solo acepta correos de: ${SYSTEM_DOMAINS.join(', ')}. From recibido: ${from}`
+      };
+    }
+    
+    // REGLA 3: From NO puede ser correo personal conocido
+    const personalEmailDomains = ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com'];
+    const fromDomain = from.split('@')[1]?.toLowerCase();
+    if (personalEmailDomains.includes(fromDomain)) {
+      return {
+        blocked: true,
+        reason: `SES_PERSONAL_EMAIL: No puedes usar SES con correos personales (${fromDomain}). Usa OAuth o SMTP directo.`
+      };
+    }
+  }
+  
+  return { blocked: false };
+}
+
+/**
+ * REGLA ABSOLUTA: Valida que un correo cumple todas las reglas para SES
+ * 
+ * @param from - Email del remitente (DEBE ser @al-eon.com o @infinitykode.com)
+ * @param to - Destinatario(s)
+ * @param type - Tipo de correo (debe ser transaccional)
+ * @returns {valid: true} o {valid: false, error: string}
+ */
+export function validateSESAbsoluteRules(params: {
+  from: string;
+  to: string | string[];
+  type?: string;
+}): { valid: boolean; error?: string } {
+  const { from, to, type } = params;
+  
+  // REGLA ABSOLUTA 1: From DEBE ser dominio del sistema
+  if (!isSystemDomain(from)) {
+    return {
+      valid: false,
+      error: `REGLA_ABSOLUTA_VIOLATED: SES solo acepta correos de: ${SYSTEM_DOMAINS.join(', ')}. From: ${from}`
+    };
+  }
+  
+  // REGLA ABSOLUTA 2: Type debe ser correo transaccional (si se especifica)
+  if (type && !ALLOWED_EMAIL_TYPES.includes(type as any)) {
+    return {
+      valid: false,
+      error: `REGLA_ABSOLUTA_VIOLATED: Tipo '${type}' no permitido. SES solo para: ${ALLOWED_EMAIL_TYPES.join(', ')}`
+    };
+  }
+  
+  // REGLA ABSOLUTA 3: NO enviar a dominios de prueba (excepto SES Simulator)
+  const recipients = Array.isArray(to) ? to : [to];
+  for (const recipient of recipients) {
+    const domain = recipient.split('@')[1]?.toLowerCase();
+    
+    // Permitir SES Simulator
+    if (recipient === SES_SIMULATOR.SUCCESS || 
+        recipient === SES_SIMULATOR.BOUNCE || 
+        recipient === SES_SIMULATOR.COMPLAINT) {
+      continue;
+    }
+    
+    // Bloquear dominios de prueba
+    if (BLACKLISTED_DOMAINS.includes(domain)) {
+      return {
+        valid: false,
+        error: `REGLA_ABSOLUTA_VIOLATED: Dominio prohibido: ${domain}. Usa SES Mailbox Simulator para pruebas: ${SES_SIMULATOR.SUCCESS}`
+      };
+    }
+  }
+  
+  return { valid: true };
+}
+
+/**
+ * Obtiene el remitente correcto del sistema según el tipo de correo
+ */
+export function getSystemSender(type: AllowedEmailType): { email: string; name: string } {
+  const senders: Record<string, { email: string; name: string }> = {
+    'password_reset': { email: 'seguridad@al-eon.com', name: 'AL-E Seguridad' },
+    'email_verification': { email: 'verificacion@al-eon.com', name: 'AL-E Verificación' },
+    'onboarding_welcome': { email: 'bienvenida@al-eon.com', name: 'AL-E Team' },
+    'account_created': { email: 'bienvenida@al-eon.com', name: 'AL-E Team' },
+    'system_notification': { email: 'notificaciones@al-eon.com', name: 'AL-E Notificaciones' },
+    'account_alert': { email: 'alertas@al-eon.com', name: 'AL-E Alertas' },
+    'security_alert': { email: 'seguridad@al-eon.com', name: 'AL-E Seguridad' },
+    'two_factor_auth': { email: 'seguridad@al-eon.com', name: 'AL-E Seguridad' },
+    'subscription_confirmation': { email: 'suscripciones@al-eon.com', name: 'AL-E Suscripciones' },
+    'payment_receipt': { email: 'pagos@al-eon.com', name: 'AL-E Pagos' }
+  };
+  
+  return senders[type] || { email: 'notificaciones@al-eon.com', name: 'AL-E' };
+}
+
+/**
+ * Registra intento bloqueado para auditoría
+ */
+export function logBlockedSESAttempt(params: {
+  userId?: string;
+  from: string;
+  to: string | string[];
+  reason: string;
+  provider: string;
+}): void {
+  console.error('[SES PROTECTION] 🚫 Intento bloqueado:', {
+    timestamp: new Date().toISOString(),
+    severity: 'CRITICAL',
+    ...params
+  });
+  
+  // Incrementar contador de intentos bloqueados
+  stats.blocked++;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // EXPORTS
 // ═══════════════════════════════════════════════════════════════
 
@@ -404,6 +569,13 @@ export default {
   checkRateLimit,
   getSESStats,
   sesHealthCheck,
+  blockUserEmailsInSES,
+  validateSESAbsoluteRules,
+  isSystemDomain,
+  getSystemSender,
+  logBlockedSESAttempt,
   SES_SIMULATOR,
-  ALLOWED_EMAIL_TYPES
+  ALLOWED_EMAIL_TYPES,
+  SYSTEM_DOMAINS
 };
+
