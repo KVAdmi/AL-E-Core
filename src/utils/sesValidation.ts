@@ -25,7 +25,7 @@
  * Tipos de correo PERMITIDOS para SES
  * SOLO correos transaccionales del sistema
  */
-const ALLOWED_EMAIL_TYPES = [
+export const ALLOWED_EMAIL_TYPES = [
   'password_reset',
   'email_verification',
   'onboarding_welcome',

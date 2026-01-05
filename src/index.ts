@@ -11,6 +11,7 @@ import profileRouter from "./api/profile"; // Personalización de usuario
 import healthRouter from "./api/health"; // Health checks
 import emailRouter from "./api/email"; // Email accounts (SMTP/IMAP manual)
 import mailRouter from "./api/mail"; // Mail send/inbox
+import systemMailRouter from "./api/systemMail"; // System mail (SES ONLY - correos transaccionales)
 import mailWebhookRouter from "./api/mail-webhook"; // AWS SES webhook
 import mailInboundRouter from "./api/mail-inbound"; // Mail inbound (SES→S3→Lambda→Core)
 import emailHubRouter from "./api/emailHub"; // Email Hub Universal (IMAP/SMTP cualquier proveedor)
@@ -196,6 +197,7 @@ app.use("/api/voice", voiceRouter);
 app.use("/api/sessions", sessionsRouter);
 app.use("/api/memory", memoryRouter); // Memoria explícita (acuerdos/decisiones/hechos)
 app.use("/api/profile", profileRouter); // Personalización de usuario
+app.use("/api/system/mail", systemMailRouter); // System mail (SES ONLY - correos transaccionales)
 app.use("/api/email", emailRouter); // Email accounts (SMTP/IMAP manual)
 app.use("/api/mail", mailRouter); // Mail send/inbox
 app.use("/api/mail", mailWebhookRouter); // AWS SES webhook (same prefix)
@@ -216,6 +218,7 @@ console.log("[DEBUG] voiceRouter montado en /api/voice");
 console.log("[DEBUG] sessionsRouter montado en /api/sessions");
 console.log("[DEBUG] memoryRouter montado en /api/memory");
 console.log("[DEBUG] profileRouter montado en /api/profile");
+console.log("[DEBUG] systemMailRouter (SES ONLY) montado en /api/system/mail");
 console.log("[DEBUG] emailRouter montado en /api/email");
 console.log("[DEBUG] mailRouter montado en /api/mail");
 console.log("[DEBUG] emailHubRouter (Universal IMAP/SMTP) montado en /api/email");
