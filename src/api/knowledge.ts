@@ -12,6 +12,7 @@ import express from 'express';
 import { searchKnowledge } from '../services/knowledgeIngest';
 import { processDocument } from '../services/documentParser';
 import { analyzeImage } from '../services/visionService';
+import { generateEmbeddingsBatch, arrayToVector } from '../services/embeddingService';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -37,19 +38,44 @@ router.post('/search', async (req, res) => {
     
     console.log('[KNOWLEDGE] 🔍 Búsqueda:', query);
     
-    const results = await searchKnowledge(query, limit);
+    // Generar embedding del query
+    const { generateVectorString } = await import('../services/embeddingService');
+    const queryEmbedding = await generateVectorString(query);
     
-    console.log('[KNOWLEDGE] ✅ Encontrados:', results.length, 'resultados');
+    // Buscar usando similitud coseno en pgvector
+    const { supabase } = await import('../db/supabase');
     
-    // Filtrar por threshold
-    const filtered = results.filter((r: any) => r.score >= threshold);
+    const { data, error } = await supabase.rpc('search_knowledge', {
+      query_embedding: queryEmbedding,
+      match_threshold: threshold,
+      match_count: limit
+    });
+    
+    if (error) {
+      console.error('[KNOWLEDGE] ❌ Error en búsqueda:', error);
+      throw error;
+    }
+    
+    // Si no hay resultados arriba del threshold
+    if (!data || data.length === 0) {
+      return res.json({
+        success: true,
+        query,
+        results: [],
+        count: 0,
+        has_results: false,
+        message: 'No tengo evidencia suficiente en la base. Necesito que ingieras el documento relevante.'
+      });
+    }
+    
+    console.log('[KNOWLEDGE] ✅ Encontrados:', data.length, 'resultados');
     
     return res.json({
       success: true,
       query,
-      results: filtered,
-      count: filtered.length,
-      has_results: filtered.length > 0
+      results: data,
+      count: data.length,
+      has_results: true
     });
     
   } catch (error: any) {
@@ -114,6 +140,10 @@ router.post('/ingest', upload.single('file'), async (req, res) => {
       const sourceId = await saveSource(supabase, file.originalname, sourceType, repo, branch, text);
       const savedChunks = await saveChunks(supabase, sourceId, chunks, metadata);
       
+      // Generar embeddings para los chunks
+      console.log('[KNOWLEDGE] 🧠 Generando embeddings...');
+      await generateEmbeddingsForChunks(supabase, savedChunks, chunks);
+      
       // Limpiar archivo temporal
       fs.unlinkSync(file.path);
       
@@ -139,6 +169,10 @@ router.post('/ingest', upload.single('file'), async (req, res) => {
     const sourceId = await saveSource(supabase, file.originalname, sourceType, repo, branch, text);
     const chunks = [text]; // Imagen = 1 chunk
     const savedChunks = await saveChunks(supabase, sourceId, chunks, metadata);
+    
+    // Generar embeddings
+    console.log('[KNOWLEDGE] 🧠 Generando embeddings para imagen...');
+    await generateEmbeddingsForChunks(supabase, savedChunks, chunks);
     
     // Limpiar archivo temporal
     fs.unlinkSync(file.path);
@@ -206,6 +240,30 @@ async function saveChunks(supabase: any, sourceId: string, chunks: string[], met
   
   if (error) throw error;
   return data || [];
+}
+
+async function generateEmbeddingsForChunks(supabase: any, savedChunks: any[], chunkTexts: string[]) {
+  try {
+    // Generar embeddings en batch
+    const embeddings = await generateEmbeddingsBatch(chunkTexts);
+    
+    // Guardar embeddings en kb_embeddings
+    const embeddingsToInsert = savedChunks.map((chunk, index) => ({
+      chunk_id: chunk.id,
+      embedding: arrayToVector(embeddings[index])
+    }));
+    
+    const { error } = await supabase
+      .from('kb_embeddings')
+      .insert(embeddingsToInsert);
+    
+    if (error) throw error;
+    
+    console.log(`[KNOWLEDGE] ✅ ${embeddings.length} embeddings guardados`);
+  } catch (error: any) {
+    console.error('[KNOWLEDGE] ⚠️ Error generando embeddings:', error);
+    // No fallar la ingesta si los embeddings fallan
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
