@@ -112,10 +112,11 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ToolResult> {
     }
 
     // 2. Rate limiting
-    if (!checkRateLimit(name, toolDef.rateLimit)) {
+    const rateLimit = toolDef.rateLimit || { maxCalls: 30, windowMs: 60000 }; // Default: 30/min
+    if (!checkRateLimit(name, rateLimit)) {
       return {
         success: false,
-        error: `Rate limit excedido para ${name}. Límite: ${toolDef.rateLimit.maxCalls} llamadas/${toolDef.rateLimit.windowMs}ms`,
+        error: `Rate limit excedido para ${name}. Límite: ${rateLimit.maxCalls} llamadas/${rateLimit.windowMs}ms`,
         timestamp: new Date().toISOString(),
         provider: 'router'
       };
@@ -135,9 +136,10 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ToolResult> {
     const validArgs = validationResult.data;
 
     // 4. Ejecutar handler con timeout
+    const timeout = toolDef.timeout || 15000; // Default: 15 segundos
     const result = await Promise.race([
       executeHandler(name, validArgs),
-      timeoutPromise(toolDef.timeout)
+      timeoutPromise(timeout)
     ]);
 
     console.log(`[TOOL ROUTER] Resultado exitoso: ${name}`);
