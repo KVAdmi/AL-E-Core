@@ -55,7 +55,7 @@ async function syncAccount(account: any): Promise<void> {
     const errors: string[] = [];
     
     // Sincronizar solo INBOX por ahora (para evitar sobrecarga)
-    const inboxFolder = folders.find(f => f.folder_type === 'inbox');
+    const inboxFolder = folders.find(f => f.imap_path === 'INBOX');
     
     if (!inboxFolder) {
       console.log('[SYNC WORKER] ⚠️ Folder INBOX no encontrado');
