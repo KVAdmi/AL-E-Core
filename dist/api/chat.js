@@ -380,9 +380,9 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                 console.log('[KNOWLEDGE] No hay mensaje del usuario para buscar');
             }
             else {
-                // Llamar al endpoint de búsqueda vectorial
-                const { generateVectorString } = await Promise.resolve().then(() => __importStar(require('../services/embeddingService')));
-                const queryEmbedding = await generateVectorString(searchQuery);
+                // Generar embedding como array (no string)
+                const { generateEmbedding } = await Promise.resolve().then(() => __importStar(require('../services/embeddingService')));
+                const queryEmbedding = await generateEmbedding(searchQuery);
                 const { data: vectorResults, error: vectorError } = await supabase_1.supabase.rpc('search_knowledge', {
                     query_embedding: queryEmbedding,
                     match_threshold: 0.7,
@@ -975,8 +975,8 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         let vectorKnowledgeContext = '';
         let knowledgeSources = [];
         try {
-            const { generateVectorString } = await Promise.resolve().then(() => __importStar(require('../services/embeddingService')));
-            const queryEmbedding = await generateVectorString(message);
+            const { generateEmbedding } = await Promise.resolve().then(() => __importStar(require('../services/embeddingService')));
+            const queryEmbedding = await generateEmbedding(message);
             const { data: vectorResults, error: vectorError } = await supabase_1.supabase.rpc('search_knowledge', {
                 query_embedding: queryEmbedding,
                 match_threshold: 0.7,

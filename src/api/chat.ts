@@ -416,9 +416,9 @@ router.post('/chat', optionalAuth, async (req, res) => {
       if (!searchQuery) {
         console.log('[KNOWLEDGE] No hay mensaje del usuario para buscar');
       } else {
-        // Llamar al endpoint de búsqueda vectorial
-        const { generateVectorString } = await import('../services/embeddingService');
-        const queryEmbedding = await generateVectorString(searchQuery);
+        // Generar embedding como array (no string)
+        const { generateEmbedding } = await import('../services/embeddingService');
+        const queryEmbedding = await generateEmbedding(searchQuery);
         
         const { data: vectorResults, error: vectorError } = await supabase.rpc('search_knowledge', {
           query_embedding: queryEmbedding,
@@ -1122,8 +1122,8 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
     let knowledgeSources: any[] = [];
     
     try {
-      const { generateVectorString } = await import('../services/embeddingService');
-      const queryEmbedding = await generateVectorString(message);
+      const { generateEmbedding } = await import('../services/embeddingService');
+      const queryEmbedding = await generateEmbedding(message);
       
       const { data: vectorResults, error: vectorError } = await supabase.rpc('search_knowledge', {
         query_embedding: queryEmbedding,

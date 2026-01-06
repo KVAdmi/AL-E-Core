@@ -38,13 +38,14 @@ router.post('/search', async (req, res) => {
     
     console.log('[KNOWLEDGE] 🔍 Búsqueda:', query);
     
-    // Generar embedding del query
-    const { generateVectorString } = await import('../services/embeddingService');
-    const queryEmbedding = await generateVectorString(query);
+    // Generar embedding del query como ARRAY (no string)
+    const { generateEmbedding } = await import('../services/embeddingService');
+    const queryEmbedding = await generateEmbedding(query);
     
     // Buscar usando similitud coseno en pgvector
     const { supabase } = await import('../db/supabase');
     
+    // Enviar array directamente, Supabase lo convierte a vector(1024)
     const { data, error } = await supabase.rpc('search_knowledge', {
       query_embedding: queryEmbedding,
       match_threshold: threshold,
