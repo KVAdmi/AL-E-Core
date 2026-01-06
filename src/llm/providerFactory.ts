@@ -50,9 +50,9 @@ class LLMProviderFactory {
       console.log('[LLM FACTORY] OpenRouter configurado (fallback)');
     }
 
-    // Validar que al menos uno esté disponible
+    // Validar que al menos uno esté disponible (solo warning si no hay)
     if (!this.primaryProvider && !this.fallbackProvider) {
-      throw new Error('No hay providers LLM configurados. Se requiere MISTRAL_API_KEY o OPENROUTER_API_KEY');
+      console.warn('[LLM FACTORY] ⚠️  No hay providers LLM configurados. Tool calling no estará disponible hasta configurar MISTRAL_API_KEY o OPENROUTER_API_KEY');
     }
 
     this.currentProvider = provider === 'openrouter' ? 'openrouter' : 'mistral';
@@ -65,6 +65,11 @@ class LLMProviderFactory {
     messages: Message[],
     options: CompletionOptions = {}
   ): Promise<CompletionResponse> {
+    
+    // Validar que hay providers disponibles
+    if (!this.primaryProvider && !this.fallbackProvider) {
+      throw new Error('No hay providers LLM configurados. Configura MISTRAL_API_KEY o OPENROUTER_API_KEY en el servidor');
+    }
     
     // Intentar con provider primario
     if (this.primaryProvider) {
