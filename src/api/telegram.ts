@@ -314,6 +314,111 @@ router.post('/webhook/:botId/:secret', async (req, res) => {
         console.error('[TELEGRAM] Error sending response:', error);
       }
     }
+
+    // Procesar callback_query (botones)
+    if (update.callback_query) {
+      const callbackQuery = update.callback_query;
+      const chatId = callbackQuery.message.chat.id;
+      const messageId = callbackQuery.message.message_id;
+      const callbackData = callbackQuery.data;
+
+      console.log(`[TELEGRAM] Callback recibido - Chat: ${chatId}, Data: ${callbackData}`);
+
+      try {
+        const data = JSON.parse(callbackData);
+        const { action, eventId } = data;
+
+        const botToken = decrypt(bot.bot_token_enc);
+        const telegramBot = new TelegramBot(botToken);
+
+        // Ejecutar acción según el botón presionado
+        if (action === 'confirm') {
+          // Confirmar evento
+          const { data: event, error: updateError } = await supabase
+            .from('calendar_events')
+            .update({ status: 'confirmed', updated_at: new Date().toISOString() })
+            .eq('id', eventId)
+            .eq('owner_user_id', bot.owner_user_id)
+            .select()
+            .single();
+
+          if (updateError || !event) {
+            await telegramBot.answerCallbackQuery(callbackQuery.id, {
+              text: '❌ Error: evento no encontrado',
+              show_alert: true
+            });
+          } else {
+            // Actualizar mensaje
+            await telegramBot.editMessageText(
+              `✅ Evento confirmado\n\n📅 ${event.title}\n🕒 ${new Date(event.start_at).toLocaleString('es-MX')}`,
+              {
+                chat_id: chatId,
+                message_id: messageId
+              }
+            );
+
+            await telegramBot.answerCallbackQuery(callbackQuery.id, {
+              text: '✅ Evento confirmado exitosamente'
+            });
+
+            console.log(`[TELEGRAM] ✓ Evento confirmado - ID: ${eventId}`);
+          }
+
+        } else if (action === 'cancel') {
+          // Cancelar evento
+          const { data: event, error: updateError } = await supabase
+            .from('calendar_events')
+            .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+            .eq('id', eventId)
+            .eq('owner_user_id', bot.owner_user_id)
+            .select()
+            .single();
+
+          if (updateError || !event) {
+            await telegramBot.answerCallbackQuery(callbackQuery.id, {
+              text: '❌ Error: evento no encontrado',
+              show_alert: true
+            });
+          } else {
+            await telegramBot.editMessageText(
+              `❌ Evento cancelado\n\n📅 ${event.title}\n🕒 ${new Date(event.start_at).toLocaleString('es-MX')}`,
+              {
+                chat_id: chatId,
+                message_id: messageId
+              }
+            );
+
+            await telegramBot.answerCallbackQuery(callbackQuery.id, {
+              text: '❌ Evento cancelado'
+            });
+
+            console.log(`[TELEGRAM] ✓ Evento cancelado - ID: ${eventId}`);
+          }
+
+        } else if (action === 'reschedule') {
+          // Reagendar: solo notificar al usuario que debe hacerlo manualmente
+          await telegramBot.answerCallbackQuery(callbackQuery.id, {
+            text: '🔁 Dime la nueva fecha por mensaje',
+            show_alert: true
+          });
+
+          await telegramBot.sendMessage(chatId, 
+            '🔁 Para reagendar, dime la nueva fecha y hora.\n\nEjemplo: "Mueve mi cita al viernes a las 3pm"'
+          );
+        }
+
+      } catch (error: any) {
+        console.error('[TELEGRAM] Error processing callback:', error);
+        
+        const botToken = decrypt(bot.bot_token_enc);
+        const telegramBot = new TelegramBot(botToken);
+        
+        await telegramBot.answerCallbackQuery(callbackQuery.id, {
+          text: '❌ Error procesando acción',
+          show_alert: true
+        });
+      }
+    }
     
     // Responder 200 OK a Telegram (obligatorio)
     return res.json({ ok: true });

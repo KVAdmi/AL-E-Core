@@ -106,6 +106,52 @@ export const KnowledgeSearchSchema = z.object({
   workspaceId: z.string().optional()
 });
 
+// Telegram
+export const TelegramSendMessageSchema = z.object({
+  userId: z.string().uuid(),
+  message: z.string().min(1).max(4096), // Límite de Telegram
+  chatId: z.number().optional()
+});
+
+export const TelegramSendConfirmationSchema = z.object({
+  userId: z.string().uuid(),
+  message: z.string().min(1).max(4096),
+  eventId: z.string().uuid(),
+  chatId: z.number().optional()
+});
+
+// Calendar
+export const CalendarCreateEventSchema = z.object({
+  userId: z.string().uuid(),
+  title: z.string().min(1).max(500),
+  startAt: z.string(), // ISO 8601
+  endAt: z.string(), // ISO 8601
+  location: z.string().optional(),
+  description: z.string().optional(),
+  attendees: z.array(z.string()).optional(),
+  notificationMinutes: z.number().optional().default(60)
+});
+
+export const CalendarUpdateEventSchema = z.object({
+  userId: z.string().uuid(),
+  eventId: z.string().uuid(),
+  title: z.string().optional(),
+  startAt: z.string().optional(),
+  endAt: z.string().optional(),
+  location: z.string().optional(),
+  description: z.string().optional(),
+  status: z.enum(['draft', 'confirmed', 'cancelled']).optional(),
+  attendees: z.array(z.string()).optional()
+});
+
+export const CalendarListEventsSchema = z.object({
+  userId: z.string().uuid(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+  status: z.enum(['draft', 'confirmed', 'cancelled']).optional(),
+  limit: z.number().optional().default(50)
+});
+
 // ═══════════════════════════════════════════════════════════════
 // REGISTRO DE HERRAMIENTAS
 // ═══════════════════════════════════════════════════════════════
@@ -205,6 +251,54 @@ export const TOOL_REGISTRY: Record<string, Omit<ToolDefinition, 'handler'>> = {
     description: 'Busca en la base de conocimiento interna (documentación, memoria del sistema) usando búsqueda semántica.',
     category: 'internal',
     schema: KnowledgeSearchSchema,
+    timeout: 10000
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // TELEGRAM
+  // ─────────────────────────────────────────────────────────────
+  telegram_send_message: {
+    name: 'telegram_send_message',
+    description: 'Envía un mensaje de texto por Telegram al usuario. Requiere bot conectado y chat activo.',
+    category: 'internal',
+    schema: TelegramSendMessageSchema,
+    timeout: 10000,
+    rateLimit: { maxCalls: 20, windowMs: 60000 }
+  },
+
+  telegram_send_confirmation: {
+    name: 'telegram_send_confirmation',
+    description: 'Envía un mensaje con botones interactivos (Confirmar/Reagendar/Cancelar) para confirmación de eventos.',
+    category: 'internal',
+    schema: TelegramSendConfirmationSchema,
+    timeout: 10000,
+    rateLimit: { maxCalls: 10, windowMs: 60000 }
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // CALENDAR
+  // ─────────────────────────────────────────────────────────────
+  calendar_create_event: {
+    name: 'calendar_create_event',
+    description: 'Crea un nuevo evento en el calendario del usuario. Genera notification_job automáticamente.',
+    category: 'internal',
+    schema: CalendarCreateEventSchema,
+    timeout: 10000
+  },
+
+  calendar_update_event: {
+    name: 'calendar_update_event',
+    description: 'Actualiza un evento existente (título, fechas, status, etc). Valida ownership del usuario.',
+    category: 'internal',
+    schema: CalendarUpdateEventSchema,
+    timeout: 10000
+  },
+
+  calendar_list_events: {
+    name: 'calendar_list_events',
+    description: 'Lista eventos del calendario con filtros opcionales (fechas, status).',
+    category: 'internal',
+    schema: CalendarListEventsSchema,
     timeout: 10000
   }
 };

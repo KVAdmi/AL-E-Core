@@ -12,6 +12,7 @@
 import { supabase } from '../db/supabase';
 import { UserIntegrations } from './integrationChecker';
 import { IntentClassification } from './intentClassifier';
+import { executeToolCall } from '../tools/router';
 
 /**
  * Formato transaccional REAL con evidencia obligatoria
@@ -522,7 +523,7 @@ Por ahora, usa el endpoint \`POST /api/mail/send\` directamente con tu cuenta co
   }
   
   // ═══════════════════════════════════════════════════════════════
-  // 4. CALENDAR - CREAR EVENTO (CON EVIDENCIA REAL)
+  // 4. CALENDAR - CREAR EVENTO (VÍA TOOL ROUTER)
   // ═══════════════════════════════════════════════════════════════
   if (
     lowerMsg.match(/\b(agenda|agendar|agend[aá]r?l[ao]s?|crea|crear|cr[eé]al[ao]s?|pon|poner|añade|añadir|agrega|agregar|programa|programar|intenta|intentar)\b.{0,100}\b(reunión|reunion|cita|citas|evento|eventos|llamada|call|meet|zoom|videollamada)\b/i)
@@ -534,7 +535,7 @@ Por ahora, usa el endpoint \`POST /api/mail/send\` directamente con tu cuenta co
     
     if (!eventInfo.title) {
       return {
-        toolUsed: 'calendar_create',
+        toolUsed: 'calendar_create_event',
         toolReason: 'Missing event title',
         toolResult: '⚠️ ¿Cuál es el nombre o motivo del evento que quieres agendar?',
         toolFailed: true,
@@ -544,7 +545,7 @@ Por ahora, usa el endpoint \`POST /api/mail/send\` directamente con tu cuenta co
     
     if (!eventInfo.startDate) {
       return {
-        toolUsed: 'calendar_create',
+        toolUsed: 'calendar_create_event',
         toolReason: 'Missing event date',
         toolResult: '⚠️ ¿Para qué fecha y hora quieres agendar el evento?',
         toolFailed: true,
@@ -553,83 +554,53 @@ Por ahora, usa el endpoint \`POST /api/mail/send\` directamente con tu cuenta co
     }
     
     try {
-      // ═══ TRANSACCIÓN REAL CON EVIDENCIA ═══
-      const { data: newEvent, error } = await supabase
-        .from('calendar_events')
-        .insert({
-          owner_user_id: userId,
+      // Llamar al Tool Router
+      const result = await executeToolCall({
+        name: 'calendar_create_event',
+        args: {
+          userId,
           title: eventInfo.title,
-          description: eventInfo.description || '',
-          location: eventInfo.location || '',
-          start_at: eventInfo.startDate.toISOString(),
-          end_at: eventInfo.endDate.toISOString(),
-          timezone: 'America/Mexico_City',
-          status: 'scheduled',
-          notification_minutes: 60,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .select()
-        .single();
-      
-      // SI FALLA LA DB → success = false
-      if (error || !newEvent || !newEvent.id) {
-        console.error('[TRANSACTIONAL] ❌ CALENDAR CREATE FAILED:', error);
+          startAt: eventInfo.startDate.toISOString(),
+          endAt: eventInfo.endDate.toISOString(),
+          location: eventInfo.location || undefined,
+          description: eventInfo.description || undefined,
+          notificationMinutes: 60
+        }
+      });
+
+      if (result.success) {
+        const event = result.data.event;
+        const formattedDate = new Date(event.startAt).toLocaleString('es-MX', {
+          timeZone: 'America/Mexico_City',
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+
         return {
-          toolUsed: 'calendar_create',
-          toolReason: error?.message || 'No ID returned from DB',
-          toolResult: JSON.stringify({
-            success: false,
-            action: 'calendar.create',
-            evidence: null,
-            userMessage: 'No pude crear el evento en tu calendario.',
-            reason: error?.message || 'NO_ID_RETURNED'
-          }),
+          toolUsed: 'calendar_create_event',
+          toolReason: 'Event created successfully',
+          toolResult: `✅ Evento creado exitosamente\n\n📅 **${event.title}**\n🕒 ${formattedDate}\n${event.location ? `📍 ${event.location}\n` : ''}${result.data.notificationScheduled ? '🔔 Recibirás una notificación 1 hora antes\n' : ''}\nID: ${event.id}`,
+          toolFailed: false
+        };
+      } else {
+        return {
+          toolUsed: 'calendar_create_event',
+          toolReason: result.error || 'Unknown error',
+          toolResult: `❌ Error creando evento:\n\n${result.error}`,
           toolFailed: true,
-          toolError: error?.message || 'NO_ID_RETURNED'
+          toolError: result.error
         };
       }
-      
-      // ✅ ÉXITO REAL CON EVIDENCIA
-      console.log('[TRANSACTIONAL] ✅ CALENDAR CREATE SUCCESS:', newEvent.id);
-      
-      const formattedDate = eventInfo.startDate.toLocaleString('es-MX', {
-        timeZone: 'America/Mexico_City',
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-      
-      return {
-        toolUsed: 'calendar_create',
-        toolReason: 'Event created with evidence',
-        toolResult: JSON.stringify({
-          success: true,
-          action: 'calendar.create',
-          evidence: {
-            table: 'calendar_events',
-            id: newEvent.id
-          },
-          userMessage: `Evento agendado: ${eventInfo.title} - ${formattedDate}${eventInfo.location ? ` en ${eventInfo.location}` : ''}`
-        }),
-        toolFailed: false
-      };
-      
+
     } catch (error: any) {
-      console.error('[TRANSACTIONAL] ❌ CALENDAR CREATE EXCEPTION:', error);
       return {
-        toolUsed: 'calendar_create',
-        toolReason: 'Exception',
-        toolResult: JSON.stringify({
-          success: false,
-          action: 'calendar.create',
-          evidence: null,
-          userMessage: 'No pude crear el evento en tu calendario.',
-          reason: error.message
-        }),
+        toolUsed: 'calendar_create_event',
+        toolReason: error.message,
+        toolResult: `❌ Error: ${error.message}`,
         toolFailed: true,
         toolError: error.message
       };
@@ -646,24 +617,54 @@ Por ahora, usa el endpoint \`POST /api/mail/send\` directamente con tu cuenta co
     
     if (!integrations.hasTelegram) {
       return {
-        toolUsed: 'telegram_send',
+        toolUsed: 'telegram_send_message',
         toolReason: 'No telegram bot configured',
         toolResult: '❌ No tienes ningún bot de Telegram conectado.\n\nPara enviar mensajes por Telegram, primero conecta tu bot en tu perfil.',
         toolFailed: true,
         toolError: 'NO_TELEGRAM_BOT'
       };
     }
-    
-    return {
-      toolUsed: 'telegram_send',
-      toolReason: 'Telegram send ready (implementation pending)',
-      toolResult: `✅ Bot de Telegram conectado.
 
-⚠️ El envío de mensajes está listo pero aún no implementado en el orchestrator.
+    // Extraer mensaje a enviar
+    const match = userMessage.match(/(?:envía|enviar|manda|mandar|notifica|notificar|avisa|avisar)\s+(?:por\s+)?(?:telegram|telegrama)?\s*[":']?(.+?)[":']?$/i);
+    const message = match ? match[1].trim() : 'Mensaje de AL-E';
 
-Por ahora, usa el endpoint \`POST /api/telegram/send\` directamente.`,
-      toolFailed: false
-    };
+    try {
+      // Llamar al Tool Router
+      const result = await executeToolCall({
+        name: 'telegram_send_message',
+        args: {
+          userId,
+          message
+        }
+      });
+
+      if (result.success) {
+        return {
+          toolUsed: 'telegram_send_message',
+          toolReason: 'Message sent successfully via Telegram',
+          toolResult: `✅ Mensaje enviado por Telegram:\n\n"${message}"\n\nMessageID: ${result.data.messageId}`,
+          toolFailed: false
+        };
+      } else {
+        return {
+          toolUsed: 'telegram_send_message',
+          toolReason: result.error || 'Unknown error',
+          toolResult: `❌ Error enviando mensaje:\n\n${result.error}`,
+          toolFailed: true,
+          toolError: result.error
+        };
+      }
+
+    } catch (error: any) {
+      return {
+        toolUsed: 'telegram_send_message',
+        toolReason: error.message,
+        toolResult: `❌ Error: ${error.message}`,
+        toolFailed: true,
+        toolError: error.message
+      };
+    }
   }
   
   // ═══════════════════════════════════════════════════════════════

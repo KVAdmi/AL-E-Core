@@ -45,6 +45,17 @@ import {
   generateImageHandler 
 } from './handlers/imageTools';
 
+import {
+  telegramSendMessageHandler,
+  telegramSendConfirmationHandler
+} from './handlers/telegramTools';
+
+import {
+  calendarCreateEventHandler,
+  calendarUpdateEventHandler,
+  calendarListEventsHandler
+} from './handlers/calendarTools';
+
 // ═══════════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════════
@@ -191,6 +202,20 @@ async function executeHandler(name: string, args: any): Promise<ToolResult> {
     // Image
     case 'generate_image':
       return generateImageHandler(args);
+
+    // Telegram
+    case 'telegram_send_message':
+      return telegramSendMessageHandler(args);
+    case 'telegram_send_confirmation':
+      return telegramSendConfirmationHandler(args);
+
+    // Calendar
+    case 'calendar_create_event':
+      return calendarCreateEventHandler(args);
+    case 'calendar_update_event':
+      return calendarUpdateEventHandler(args);
+    case 'calendar_list_events':
+      return calendarListEventsHandler(args);
 
     default:
       throw new Error(`Handler no implementado para: ${name}`);

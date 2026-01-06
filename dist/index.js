@@ -26,6 +26,8 @@ const calendar_1 = __importDefault(require("./api/calendar")); // Calendario int
 const telegram_1 = __importDefault(require("./api/telegram")); // Telegram bot por usuario
 const runtime_capabilities_1 = __importDefault(require("./api/runtime-capabilities")); // Runtime capabilities
 const p0_1 = __importDefault(require("./api/p0")); // P0 internal testing endpoint
+const toolsTest_1 = __importDefault(require("./api/toolsTest")); // Tool calling test endpoint
+const knowledgeEmbeddings_1 = __importDefault(require("./api/knowledgeEmbeddings")); // Regenerar embeddings
 const documentText_1 = require("./utils/documentText");
 const notificationWorker_1 = require("./workers/notificationWorker");
 const emailSyncWorker_1 = require("./workers/emailSyncWorker");
@@ -199,6 +201,8 @@ app.use("/api/calendar", calendar_1.default); // Calendario interno
 app.use("/api/telegram", telegram_1.default); // Telegram bot por usuario
 app.use("/api/runtime-capabilities", runtime_capabilities_1.default); // Runtime capabilities
 app.use("/api/p0", p0_1.default); // P0 internal testing (service role only)
+app.use("/api/tools", toolsTest_1.default); // Tool calling test (nuevas integraciones externas)
+app.use("/api/knowledge/embeddings", knowledgeEmbeddings_1.default); // Regenerar embeddings (enterprise)
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
