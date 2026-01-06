@@ -13,6 +13,8 @@ import { searchKnowledge } from '../services/knowledgeIngest';
 import { processDocument } from '../services/documentParser';
 import { analyzeImage } from '../services/visionService';
 import { generateEmbeddingsBatch, arrayToVector } from '../services/embeddingService';
+import { processEmbeddingQueue, getEmbeddingStats } from '../workers/embeddingWorker';
+import crypto from 'crypto';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -258,13 +260,39 @@ router.post('/ingest', upload.single('file'), async (req, res) => {
 // ═══════════════════════════════════════════════════════════════
 
 async function saveSource(supabase: any, filename: string, type: string, repo: string | undefined, branch: string | undefined, content: string) {
+  
+  // Calcular source_hash (SHA-256 del contenido)
+  const sourceHash = crypto
+    .createHash('sha256')
+    .update(content)
+    .digest('hex');
+  
+  // Verificar si ya existe
+  const { data: existing, error: searchError } = await supabase
+    .from('kb_sources')
+    .select('id')
+    .eq('source_hash', sourceHash)
+    .maybeSingle();
+  
+  if (searchError) {
+    console.error('[KNOWLEDGE] ⚠️ Error verificando source_hash:', searchError);
+    // Continuar sin idempotencia (no bloqueante)
+  }
+  
+  if (existing) {
+    console.log('[KNOWLEDGE] ℹ️ Source ya existe (source_hash match), reutilizando ID:', existing.id);
+    return existing.id;
+  }
+  
+  // Crear nuevo source
   const { data, error } = await supabase
     .from('kb_sources')
     .insert({
       type: type || 'upload',
       repo: repo || null,
       path: filename,
-      content: content.substring(0, 10000) // Max 10k chars en source
+      content: content.substring(0, 10000), // Max 10k chars en source
+      source_hash: sourceHash
     })
     .select('id')
     .single();
@@ -277,7 +305,8 @@ async function saveChunks(supabase: any, sourceId: string, chunks: string[], met
   const chunksToInsert = chunks.map(content => ({
     source_id: sourceId,
     content,
-    metadata
+    metadata,
+    embedding_status: 'pending' // ← Estado explícito
   }));
   
   const { data, error } = await supabase
@@ -347,6 +376,100 @@ router.get('/stats', async (req, res) => {
     return res.status(500).json({
       success: false,
       error: 'STATS_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// POST /api/knowledge/embeddings/process - Worker de Embeddings
+// ═══════════════════════════════════════════════════════════════
+
+router.post('/embeddings/process', async (req, res) => {
+  try {
+    const { batchSize = 50, retryErrors = false } = req.body;
+    
+    console.log(`[KNOWLEDGE] 🤖 Worker iniciado (batch=${batchSize}, retry=${retryErrors})`);
+    
+    // Obtener Supabase client (usando el global)
+    const supabase = (req as any).supabase;
+    if (!supabase) {
+      return res.status(500).json({
+        success: false,
+        error: 'NO_SUPABASE_CLIENT'
+      });
+    }
+    
+    // Procesar queue
+    const result = await processEmbeddingQueue(supabase, batchSize, retryErrors);
+    
+    console.log(`[KNOWLEDGE] ✅ Worker completado: ${result.ready} ready, ${result.errors} errors`);
+    
+    return res.json({
+      success: result.success,
+      processed: result.processed,
+      ready: result.ready,
+      errors: result.errors,
+      errorDetails: result.errorDetails
+    });
+    
+  } catch (error: any) {
+    console.error('[KNOWLEDGE] ❌ Error en worker:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'WORKER_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// GET /api/knowledge/health - Health Monitoring
+// ═══════════════════════════════════════════════════════════════
+
+router.get('/health', async (req, res) => {
+  try {
+    const supabase = (req as any).supabase;
+    if (!supabase) {
+      return res.status(500).json({
+        success: false,
+        error: 'NO_SUPABASE_CLIENT'
+      });
+    }
+    
+    // Stats de embeddings
+    const stats = await getEmbeddingStats(supabase);
+    
+    // Coverage
+    const coverage = stats.total_chunks > 0 
+      ? Math.round((stats.ready / stats.total_chunks) * 100 * 10) / 10 
+      : 100;
+    
+    // Status
+    let status = 'healthy';
+    if (stats.pending > 0 || stats.error > 0) {
+      status = 'degraded';
+    }
+    if (stats.processing > 0) {
+      status = 'processing';
+    }
+    
+    return res.json({
+      status,
+      coverage,
+      healthy: stats.healthy,
+      total_chunks: stats.total_chunks,
+      ready: stats.ready,
+      pending: stats.pending,
+      processing: stats.processing,
+      errors: stats.error
+    });
+    
+  } catch (error: any) {
+    console.error('[KNOWLEDGE] ❌ Error en health check:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'HEALTH_CHECK_ERROR',
       message: error.message
     });
   }
