@@ -10,8 +10,9 @@
  * - POST /api/telegram/bots/connect - Conectar bot de usuario
  * - GET /api/telegram/bots - Listar bots del usuario
  * - POST /api/telegram/webhook/:botId/:secret - Recibir mensajes
- * - POST /api/telegram/send - Enviar mensaje
+ * - POST /api/telegram/send - Enviar mensaje (con validación auto_send)
  * - GET /api/telegram/chats - Listar chats del bot
+ * - POST /api/telegram/bot/settings - Actualizar settings (auto_send_enabled)
  * =====================================================
  */
 
@@ -448,7 +449,7 @@ router.post('/send', async (req, res) => {
     
     console.log(`[TELEGRAM] Enviando mensaje - User: ${ownerUserId}, Chat: ${chatId}`);
     
-    // Obtener bot activo del usuario
+    // 1. Obtener bot activo del usuario
     const { data: bot, error: botError } = await supabase
       .from('telegram_bots')
       .select('*')
@@ -465,8 +466,40 @@ router.post('/send', async (req, res) => {
         message: 'No tienes un bot de Telegram configurado'
       });
     }
+
+    // 2. Obtener chat y validar auto_send_enabled
+    const { data: chat, error: chatError } = await supabase
+      .from('telegram_chats')
+      .select('auto_send_enabled, chat_id')
+      .eq('bot_id', bot.id)
+      .eq('owner_user_id', ownerUserId)
+      .order('last_seen_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (chatError || !chat) {
+      return res.status(404).json({
+        ok: false,
+        error: 'CHAT_NOT_FOUND',
+        message: 'No hay chats activos. Inicia conversación con tu bot primero.'
+      });
+    }
+
+    // 3. Validar auto_send_enabled
+    if (!chat.auto_send_enabled) {
+      console.log(`[TELEGRAM] ⚠️ Auto-send desactivado - devolviendo borrador`);
+      return res.json({
+        ok: true,
+        requires_approval: true,
+        draft: {
+          text,
+          chatId: chat.chat_id,
+          message: 'Auto-send desactivado. Actívalo en settings o aprueba este mensaje manualmente.'
+        }
+      });
+    }
     
-    // Enviar mensaje
+    // 4. Enviar mensaje (auto_send_enabled = true)
     let messageId;
     let status = 'sent';
     let errorText = null;
@@ -475,7 +508,7 @@ router.post('/send', async (req, res) => {
       const botToken = decrypt(bot.bot_token_enc);
       const telegramBot = new TelegramBot(botToken);
       
-      const result = await telegramBot.sendMessage(chatId, text);
+      const result = await telegramBot.sendMessage(chat.chat_id, text);
       messageId = result.message_id;
       
       console.log(`[TELEGRAM] ✓ Mensaje enviado - ID: ${messageId}`);
@@ -486,13 +519,13 @@ router.post('/send', async (req, res) => {
       errorText = error.message;
     }
     
-    // Guardar en DB
+    // 5. Guardar en DB con evidencia
     await supabase
       .from('telegram_messages')
       .insert({
         owner_user_id: ownerUserId,
         bot_id: bot.id,
-        chat_id: chatId,
+        chat_id: chat.chat_id,
         direction: 'outbound',
         text,
         telegram_message_id: messageId || null,
@@ -541,9 +574,18 @@ router.get('/chats', async (req, res) => {
       });
     }
     
+    // Obtener chats con info del bot
     const { data, error } = await supabase
       .from('telegram_chats')
-      .select('*')
+      .select(`
+        id,
+        chat_id,
+        telegram_username,
+        auto_send_enabled,
+        first_seen_at,
+        last_seen_at,
+        bot_id
+      `)
       .eq('owner_user_id', ownerUserId)
       .order('last_seen_at', { ascending: false });
     
@@ -556,9 +598,86 @@ router.get('/chats', async (req, res) => {
       });
     }
     
+    // Formatear para frontend (compatibilidad telegram_accounts)
+    const chats = (data || []).map(chat => ({
+      chatId: chat.id, // UUID del chat
+      title: chat.telegram_username ? `@${chat.telegram_username}` : `Chat ${chat.chat_id}`,
+      username: chat.telegram_username,
+      connected: true,
+      auto_send_enabled: chat.auto_send_enabled || false,
+      last_seen_at: chat.last_seen_at
+    }));
+    
     return res.json({
       ok: true,
-      chats: data || []
+      chats
+    });
+    
+  } catch (error: any) {
+    console.error('[TELEGRAM] Error:', error);
+    return res.status(500).json({
+      ok: false,
+      error: 'INTERNAL_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// POST /api/telegram/bot/settings - Actualizar settings del chat
+// ═══════════════════════════════════════════════════════════════
+
+router.post('/bot/settings', async (req, res) => {
+  try {
+    const { chatId, auto_send_enabled } = req.body;
+    
+    if (!chatId || auto_send_enabled === undefined) {
+      return res.status(400).json({
+        ok: false,
+        error: 'MISSING_REQUIRED_FIELDS',
+        message: 'Campos requeridos: chatId, auto_send_enabled'
+      });
+    }
+    
+    console.log(`[TELEGRAM] Actualizando settings - Chat: ${chatId}, auto_send: ${auto_send_enabled}`);
+    
+    // Actualizar telegram_chats
+    const { data, error } = await supabase
+      .from('telegram_chats')
+      .update({ 
+        auto_send_enabled,
+        last_seen_at: new Date().toISOString()
+      })
+      .eq('id', chatId)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('[TELEGRAM] Error updating settings:', error);
+      return res.status(500).json({
+        ok: false,
+        error: 'DB_ERROR',
+        message: error.message
+      });
+    }
+    
+    if (!data) {
+      return res.status(404).json({
+        ok: false,
+        error: 'CHAT_NOT_FOUND',
+        message: 'Chat no encontrado'
+      });
+    }
+    
+    console.log(`[TELEGRAM] ✓ Settings actualizados - Chat: ${chatId}`);
+    
+    return res.json({
+      ok: true,
+      message: 'Settings actualizados exitosamente',
+      chat: {
+        chatId: data.id,
+        auto_send_enabled: data.auto_send_enabled
+      }
     });
     
   } catch (error: any) {
