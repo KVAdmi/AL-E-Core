@@ -152,6 +152,60 @@ export const CalendarListEventsSchema = z.object({
   limit: z.number().optional().default(50)
 });
 
+// Email
+export const EmailReadInboxSchema = z.object({
+  userId: z.string().uuid(),
+  accountId: z.string().uuid().optional(),
+  filter: z.enum(['all', 'unread', 'urgent', 'important']).optional().default('unread'),
+  limit: z.number().optional().default(20)
+});
+
+export const EmailAnalyzeMessageSchema = z.object({
+  userId: z.string().uuid(),
+  messageId: z.string().uuid()
+});
+
+export const EmailClassifySchema = z.object({
+  userId: z.string().uuid(),
+  messageId: z.string().uuid(),
+  classification: z.enum(['urgent', 'important', 'normal', 'low_priority', 'spam']),
+  category: z.string().optional()
+});
+
+export const EmailDraftReplySchema = z.object({
+  userId: z.string().uuid(),
+  messageId: z.string().uuid(),
+  replyType: z.enum(['formal', 'friendly', 'brief']).optional().default('formal'),
+  instructions: z.string().optional()
+});
+
+export const EmailSendSchema = z.object({
+  userId: z.string().uuid(),
+  accountId: z.string().uuid(),
+  to: z.union([z.string(), z.array(z.string())]),
+  subject: z.string().min(1).max(500),
+  body: z.string().min(1),
+  html: z.string().optional(),
+  cc: z.array(z.string()).optional(),
+  bcc: z.array(z.string()).optional(),
+  draftId: z.string().uuid().optional(),
+  inReplyTo: z.string().optional()
+});
+
+export const EmailSearchContactSchema = z.object({
+  userId: z.string().uuid(),
+  query: z.string().min(1).max(200)
+});
+
+export const EmailCreateContactSchema = z.object({
+  userId: z.string().uuid(),
+  name: z.string().min(1).max(200),
+  email: z.string().email(),
+  phone: z.string().optional(),
+  company: z.string().optional(),
+  notes: z.string().optional()
+});
+
 // ═══════════════════════════════════════════════════════════════
 // REGISTRO DE HERRAMIENTAS
 // ═══════════════════════════════════════════════════════════════
@@ -300,6 +354,66 @@ export const TOOL_REGISTRY: Record<string, Omit<ToolDefinition, 'handler'>> = {
     category: 'internal',
     schema: CalendarListEventsSchema,
     timeout: 10000
+  },
+
+  // ─────────────────────────────────────────────────────────────
+  // EMAIL
+  // ─────────────────────────────────────────────────────────────
+  email_read_inbox: {
+    name: 'email_read_inbox',
+    description: 'Lee mensajes del inbox con filtros (unread, urgent, important). Requiere email_accounts configurada.',
+    category: 'internal',
+    schema: EmailReadInboxSchema,
+    timeout: 15000
+  },
+
+  email_analyze_message: {
+    name: 'email_analyze_message',
+    description: 'Analiza y clasifica un correo con LLM (urgente/importante, categoría, requiere acción, resumen).',
+    category: 'internal',
+    schema: EmailAnalyzeMessageSchema,
+    timeout: 20000
+  },
+
+  email_classify: {
+    name: 'email_classify',
+    description: 'Actualiza la clasificación de un mensaje en la DB (urgent, important, normal, low_priority, spam).',
+    category: 'internal',
+    schema: EmailClassifySchema,
+    timeout: 5000
+  },
+
+  email_draft_reply: {
+    name: 'email_draft_reply',
+    description: 'Genera borrador de respuesta a un correo usando LLM con tono formal/friendly/brief.',
+    category: 'internal',
+    schema: EmailDraftReplySchema,
+    timeout: 20000
+  },
+
+  email_send: {
+    name: 'email_send',
+    description: 'Envía un correo electrónico. Valida auto_send_enabled: si false → retorna borrador, si true → envía real.',
+    category: 'internal',
+    schema: EmailSendSchema,
+    timeout: 30000,
+    rateLimit: { maxCalls: 10, windowMs: 60000 }
+  },
+
+  email_search_contact: {
+    name: 'email_search_contact',
+    description: 'Busca contactos por nombre o email en email_contacts del usuario.',
+    category: 'internal',
+    schema: EmailSearchContactSchema,
+    timeout: 5000
+  },
+
+  email_create_contact: {
+    name: 'email_create_contact',
+    description: 'Crea un nuevo contacto en email_contacts con nombre, email, phone, company, notes.',
+    category: 'internal',
+    schema: EmailCreateContactSchema,
+    timeout: 5000
   }
 };
 

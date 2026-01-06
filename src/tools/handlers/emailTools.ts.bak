@@ -1,0 +1,878 @@
+/**
+ * =====================================================
+ * EMAIL TOOLS - Handlers para Tool Router
+ * =====================================================
+ * 
+ * Herramientas:
+ * - email_read_inbox: Leer mensajes de inbox (con filtros urgente/importante)
+ * - email_analyze_message: Analizar y clasificar un mensaje con LLM
+ * - email_classify: Actualizar clasificación en DB
+ * - email_draft_reply: Generar borrador de respuesta
+ * - email_send: Enviar correo (con validación auto_send_enabled)
+ * - email_search_contact: Buscar contacto por nombre/email
+ * - email_create_contact: Crear nuevo contacto
+ * 
+ * IMPORTANTE:
+ * - Requiere email_accounts configurada
+ * - Usa LLM para análisis y clasificación
+ * - Registra en email_messages y email_contacts
+ * - Política auto_send_enabled igual que Telegram
+ * =====================================================
+ */
+
+import { supabase } from '../../db/supabase';
+import { decryptCredential } from '../../utils/emailEncryption';
+import Imap from 'imap';
+import { simpleParser } from 'mailparser';
+import nodemailer from 'nodemailer';
+import Anthropic from '@anthropic-ai/sdk';
+
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY!
+});
+
+// Extended ToolResult para email tools (incluye action, evidence, userMessage)
+export interface EmailToolResult {
+  success: boolean;
+  action: string;
+  evidence: any;
+  userMessage: string;
+  reason?: string;
+  data?: any;
+  timestamp: string;
+  provider: string;
+}
+
+// Helper para crear EmailToolResult con timestamp y provider automáticos
+function createEmailToolResult(result: Omit<EmailToolResult, 'timestamp' | 'provider'>): EmailToolResult {
+  return {
+    ...result,
+    timestamp: new Date().toISOString(),
+    provider: 'email_tools'
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMAIL READ INBOX
+// ═══════════════════════════════════════════════════════════════
+
+export interface EmailReadInboxArgs {
+  userId: string;
+  accountId?: string; // Opcional, usa cuenta por defecto
+  filter?: 'all' | 'unread' | 'urgent' | 'important'; // Filtro de lectura
+  limit?: number; // Máximo de mensajes a retornar
+}
+
+export async function emailReadInboxHandler(
+  args: EmailReadInboxArgs
+): Promise<EmailToolResult> {
+  try {
+    const { userId, accountId, filter = 'unread', limit = 20 } = args;
+
+    console.log(`[EMAIL TOOL] Leyendo inbox - User: ${userId}, Filter: ${filter}`);
+
+    // 1. Obtener cuenta de email (si no se especifica, usar la primera activa)
+    let query = supabase
+      .from('email_accounts')
+      .select('*')
+      .eq('owner_user_id', userId)
+      .eq('is_active', true);
+
+    if (accountId) {
+      query = query.eq('id', accountId);
+    }
+
+    const { data: accounts, error: accountError } = await query
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (accountError || !accounts || accounts.length === 0) {
+      return {
+        success: false,
+        action: 'email_read_inbox',
+        evidence: null,
+        userMessage: '❌ No tienes cuentas de correo configuradas.',
+        reason: 'NO_EMAIL_ACCOUNT'
+      };
+    }
+
+    const account = accounts[0];
+
+    // 2. Obtener mensajes de la DB (ya sincronizados previamente)
+    let messagesQuery = supabase
+      .from('email_messages')
+      .select('*')
+      .eq('account_id', account.id)
+      .order('date', { ascending: false })
+      .limit(limit);
+
+    // Aplicar filtros
+    if (filter === 'unread') {
+      messagesQuery = messagesQuery.eq('is_read', false);
+    } else if (filter === 'urgent') {
+      messagesQuery = messagesQuery.or('classification.eq.urgent,classification.eq.high_priority');
+    } else if (filter === 'important') {
+      messagesQuery = messagesQuery.eq('classification', 'important');
+    }
+
+    const { data: messages, error: messagesError } = await messagesQuery;
+
+    if (messagesError) {
+      console.error('[EMAIL TOOL] Error obteniendo mensajes:', messagesError);
+      return {
+        success: false,
+        action: 'email_read_inbox',
+        evidence: null,
+        userMessage: '❌ Error al leer los correos.',
+        reason: 'DB_ERROR'
+      };
+    }
+
+    // 3. Formatear resultado
+    const messagesList = messages?.map(m => ({
+      id: m.id,
+      messageId: m.message_id,
+      from: `${m.from_name} <${m.from_address}>`,
+      subject: m.subject,
+      preview: m.body_preview,
+      date: m.date,
+      isRead: m.is_read,
+      classification: m.classification,
+      hasAttachments: m.has_attachments
+    })) || [];
+
+    const evidence = {
+      accountEmail: account.from_email,
+      totalMessages: messagesList.length,
+      filter: filter,
+      messages: messagesList
+    };
+
+    const userMessage = `📧 Inbox de **${account.from_email}**:\n\n` +
+      `**${messagesList.length} correos ${filter}**\n\n` +
+      messagesList.slice(0, 5).map((m, i) => 
+        `${i + 1}. ${m.isRead ? '' : '🔵 '}**${m.subject}**\n` +
+        `   De: ${m.from}\n` +
+        `   ${m.preview?.substring(0, 80) || 'Sin vista previa'}...`
+      ).join('\n\n') +
+      (messagesList.length > 5 ? `\n\n... y ${messagesList.length - 5} más.` : '');
+
+    return {
+      success: true,
+      action: 'email_read_inbox',
+      evidence: evidence,
+      userMessage: userMessage
+    };
+
+  } catch (error: any) {
+    console.error('[EMAIL TOOL] Error:', error);
+    return {
+      success: false,
+      action: 'email_read_inbox',
+      evidence: null,
+      userMessage: `❌ Error leyendo inbox: ${error.message}`,
+      reason: 'EXCEPTION'
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMAIL ANALYZE MESSAGE (con LLM)
+// ═══════════════════════════════════════════════════════════════
+
+export interface EmailAnalyzeMessageArgs {
+  userId: string;
+  messageId: string; // ID del mensaje en email_messages
+}
+
+export async function emailAnalyzeMessageHandler(
+  args: EmailAnalyzeMessageArgs
+): Promise<ToolResult> {
+  try {
+    const { userId, messageId } = args;
+
+    console.log(`[EMAIL TOOL] Analizando mensaje - User: ${userId}, Message: ${messageId}`);
+
+    // 1. Obtener mensaje
+    const { data: message, error: messageError } = await supabase
+      .from('email_messages')
+      .select('*')
+      .eq('id', messageId)
+      .eq('owner_user_id', userId)
+      .single();
+
+    if (messageError || !message) {
+      return {
+        success: false,
+        action: 'email_analyze_message',
+        evidence: null,
+        userMessage: '❌ Mensaje no encontrado.',
+        reason: 'MESSAGE_NOT_FOUND'
+      };
+    }
+
+    // 2. Analizar con LLM
+    const prompt = `Analiza este correo electrónico y clasifícalo:
+
+**De:** ${message.from_name} <${message.from_address}>
+**Asunto:** ${message.subject}
+**Fecha:** ${message.date}
+**Cuerpo:**
+${message.body_text || message.body_html?.substring(0, 2000) || 'Sin contenido'}
+
+Responde en formato JSON:
+{
+  "classification": "urgent|important|normal|low_priority|spam",
+  "category": "meeting|task|information|question|other",
+  "sentiment": "positive|neutral|negative",
+  "requires_action": true/false,
+  "summary": "Resumen breve en español (max 100 caracteres)",
+  "action_items": ["acción 1", "acción 2"],
+  "urgency_reason": "Por qué es urgente (solo si classification=urgent)"
+}`;
+
+    const response = await anthropic.messages.create({
+      model: 'claude-3-5-sonnet-20241022',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: prompt
+      }]
+    });
+
+    const analysisText = response.content[0].type === 'text' 
+      ? response.content[0].text 
+      : '';
+
+    // Extraer JSON del response
+    const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('No se pudo parsear análisis del LLM');
+    }
+
+    const analysis = JSON.parse(jsonMatch[0]);
+
+    // 3. Actualizar clasificación en DB
+    const { error: updateError } = await supabase
+      .from('email_messages')
+      .update({
+        classification: analysis.classification,
+        category: analysis.category,
+        sentiment: analysis.sentiment,
+        requires_action: analysis.requires_action,
+        ai_summary: analysis.summary,
+        action_items: analysis.action_items
+      })
+      .eq('id', messageId);
+
+    if (updateError) {
+      console.error('[EMAIL TOOL] Error actualizando clasificación:', updateError);
+    }
+
+    const evidence = {
+      messageId: message.id,
+      subject: message.subject,
+      from: message.from_address,
+      analysis: analysis
+    };
+
+    const userMessage = `📊 **Análisis del correo:**\n\n` +
+      `**Asunto:** ${message.subject}\n` +
+      `**De:** ${message.from_name}\n\n` +
+      `**Clasificación:** ${analysis.classification.toUpperCase()}\n` +
+      `**Categoría:** ${analysis.category}\n` +
+      `**Requiere acción:** ${analysis.requires_action ? '✅ Sí' : '❌ No'}\n\n` +
+      `**Resumen:** ${analysis.summary}` +
+      (analysis.action_items?.length > 0 
+        ? `\n\n**Acciones:**\n${analysis.action_items.map((a: string, i: number) => `${i + 1}. ${a}`).join('\n')}`
+        : '') +
+      (analysis.urgency_reason 
+        ? `\n\n⚠️ **Urgencia:** ${analysis.urgency_reason}`
+        : '');
+
+    return {
+      success: true,
+      action: 'email_analyze_message',
+      evidence: evidence,
+      userMessage: userMessage
+    };
+
+  } catch (error: any) {
+    console.error('[EMAIL TOOL] Error:', error);
+    return {
+      success: false,
+      action: 'email_analyze_message',
+      evidence: null,
+      userMessage: `❌ Error analizando correo: ${error.message}`,
+      reason: 'EXCEPTION'
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMAIL CLASSIFY (actualizar clasificación en DB)
+// ═══════════════════════════════════════════════════════════════
+
+export interface EmailClassifyArgs {
+  userId: string;
+  messageId: string;
+  classification: 'urgent' | 'important' | 'normal' | 'low_priority' | 'spam';
+  category?: string;
+}
+
+export async function emailClassifyHandler(
+  args: EmailClassifyArgs
+): Promise<ToolResult> {
+  try {
+    const { userId, messageId, classification, category } = args;
+
+    console.log(`[EMAIL TOOL] Clasificando mensaje - User: ${userId}, Classification: ${classification}`);
+
+    // Actualizar clasificación
+    const updateData: any = { classification };
+    if (category) {
+      updateData.category = category;
+    }
+
+    const { data, error } = await supabase
+      .from('email_messages')
+      .update(updateData)
+      .eq('id', messageId)
+      .eq('owner_user_id', userId)
+      .select('subject, from_address')
+      .single();
+
+    if (error) {
+      console.error('[EMAIL TOOL] Error clasificando:', error);
+      return {
+        success: false,
+        action: 'email_classify',
+        evidence: null,
+        userMessage: '❌ Error al clasificar el correo.',
+        reason: 'DB_ERROR'
+      };
+    }
+
+    return {
+      success: true,
+      action: 'email_classify',
+      evidence: {
+        messageId,
+        classification,
+        category,
+        subject: data?.subject
+      },
+      userMessage: `✅ Correo clasificado como **${classification.toUpperCase()}**`
+    };
+
+  } catch (error: any) {
+    console.error('[EMAIL TOOL] Error:', error);
+    return {
+      success: false,
+      action: 'email_classify',
+      evidence: null,
+      userMessage: `❌ Error clasificando correo: ${error.message}`,
+      reason: 'EXCEPTION'
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMAIL DRAFT REPLY (generar borrador con LLM)
+// ═══════════════════════════════════════════════════════════════
+
+export interface EmailDraftReplyArgs {
+  userId: string;
+  messageId: string; // ID del mensaje original
+  replyType?: 'formal' | 'friendly' | 'brief'; // Tono de respuesta
+  instructions?: string; // Instrucciones adicionales del usuario
+}
+
+export async function emailDraftReplyHandler(
+  args: EmailDraftReplyArgs
+): Promise<ToolResult> {
+  try {
+    const { userId, messageId, replyType = 'formal', instructions } = args;
+
+    console.log(`[EMAIL TOOL] Generando borrador - User: ${userId}, Type: ${replyType}`);
+
+    // 1. Obtener mensaje original
+    const { data: message, error: messageError } = await supabase
+      .from('email_messages')
+      .select('*')
+      .eq('id', messageId)
+      .eq('owner_user_id', userId)
+      .single();
+
+    if (messageError || !message) {
+      return {
+        success: false,
+        action: 'email_draft_reply',
+        evidence: null,
+        userMessage: '❌ Mensaje no encontrado.',
+        reason: 'MESSAGE_NOT_FOUND'
+      };
+    }
+
+    // 2. Generar borrador con LLM
+    const toneInstructions = {
+      formal: 'Tono formal y profesional, saludo cordial.',
+      friendly: 'Tono amigable y cercano, natural.',
+      brief: 'Respuesta breve y directa, máximo 3 líneas.'
+    };
+
+    const prompt = `Genera una respuesta a este correo electrónico:
+
+**De:** ${message.from_name} <${message.from_address}>
+**Asunto:** ${message.subject}
+**Fecha:** ${message.date}
+**Cuerpo:**
+${message.body_text || message.body_html?.substring(0, 2000) || 'Sin contenido'}
+
+**Instrucciones:**
+- ${toneInstructions[replyType]}
+${instructions ? `- ${instructions}` : ''}
+
+Responde SOLO con el cuerpo del correo (sin "Asunto:", sin "De:", sin "Para:").
+Incluye saludo y despedida apropiados.`;
+
+    const response = await anthropic.messages.create({
+      model: 'claude-3-5-sonnet-20241022',
+      max_tokens: 2048,
+      messages: [{
+        role: 'user',
+        content: prompt
+      }]
+    });
+
+    const draftBody = response.content[0].type === 'text' 
+      ? response.content[0].text.trim()
+      : '';
+
+    // 3. Guardar borrador en email_drafts
+    const { data: account } = await supabase
+      .from('email_accounts')
+      .select('*')
+      .eq('id', message.account_id)
+      .single();
+
+    const draftSubject = message.subject.startsWith('Re:') 
+      ? message.subject 
+      : `Re: ${message.subject}`;
+
+    const { data: draft, error: draftError } = await supabase
+      .from('email_drafts')
+      .insert({
+        account_id: message.account_id,
+        owner_user_id: userId,
+        to_addresses: [message.from_address],
+        subject: draftSubject,
+        body_text: draftBody,
+        body_html: draftBody.replace(/\n/g, '<br>'),
+        in_reply_to: message.message_id,
+        reply_to_message_id: message.id
+      })
+      .select('id')
+      .single();
+
+    if (draftError) {
+      console.error('[EMAIL TOOL] Error guardando borrador:', draftError);
+    }
+
+    const evidence = {
+      draftId: draft?.id,
+      messageId: message.id,
+      subject: draftSubject,
+      to: message.from_address,
+      body: draftBody,
+      replyType: replyType
+    };
+
+    const userMessage = `✉️ **Borrador generado:**\n\n` +
+      `**Para:** ${message.from_address}\n` +
+      `**Asunto:** ${draftSubject}\n\n` +
+      `**Contenido:**\n${draftBody}\n\n` +
+      `✅ Borrador guardado (ID: ${draft?.id}). Usa \`email_send\` para enviarlo.`;
+
+    return {
+      success: true,
+      action: 'email_draft_reply',
+      evidence: evidence,
+      userMessage: userMessage
+    };
+
+  } catch (error: any) {
+    console.error('[EMAIL TOOL] Error:', error);
+    return {
+      success: false,
+      action: 'email_draft_reply',
+      evidence: null,
+      userMessage: `❌ Error generando borrador: ${error.message}`,
+      reason: 'EXCEPTION'
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMAIL SEND (con validación auto_send_enabled)
+// ═══════════════════════════════════════════════════════════════
+
+export interface EmailSendArgs {
+  userId: string;
+  accountId: string;
+  to: string | string[];
+  subject: string;
+  body: string;
+  html?: string;
+  cc?: string[];
+  bcc?: string[];
+  draftId?: string; // Si se envía desde borrador
+  inReplyTo?: string; // Message-ID del mensaje original
+}
+
+export async function emailSendHandler(
+  args: EmailSendArgs
+): Promise<ToolResult> {
+  try {
+    const { userId, accountId, to, subject, body, html, cc, bcc, draftId, inReplyTo } = args;
+
+    console.log(`[EMAIL TOOL] Enviando correo - User: ${userId}, To: ${to}`);
+
+    // 1. Obtener cuenta
+    const { data: account, error: accountError } = await supabase
+      .from('email_accounts')
+      .select('*')
+      .eq('id', accountId)
+      .eq('owner_user_id', userId)
+      .eq('is_active', true)
+      .single();
+
+    if (accountError || !account) {
+      return {
+        success: false,
+        action: 'email_send',
+        evidence: null,
+        userMessage: '❌ Cuenta de correo no encontrada o inactiva.',
+        reason: 'ACCOUNT_NOT_FOUND'
+      };
+    }
+
+    // 2. Validar política auto_send_enabled
+    if (!account.auto_send_enabled) {
+      // MODO BORRADOR: No enviar, retornar draft
+      console.log('[EMAIL TOOL] auto_send_enabled=false → Retornando borrador');
+
+      const evidence = {
+        mode: 'DRAFT_ONLY',
+        accountEmail: account.from_email,
+        to: Array.isArray(to) ? to : [to],
+        subject: subject,
+        body: body
+      };
+
+      return {
+        success: true,
+        action: 'email_send',
+        evidence: evidence,
+        userMessage: `📝 **Borrador creado** (envío automático deshabilitado)\n\n` +
+          `**Para:** ${Array.isArray(to) ? to.join(', ') : to}\n` +
+          `**Asunto:** ${subject}\n\n` +
+          `Revisa y aprueba en la app antes de enviar.`
+      };
+    }
+
+    // 3. MODO AUTO-SEND: Enviar correo real
+    console.log('[EMAIL TOOL] auto_send_enabled=true → Enviando correo real');
+
+    // Descifrar password SMTP
+    const smtpPass = decryptCredential(account.smtp_pass_enc);
+
+    // Crear transporter
+    const transporter = nodemailer.createTransport({
+      host: account.smtp_host,
+      port: account.smtp_port,
+      secure: account.smtp_secure,
+      auth: {
+        user: account.smtp_user,
+        pass: smtpPass
+      }
+    });
+
+    // Enviar correo
+    const toArray = Array.isArray(to) ? to : [to];
+    const info = await transporter.sendMail({
+      from: `"${account.from_name}" <${account.from_email}>`,
+      to: toArray.join(', '),
+      cc: cc?.join(', '),
+      bcc: bcc?.join(', '),
+      replyTo: account.from_email,
+      subject: subject,
+      text: body,
+      html: html || body.replace(/\n/g, '<br>'),
+      inReplyTo: inReplyTo,
+      headers: inReplyTo ? {
+        'In-Reply-To': inReplyTo,
+        'References': inReplyTo
+      } : undefined
+    });
+
+    if (!info.messageId) {
+      throw new Error('Sin confirmación del servidor SMTP');
+    }
+
+    // 4. Guardar en email_messages (Sent)
+    const { data: sentFolder } = await supabase
+      .from('email_folders')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('folder_type', 'sent')
+      .limit(1)
+      .single();
+
+    await supabase
+      .from('email_messages')
+      .insert({
+        account_id: accountId,
+        owner_user_id: userId,
+        folder_id: sentFolder?.id,
+        current_folder_id: sentFolder?.id,
+        message_id: info.messageId,
+        from_address: account.from_email,
+        from_name: account.from_name,
+        to_addresses: toArray,
+        cc_addresses: cc || [],
+        bcc_addresses: bcc || [],
+        subject: subject,
+        body_text: body,
+        body_html: html || null,
+        body_preview: body.substring(0, 200),
+        has_attachments: false,
+        is_read: true,
+        date: new Date().toISOString(),
+        in_reply_to: inReplyTo
+      });
+
+    // 5. Si era borrador, marcarlo como enviado
+    if (draftId) {
+      await supabase
+        .from('email_drafts')
+        .update({ is_sent: true, sent_at: new Date().toISOString() })
+        .eq('id', draftId);
+    }
+
+    const evidence = {
+      messageId: info.messageId,
+      accountEmail: account.from_email,
+      to: toArray,
+      subject: subject,
+      provider: account.smtp_host
+    };
+
+    return {
+      success: true,
+      action: 'email_send',
+      evidence: evidence,
+      userMessage: `✅ **Correo enviado**\n\n` +
+        `**Para:** ${toArray.join(', ')}\n` +
+        `**Asunto:** ${subject}\n` +
+        `**Message-ID:** ${info.messageId}`
+    };
+
+  } catch (error: any) {
+    console.error('[EMAIL TOOL] Error:', error);
+    return {
+      success: false,
+      action: 'email_send',
+      evidence: null,
+      userMessage: `❌ Error enviando correo: ${error.message}`,
+      reason: 'SMTP_ERROR'
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMAIL SEARCH CONTACT
+// ═══════════════════════════════════════════════════════════════
+
+export interface EmailSearchContactArgs {
+  userId: string;
+  query: string; // Nombre o email a buscar
+}
+
+export async function emailSearchContactHandler(
+  args: EmailSearchContactArgs
+): Promise<ToolResult> {
+  try {
+    const { userId, query } = args;
+
+    console.log(`[EMAIL TOOL] Buscando contacto - User: ${userId}, Query: ${query}`);
+
+    // Buscar en email_contacts por nombre o email
+    const { data: contacts, error } = await supabase
+      .from('email_contacts')
+      .select('*')
+      .eq('owner_user_id', userId)
+      .or(`name.ilike.%${query}%,email.ilike.%${query}%`)
+      .limit(10);
+
+    if (error) {
+      console.error('[EMAIL TOOL] Error buscando contacto:', error);
+      return {
+        success: false,
+        action: 'email_search_contact',
+        evidence: null,
+        userMessage: '❌ Error buscando contacto.',
+        reason: 'DB_ERROR'
+      };
+    }
+
+    if (!contacts || contacts.length === 0) {
+      return {
+        success: false,
+        action: 'email_search_contact',
+        evidence: null,
+        userMessage: `❌ No se encontraron contactos con "${query}".`,
+        reason: 'NOT_FOUND'
+      };
+    }
+
+    const contactsList = contacts.map(c => ({
+      id: c.id,
+      name: c.name,
+      email: c.email,
+      phone: c.phone,
+      company: c.company,
+      lastInteraction: c.last_interaction,
+      emailCount: c.email_count
+    }));
+
+    const evidence = {
+      query: query,
+      totalResults: contactsList.length,
+      contacts: contactsList
+    };
+
+    const userMessage = `👤 **Contactos encontrados (${contactsList.length}):**\n\n` +
+      contactsList.map((c, i) => 
+        `${i + 1}. **${c.name}**\n` +
+        `   📧 ${c.email}\n` +
+        (c.phone ? `   📞 ${c.phone}\n` : '') +
+        (c.company ? `   🏢 ${c.company}\n` : '') +
+        `   💬 ${c.emailCount || 0} correos`
+      ).join('\n\n');
+
+    return {
+      success: true,
+      action: 'email_search_contact',
+      evidence: evidence,
+      userMessage: userMessage
+    };
+
+  } catch (error: any) {
+    console.error('[EMAIL TOOL] Error:', error);
+    return {
+      success: false,
+      action: 'email_search_contact',
+      evidence: null,
+      userMessage: `❌ Error buscando contacto: ${error.message}`,
+      reason: 'EXCEPTION'
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMAIL CREATE CONTACT
+// ═══════════════════════════════════════════════════════════════
+
+export interface EmailCreateContactArgs {
+  userId: string;
+  name: string;
+  email: string;
+  phone?: string;
+  company?: string;
+  notes?: string;
+}
+
+export async function emailCreateContactHandler(
+  args: EmailCreateContactArgs
+): Promise<ToolResult> {
+  try {
+    const { userId, name, email, phone, company, notes } = args;
+
+    console.log(`[EMAIL TOOL] Creando contacto - User: ${userId}, Email: ${email}`);
+
+    // Validar que no exista ya
+    const { data: existing } = await supabase
+      .from('email_contacts')
+      .select('id')
+      .eq('owner_user_id', userId)
+      .eq('email', email)
+      .single();
+
+    if (existing) {
+      return {
+        success: false,
+        action: 'email_create_contact',
+        evidence: null,
+        userMessage: `❌ Ya existe un contacto con el email ${email}.`,
+        reason: 'DUPLICATE'
+      };
+    }
+
+    // Crear contacto
+    const { data: contact, error } = await supabase
+      .from('email_contacts')
+      .insert({
+        owner_user_id: userId,
+        name: name,
+        email: email,
+        phone: phone,
+        company: company,
+        notes: notes,
+        email_count: 0,
+        last_interaction: new Date().toISOString()
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('[EMAIL TOOL] Error creando contacto:', error);
+      return {
+        success: false,
+        action: 'email_create_contact',
+        evidence: null,
+        userMessage: '❌ Error creando contacto.',
+        reason: 'DB_ERROR'
+      };
+    }
+
+    const evidence = {
+      contactId: contact.id,
+      name: contact.name,
+      email: contact.email,
+      phone: contact.phone,
+      company: contact.company
+    };
+
+    return {
+      success: true,
+      action: 'email_create_contact',
+      evidence: evidence,
+      userMessage: `✅ **Contacto creado**\n\n` +
+        `**Nombre:** ${contact.name}\n` +
+        `**Email:** ${contact.email}\n` +
+        (contact.phone ? `**Teléfono:** ${contact.phone}\n` : '') +
+        (contact.company ? `**Empresa:** ${contact.company}` : '')
+    };
+
+  } catch (error: any) {
+    console.error('[EMAIL TOOL] Error:', error);
+    return {
+      success: false,
+      action: 'email_create_contact',
+      evidence: null,
+      userMessage: `❌ Error creando contacto: ${error.message}`,
+      reason: 'EXCEPTION'
+    };
+  }
+}

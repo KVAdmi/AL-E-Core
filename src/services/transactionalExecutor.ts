@@ -287,36 +287,93 @@ export async function executeTransactionalActionV2(
   }
   
   // ═══════════════════════════════════════════════════════════════
-  // EMAIL - ENVIAR (NO DISPONIBLE - AWS SES NO CONFIGURADO)
+  // EMAIL - ENVIAR
   // ═══════════════════════════════════════════════════════════════
   if (
     lowerMsg.match(/\b(envía|enviar|manda|mandar|send|escribe|escribir)\b.{0,100}\b(correo|email|mail|mensaje)\b/i)
   ) {
-    console.log('[TRANSACTIONAL-V2] Intent: EMAIL_SEND (NOT AVAILABLE - SMTP NOT CONFIGURED)');
+    console.log('[TRANSACTIONAL-V2] Intent: EMAIL_SEND');
     
+    // Por ahora retornar mensaje de que se necesita configuración manual
     return {
       success: false,
-      action: 'mail.send',
+      action: 'email.send',
       evidence: null,
-      userMessage: 'El envío de correos aún no está configurado.',
-      reason: 'SMTP_NOT_CONFIGURED'
+      userMessage: 'El envío de correos requiere configuración de cuenta SMTP. Usa el endpoint /api/mail/send.',
+      reason: 'MANUAL_CONFIGURATION_REQUIRED'
     };
   }
   
   // ═══════════════════════════════════════════════════════════════
-  // EMAIL - LEER INBOX (NO DISPONIBLE)
+  // EMAIL - LEER INBOX
   // ═══════════════════════════════════════════════════════════════
   if (
-    lowerMsg.match(/\b(revisa|revisar|checa|ve|ver|mira|consulta|busca|lee|leer)\b.{0,100}\b(correo|email|mail|inbox|bandeja)\b/i)
+    lowerMsg.match(/\b(revisa|revisar|checa|ve|ver|mira|consulta|busca|lee|leer)\b.{0,100}\b(correo|email|mail|inbox|bandeja|urgente|importante)\b/i)
   ) {
-    console.log('[TRANSACTIONAL-V2] Intent: EMAIL_READ (NOT AVAILABLE)');
+    console.log('[TRANSACTIONAL-V2] Intent: EMAIL_READ');
+    
+    // Determinar filtro
+    let filter = 'unread';
+    if (lowerMsg.includes('urgente')) filter = 'urgent';
+    else if (lowerMsg.includes('importante')) filter = 'important';
     
     return {
       success: false,
-      action: 'mail.inbox',
+      action: 'email.read',
       evidence: null,
-      userMessage: 'Esta función aún no está disponible.',
-      reason: 'CAPABILITY_DISABLED'
+      userMessage: `Lectura de correos (${filter}) disponible en /api/ai/analyze-email. Implementación en progreso.`,
+      reason: 'IMPLEMENTATION_IN_PROGRESS'
+    };
+  }
+  
+  // ═══════════════════════════════════════════════════════════════
+  // EMAIL - CLASIFICAR
+  // ═══════════════════════════════════════════════════════════════
+  if (
+    lowerMsg.match(/\b(clasifica|clasificar|analiza|analizar|categoriza|organiza)\b.{0,100}\b(correo|email|mail|bandeja)\b/i)
+  ) {
+    console.log('[TRANSACTIONAL-V2] Intent: EMAIL_CLASSIFY');
+    
+    return {
+      success: false,
+      action: 'email.classify',
+      evidence: null,
+      userMessage: 'Clasificación de correos disponible en /api/ai/analyze-email. Implementación en progreso.',
+      reason: 'IMPLEMENTATION_IN_PROGRESS'
+    };
+  }
+  
+  // ═══════════════════════════════════════════════════════════════
+  // EMAIL - RESPONDER
+  // ═══════════════════════════════════════════════════════════════
+  if (
+    lowerMsg.match(/\b(responde|responder|contesta|contestar|reply)\b.{0,100}\b(correo|email|mail|mensaje)\b/i)
+  ) {
+    console.log('[TRANSACTIONAL-V2] Intent: EMAIL_REPLY');
+    
+    return {
+      success: false,
+      action: 'email.reply',
+      evidence: null,
+      userMessage: 'Respuesta automática de correos disponible en /api/ai/draft-reply. Implementación en progreso.',
+      reason: 'IMPLEMENTATION_IN_PROGRESS'
+    };
+  }
+  
+  // ═══════════════════════════════════════════════════════════════
+  // EMAIL - BUSCAR CONTACTO
+  // ═══════════════════════════════════════════════════════════════
+  if (
+    lowerMsg.match(/\b(busca|buscar|encuentra|encontrar|contacto|quien es)\b.{0,100}\b(email|correo|contacto)\b/i)
+  ) {
+    console.log('[TRANSACTIONAL-V2] Intent: EMAIL_SEARCH_CONTACT');
+    
+    return {
+      success: false,
+      action: 'email.search_contact',
+      evidence: null,
+      userMessage: 'Búsqueda de contactos disponible en /api/contacts. Implementación en progreso.',
+      reason: 'IMPLEMENTATION_IN_PROGRESS'
     };
   }
   

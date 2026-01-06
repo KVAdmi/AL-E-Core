@@ -20,6 +20,8 @@ const systemMail_1 = __importDefault(require("./api/systemMail")); // System mai
 const mail_webhook_1 = __importDefault(require("./api/mail-webhook")); // AWS SES webhook
 const mail_inbound_1 = __importDefault(require("./api/mail-inbound")); // Mail inbound (SES→S3→Lambda→Core)
 const emailHub_1 = __importDefault(require("./api/emailHub")); // Email Hub Universal (IMAP/SMTP cualquier proveedor)
+const aiEmail_1 = __importDefault(require("./api/aiEmail")); // AI Email (análisis, clasificación, draft-reply, auto-reply)
+const contacts_1 = __importDefault(require("./api/contacts")); // Contacts API
 const knowledge_1 = __importDefault(require("./api/knowledge")); // Knowledge Core (RAG)
 const vision_1 = __importDefault(require("./api/vision")); // Google Vision OCR
 const calendar_1 = __importDefault(require("./api/calendar")); // Calendario interno
@@ -197,6 +199,9 @@ app.use("/api/mail", mail_inbound_1.default); // Mail inbound (SES+S3)
 app.use("/api/email", mail_1.default); // Mail send/inbox TAMBIÉN en /api/email (para compatibilidad frontend)
 app.use("/api/email", emailHub_1.default); // Email Hub Universal (IMAP/SMTP cualquier proveedor)
 app.use("/api/mail", emailHub_1.default); // Email Hub Universal TAMBIÉN en /api/mail (compatibilidad frontend)
+app.use("/api/ai", aiEmail_1.default); // AI Email endpoints (analyze-email, draft-reply, send-auto-reply)
+app.use("/api/mail", aiEmail_1.default); // AI Email endpoints TAMBIÉN en /api/mail (compatibilidad)
+app.use("/api/contacts", contacts_1.default); // Contacts API
 app.use("/api/calendar", calendar_1.default); // Calendario interno
 app.use("/api/telegram", telegram_1.default); // Telegram bot por usuario
 app.use("/api/runtime-capabilities", runtime_capabilities_1.default); // Runtime capabilities

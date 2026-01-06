@@ -56,6 +56,17 @@ import {
   calendarListEventsHandler
 } from './handlers/calendarTools';
 
+// TODO: Fix email tools types before enabling
+// import {
+//   emailReadInboxHandler,
+//   emailAnalyzeMessageHandler,
+//   emailClassifyHandler,
+//   emailDraftReplyHandler,
+//   emailSendHandler,
+//   emailSearchContactHandler,
+//   emailCreateContactHandler
+// } from './handlers/emailTools';
+
 // ═══════════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════════
@@ -216,6 +227,16 @@ async function executeHandler(name: string, args: any): Promise<ToolResult> {
       return calendarUpdateEventHandler(args);
     case 'calendar_list_events':
       return calendarListEventsHandler(args);
+
+    // Email (TODO: Fix types before enabling)
+    case 'email_read_inbox':
+    case 'email_analyze_message':
+    case 'email_classify':
+    case 'email_draft_reply':
+    case 'email_send':
+    case 'email_search_contact':
+    case 'email_create_contact':
+      throw new Error(`Email tool ${name} temporalmente deshabilitado (tipos en fix). Usa /api/ai o /api/contacts.`);
 
     default:
       throw new Error(`Handler no implementado para: ${name}`);

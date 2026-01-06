@@ -15,6 +15,8 @@ import systemMailRouter from "./api/systemMail"; // System mail (SES ONLY - corr
 import mailWebhookRouter from "./api/mail-webhook"; // AWS SES webhook
 import mailInboundRouter from "./api/mail-inbound"; // Mail inbound (SES→S3→Lambda→Core)
 import emailHubRouter from "./api/emailHub"; // Email Hub Universal (IMAP/SMTP cualquier proveedor)
+import aiEmailRouter from "./api/aiEmail"; // AI Email (análisis, clasificación, draft-reply, auto-reply)
+import contactsRouter from "./api/contacts"; // Contacts API
 import knowledgeRouter from "./api/knowledge"; // Knowledge Core (RAG)
 import visionRouter from "./api/vision"; // Google Vision OCR
 import calendarRouter from "./api/calendar"; // Calendario interno
@@ -211,6 +213,9 @@ app.use("/api/mail", mailInboundRouter); // Mail inbound (SES+S3)
 app.use("/api/email", mailRouter); // Mail send/inbox TAMBIÉN en /api/email (para compatibilidad frontend)
 app.use("/api/email", emailHubRouter); // Email Hub Universal (IMAP/SMTP cualquier proveedor)
 app.use("/api/mail", emailHubRouter); // Email Hub Universal TAMBIÉN en /api/mail (compatibilidad frontend)
+app.use("/api/ai", aiEmailRouter); // AI Email endpoints (analyze-email, draft-reply, send-auto-reply)
+app.use("/api/mail", aiEmailRouter); // AI Email endpoints TAMBIÉN en /api/mail (compatibilidad)
+app.use("/api/contacts", contactsRouter); // Contacts API
 app.use("/api/calendar", calendarRouter); // Calendario interno
 app.use("/api/telegram", telegramRouter); // Telegram bot por usuario
 app.use("/api/runtime-capabilities", runtimeCapabilitiesRouter); // Runtime capabilities
