@@ -1,21 +1,20 @@
 /**
  * =====================================================
- * SES VALIDATION & PROTECTION
+ * SES VALIDATION & PROTECTION - DESHABILITADO
  * =====================================================
+ * 
+ * ❌ ESTADO: SES COMPLETAMENTE DESHABILITADO
  * 
  * CONTEXTO CRÍTICO:
- * Amazon SES está "under review" por bounce rate 12.72%.
- * Este módulo protege la cuenta implementando:
+ * Amazon SES está BLOQUEADO por política de seguridad.
+ * Este módulo ahora SIEMPRE retorna blocked=true.
  * 
- * 1. Whitelist de tipos de correo (SOLO transaccionales)
- * 2. Blacklist de dominios de prueba
- * 3. Validación de formato de email
- * 4. Lista de supresión local
- * 5. Prevención de envíos duplicados
- * 
- * OBJETIVO: Mantener bounce rate <5%
+ * NO se permiten envíos de ningún tipo vía SES.
+ * Usar Gmail/Outlook APIs para correos personales.
  * =====================================================
  */
+
+import { SES_BLOCKER } from './sesBlocker';
 
 // ═══════════════════════════════════════════════════════════════
 // CONFIGURACIÓN
@@ -178,87 +177,19 @@ export interface SESValidationResult {
  * REGLAS:
  * 1. SOLO tipos de correo en whitelist
  * 2. NO dominios de prueba/fake
- * 3. NO emails en lista de supresión
- * 4. Formato válido de email
- * 5. Simulador de SES SIEMPRE permitido
- * 
- * @param emailType - Tipo de correo (debe estar en ALLOWED_EMAIL_TYPES)
- * @param to - Email destinatario
- * @returns Objeto con allowed=true/false y razón
+/**
+ * Validar si se puede usar SES - SIEMPRE RETORNA BLOQUEADO
  */
 export function canUseSES(emailType: string, to: string): SESValidationResult {
-  const normalizedEmail = to.toLowerCase().trim();
-  
-  // REGLA 0: Simulador de SES siempre permitido (para testing)
-  if (isSESSimulator(normalizedEmail)) {
-    console.log('[SES ALLOWED] SES Mailbox Simulator:', normalizedEmail);
-    return {
-      allowed: true,
-      reason: 'SES_SIMULATOR'
-    };
-  }
-  
-  // REGLA 1: Validar tipo de correo
-  if (!ALLOWED_EMAIL_TYPES.includes(emailType as AllowedEmailType)) {
-    console.error('[SES BLOCKED] Tipo de correo no permitido:', {
-      emailType,
-      to: normalizedEmail,
-      allowedTypes: ALLOWED_EMAIL_TYPES
-    });
-    
-    return {
-      allowed: false,
-      reason: 'INVALID_EMAIL_TYPE',
-      details: `Tipo '${emailType}' no permitido. SES solo para correos transaccionales del sistema.`
-    };
-  }
-  
-  // REGLA 2: Validar formato
-  if (!isValidEmailFormat(normalizedEmail)) {
-    console.error('[SES BLOCKED] Formato de email inválido:', normalizedEmail);
-    
-    return {
-      allowed: false,
-      reason: 'INVALID_EMAIL_FORMAT',
-      details: 'El formato del email no es válido'
-    };
-  }
-  
-  // REGLA 3: Verificar dominio blacklisted
-  if (isBlacklistedDomain(normalizedEmail)) {
-    const domain = extractDomain(normalizedEmail);
-    console.error('[SES BLOCKED] Dominio blacklisted:', {
-      email: normalizedEmail,
-      domain
-    });
-    
-    return {
-      allowed: false,
-      reason: 'BLACKLISTED_DOMAIN',
-      details: `Dominio '${domain}' no permitido para SES. Usar SES Mailbox Simulator para pruebas.`
-    };
-  }
-  
-  // REGLA 4: Verificar lista de supresión
-  if (isInSuppressionList(normalizedEmail)) {
-    console.error('[SES BLOCKED] Email en lista de supresión:', normalizedEmail);
-    
-    return {
-      allowed: false,
-      reason: 'EMAIL_SUPPRESSED',
-      details: 'Este email está en la lista de supresión (bounce/complaint previo)'
-    };
-  }
-  
-  // ✅ TODAS LAS VALIDACIONES PASARON
-  console.log('[SES ALLOWED] Email válido para SES:', {
-    type: emailType,
-    to: normalizedEmail
+  SES_BLOCKER.log({
+    action: 'canUseSES',
+    reason: `Intento de validar SES para ${to}`
   });
-  
+
   return {
-    allowed: true,
-    reason: 'VALIDATED'
+    allowed: false,
+    reason: 'SES_DISABLED_BY_POLICY',
+    details: SES_BLOCKER.message
   };
 }
 
@@ -416,106 +347,45 @@ export function isSystemDomain(email: string): boolean {
 /**
  * REGLA ABSOLUTA: Bloquea cualquier intento de usar SES para correos de usuarios
  * 
- * @param provider - Proveedor de envío (debe ser 'SES' para validar)
- * @param from - Email del remitente
- * @param accountId - ID de cuenta de usuario (si existe, es correo de usuario)
- * @returns {blocked: true, reason: string} si se debe bloquear
+/**
+ * Bloquear correos de usuarios en SES - SIEMPRE RETORNA BLOQUEADO
  */
 export function blockUserEmailsInSES(params: {
   provider: string;
   from: string;
   accountId?: string;
 }): { blocked: boolean; reason?: string } {
-  const { provider, from, accountId } = params;
-  
-  // Normalizar provider
-  const providerUpper = provider.toUpperCase();
-  
-  // Si el provider es SES
-  if (providerUpper === 'SES' || providerUpper === 'AWS_SES' || providerUpper === 'AMAZON_SES') {
-    // REGLA 1: Si hay accountId, es correo de usuario → BLOQUEAR
-    if (accountId) {
-      return {
-        blocked: true,
-        reason: 'SES_USER_EMAIL_BLOCKED: SES no puede usarse para correos de usuarios. Usa Gmail OAuth, Outlook OAuth o SMTP del usuario.'
-      };
-    }
-    
-    // REGLA 2: Si from no es dominio del sistema → BLOQUEAR
-    if (!isSystemDomain(from)) {
-      return {
-        blocked: true,
-        reason: `SES_INVALID_DOMAIN: SES solo acepta correos de: ${SYSTEM_DOMAINS.join(', ')}. From recibido: ${from}`
-      };
-    }
-    
-    // REGLA 3: From NO puede ser correo personal conocido
-    const personalEmailDomains = ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com'];
-    const fromDomain = from.split('@')[1]?.toLowerCase();
-    if (personalEmailDomains.includes(fromDomain)) {
-      return {
-        blocked: true,
-        reason: `SES_PERSONAL_EMAIL: No puedes usar SES con correos personales (${fromDomain}). Usa OAuth o SMTP directo.`
-      };
-    }
-  }
-  
-  return { blocked: false };
+  SES_BLOCKER.log({
+    action: 'blockUserEmailsInSES',
+    reason: `Intento de validar SES para ${params.from}`
+  });
+
+  return {
+    blocked: true,
+    reason: `SES_DISABLED: ${SES_BLOCKER.message}`
+  };
 }
 
 /**
  * REGLA ABSOLUTA: Valida que un correo cumple todas las reglas para SES
  * 
- * @param from - Email del remitente (DEBE ser @al-eon.com o @infinitykode.com)
- * @param to - Destinatario(s)
- * @param type - Tipo de correo (debe ser transaccional)
- * @returns {valid: true} o {valid: false, error: string}
+/**
+ * Validar reglas absolutas de SES - SIEMPRE RETORNA BLOQUEADO
  */
 export function validateSESAbsoluteRules(params: {
   from: string;
   to: string | string[];
   type?: string;
 }): { valid: boolean; error?: string } {
-  const { from, to, type } = params;
-  
-  // REGLA ABSOLUTA 1: From DEBE ser dominio del sistema
-  if (!isSystemDomain(from)) {
-    return {
-      valid: false,
-      error: `REGLA_ABSOLUTA_VIOLATED: SES solo acepta correos de: ${SYSTEM_DOMAINS.join(', ')}. From: ${from}`
-    };
-  }
-  
-  // REGLA ABSOLUTA 2: Type debe ser correo transaccional (si se especifica)
-  if (type && !ALLOWED_EMAIL_TYPES.includes(type as any)) {
-    return {
-      valid: false,
-      error: `REGLA_ABSOLUTA_VIOLATED: Tipo '${type}' no permitido. SES solo para: ${ALLOWED_EMAIL_TYPES.join(', ')}`
-    };
-  }
-  
-  // REGLA ABSOLUTA 3: NO enviar a dominios de prueba (excepto SES Simulator)
-  const recipients = Array.isArray(to) ? to : [to];
-  for (const recipient of recipients) {
-    const domain = recipient.split('@')[1]?.toLowerCase();
-    
-    // Permitir SES Simulator
-    if (recipient === SES_SIMULATOR.SUCCESS || 
-        recipient === SES_SIMULATOR.BOUNCE || 
-        recipient === SES_SIMULATOR.COMPLAINT) {
-      continue;
-    }
-    
-    // Bloquear dominios de prueba
-    if (BLACKLISTED_DOMAINS.includes(domain)) {
-      return {
-        valid: false,
-        error: `REGLA_ABSOLUTA_VIOLATED: Dominio prohibido: ${domain}. Usa SES Mailbox Simulator para pruebas: ${SES_SIMULATOR.SUCCESS}`
-      };
-    }
-  }
-  
-  return { valid: true };
+  SES_BLOCKER.log({
+    action: 'validateSESAbsoluteRules',
+    reason: `Intento de validar reglas SES para ${params.from} -> ${params.to}`
+  });
+
+  return {
+    valid: false,
+    error: `SES_DISABLED: ${SES_BLOCKER.message}`
+  };
 }
 
 /**
