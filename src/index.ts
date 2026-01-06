@@ -21,6 +21,8 @@ import calendarRouter from "./api/calendar"; // Calendario interno
 import telegramRouter from "./api/telegram"; // Telegram bot por usuario
 import runtimeCapabilitiesRouter from "./api/runtime-capabilities"; // Runtime capabilities
 import p0Router from "./api/p0"; // P0 internal testing endpoint
+import toolsTestRouter from "./api/toolsTest"; // Tool calling test endpoint
+import knowledgeEmbeddingsRouter from "./api/knowledgeEmbeddings"; // Regenerar embeddings
 import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
 import { startNotificationWorker } from "./workers/notificationWorker";
 import { startEmailSyncWorker } from "./workers/emailSyncWorker";
@@ -213,6 +215,8 @@ app.use("/api/calendar", calendarRouter); // Calendario interno
 app.use("/api/telegram", telegramRouter); // Telegram bot por usuario
 app.use("/api/runtime-capabilities", runtimeCapabilitiesRouter); // Runtime capabilities
 app.use("/api/p0", p0Router); // P0 internal testing (service role only)
+app.use("/api/tools", toolsTestRouter); // Tool calling test (nuevas integraciones externas)
+app.use("/api/knowledge/embeddings", knowledgeEmbeddingsRouter); // Regenerar embeddings (enterprise)
 
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
