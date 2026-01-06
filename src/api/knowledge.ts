@@ -38,27 +38,74 @@ router.post('/search', async (req, res) => {
     
     console.log('[KNOWLEDGE] 🔍 Búsqueda:', query);
     
-    // Generar embedding del query como ARRAY (no string)
-    const { generateEmbedding } = await import('../services/embeddingService');
-    const queryEmbedding = await generateEmbedding(query);
+    // Preprocesar query (keyword extraction para queries largas)
+    const { preprocessQuery, mergeSearchResults } = await import('../services/queryPreprocessor');
+    const preprocessed = preprocessQuery(query);
     
-    // Buscar usando similitud coseno en pgvector
+    const { generateEmbedding } = await import('../services/embeddingService');
     const { supabase } = await import('../db/supabase');
     
-    // Enviar array directamente, Supabase lo convierte a vector(1024)
-    const { data, error } = await supabase.rpc('search_knowledge', {
+    let allResults: any[] = [];
+    
+    // Búsqueda 1: Query original
+    const queryEmbedding = await generateEmbedding(preprocessed.original);
+    
+    // GUARDRAILS: Validar que el embedding sea correcto
+    if (!Array.isArray(queryEmbedding)) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_EMBEDDING',
+        message: 'query_embedding must be number[]'
+      });
+    }
+    
+    if (queryEmbedding.length !== 1024) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_EMBEDDING_DIM',
+        message: `query_embedding must have 1024 dimensions, got ${queryEmbedding.length}`
+      });
+    }
+    
+    const { data: results1, error: error1 } = await supabase.rpc('search_knowledge', {
       query_embedding: queryEmbedding,
       match_threshold: threshold,
       match_count: limit
     });
     
-    if (error) {
-      console.error('[KNOWLEDGE] ❌ Error en búsqueda:', error);
-      throw error;
+    if (error1) {
+      console.error('[KNOWLEDGE] ❌ Error en búsqueda:', error1);
+      throw error1;
     }
     
+    allResults = results1 || [];
+    
+    // Búsqueda 2: Keywords (si aplica)
+    if (preprocessed.shouldMerge && preprocessed.keywords) {
+      console.log('[KNOWLEDGE] 🔍 Keywords extraction:', preprocessed.keywords);
+      
+      const keywordsEmbedding = await generateEmbedding(preprocessed.keywords);
+      
+      const { data: results2 } = await supabase.rpc('search_knowledge', {
+        query_embedding: keywordsEmbedding,
+        match_threshold: threshold * 0.8, // Threshold más bajo para keywords
+        match_count: limit
+      });
+      
+      if (results2 && results2.length > 0) {
+        allResults = mergeSearchResults(allResults, results2);
+        console.log('[KNOWLEDGE] 🔗 Merged results:', allResults.length);
+      }
+    }
+    
+    // Limitar a los top K
+    const finalResults = allResults.slice(0, limit);
+    
+    // Log mínimo para producción (no spam)
+    console.log(`[KNOWLEDGE] ✅ Search: embedding_len=${queryEmbedding.length}, threshold=${threshold}, results=${finalResults.length}`);
+    
     // Si no hay resultados arriba del threshold
-    if (!data || data.length === 0) {
+    if (!finalResults || finalResults.length === 0) {
       return res.json({
         success: true,
         query,
@@ -69,13 +116,11 @@ router.post('/search', async (req, res) => {
       });
     }
     
-    console.log('[KNOWLEDGE] ✅ Encontrados:', data.length, 'resultados');
-    
     return res.json({
       success: true,
       query,
-      results: data,
-      count: data.length,
+      results: finalResults,
+      count: finalResults.length,
       has_results: true
     });
     

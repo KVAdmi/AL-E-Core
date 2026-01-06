@@ -60,14 +60,16 @@ export async function generateEmbeddingsBatch(texts: string[]): Promise<number[]
 }
 
 /**
- * Convierte array de números a formato pgvector
+ * Convierte array de números a formato pgvector STRING
+ * ⚠️ SOLO para inserción en DB, NUNCA para búsqueda RPC
  */
 export function arrayToVector(embedding: number[]): string {
   return `[${embedding.join(',')}]`;
 }
 
 /**
- * Genera embedding y lo convierte a formato pgvector
+ * @deprecated NO USAR PARA BÚSQUEDA. Solo para legacy/inserción.
+ * Para búsqueda usa: generateEmbedding() → devuelve number[] directamente
  */
 export async function generateVectorString(text: string): Promise<string> {
   const embedding = await generateEmbedding(text);
