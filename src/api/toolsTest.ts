@@ -15,7 +15,8 @@
 import { Router, Request, Response } from 'express';
 import { llmFactory } from '../llm/providerFactory';
 import { executeToolCallsBatch } from '../tools/router';
-import { generateToolsPrompt } from '../tools/registry';
+import { generateToolsPrompt, listTools, listToolDefinitions } from '../tools/registry';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 const router = Router();
 
@@ -52,12 +53,29 @@ REGLAS CRÍTICAS:
 
 Piensa paso a paso qué herramientas necesitas.`;
 
+    // Preparar definiciones de tools para Mistral (formato OpenAI Function Calling)
+    const toolDefinitions = listToolDefinitions();
+    const tools = toolDefinitions.map(tool => {
+      // @ts-ignore - Zod schema conversion
+      const jsonSchema = zodToJsonSchema(tool.schema);
+      return {
+        type: 'function' as const,
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: jsonSchema
+        }
+      };
+    });
+
     // 2. Primera llamada LLM: decidir tools
     const step1Response = await llmFactory.createCompletion([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: query }
     ], {
-      temperature: 0.3 // Más determinístico para tool selection
+      temperature: 0.3, // Más determinístico para tool selection
+      tools,
+      toolChoice: 'auto'
     });
 
     console.log('[TOOLS TEST] Step 1 - Tool calls:', step1Response.toolCalls);

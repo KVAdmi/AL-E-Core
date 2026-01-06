@@ -228,6 +228,13 @@ export function listTools(): string[] {
 }
 
 /**
+ * Lista todas las herramientas con sus definiciones completas
+ */
+export function listToolDefinitions(): Omit<ToolDefinition, 'handler'>[] {
+  return Object.values(TOOL_REGISTRY);
+}
+
+/**
  * Lista herramientas por categoría
  */
 export function listToolsByCategory(category: string): string[] {
