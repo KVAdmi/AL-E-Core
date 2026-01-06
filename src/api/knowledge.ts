@@ -42,9 +42,6 @@ router.post('/search', async (req, res) => {
     const { generateEmbedding } = await import('../services/embeddingService');
     const queryEmbedding = await generateEmbedding(query);
     
-    console.log('[KNOWLEDGE] 🔍 Embedding type:', typeof queryEmbedding, 'length:', queryEmbedding.length);
-    console.log('[KNOWLEDGE] 🔍 First 5 values:', queryEmbedding.slice(0, 5));
-    
     // Buscar usando similitud coseno en pgvector
     const { supabase } = await import('../db/supabase');
     
@@ -54,8 +51,6 @@ router.post('/search', async (req, res) => {
       match_threshold: threshold,
       match_count: limit
     });
-    
-    console.log('[KNOWLEDGE] 🔍 RPC result - data:', data?.length || 0, 'error:', error?.message || 'none');
     
     if (error) {
       console.error('[KNOWLEDGE] ❌ Error en búsqueda:', error);
