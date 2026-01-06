@@ -378,6 +378,7 @@ router.post('/chat', optionalAuth, async (req, res) => {
     
     console.log('[CHUNKS] Recuperando conocimiento entrenable...');
     let knowledgeContext = '';
+    let knowledgeSources: any[] = []; // Declarar aquí para que esté disponible en la respuesta
     
     try {
       const chunks = await retrieveRelevantChunks({
@@ -400,6 +401,56 @@ router.post('/chat', optionalAuth, async (req, res) => {
     }
     
     // ============================================
+    // C2) RECUPERAR CONOCIMIENTO VECTORIAL (BGE-M3)
+    // ============================================
+    
+    console.log('[KNOWLEDGE] Recuperando conocimiento vectorial (BGE-M3)...');
+    let vectorKnowledgeContext = '';
+    // knowledgeSources ya declarado arriba
+    
+    try {
+      // Extraer último mensaje del usuario para búsqueda
+      const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
+      const searchQuery = lastUserMessage?.content || '';
+      
+      if (!searchQuery) {
+        console.log('[KNOWLEDGE] No hay mensaje del usuario para buscar');
+      } else {
+        // Llamar al endpoint de búsqueda vectorial
+        const { generateVectorString } = await import('../services/embeddingService');
+        const queryEmbedding = await generateVectorString(searchQuery);
+        
+        const { data: vectorResults, error: vectorError } = await supabase.rpc('search_knowledge', {
+          query_embedding: queryEmbedding,
+          match_threshold: 0.7,
+          match_count: 5
+        });
+        
+        if (vectorError) {
+          console.error('[KNOWLEDGE] Error en búsqueda vectorial:', vectorError);
+        } else if (vectorResults && vectorResults.length > 0) {
+          // Formatear contexto documental
+          vectorKnowledgeContext = '\n\n🔍 CONOCIMIENTO DOCUMENTADO (Evidencia Real):\n\n';
+          vectorKnowledgeContext += vectorResults.map((r: any, i: number) => {
+            knowledgeSources.push({
+              path: r.source_path,
+              type: r.source_type,
+              score: r.score
+            });
+            return `[Documento ${i + 1}: ${r.source_path}]\n${r.content}\n(Relevancia: ${(r.score * 100).toFixed(1)}%)`;
+          }).join('\n\n---\n\n');
+          
+          console.log(`[KNOWLEDGE] ✓ ${vectorResults.length} documento(s) relevante(s) encontrado(s)`);
+        } else {
+          console.log('[KNOWLEDGE] No se encontró documentación relevante (threshold 0.7)');
+        }
+      }
+    } catch (vectorError) {
+      console.error('[KNOWLEDGE] Error recuperando documentación:', vectorError);
+      // No romper el chat si falla la búsqueda vectorial
+    }
+    
+    // ============================================
     // D) LLAMAR A OPENAI (CON ATTACHMENTS + CHUNKS)
     // ============================================
     
@@ -419,8 +470,11 @@ router.post('/chat', optionalAuth, async (req, res) => {
       // Preparar mensajes con contexto de attachments Y chunks
       let finalMessages = [...messages];
       
-      // Si hay conocimiento entrenable, inyectarlo como contexto del sistema
-      if (knowledgeContext) {
+      // Combinar conocimiento entrenable + vectorial
+      const combinedKnowledge = [knowledgeContext, vectorKnowledgeContext].filter(Boolean).join('\n\n');
+      
+      // Si hay conocimiento (entrenable o vectorial), inyectarlo como contexto del sistema
+      if (combinedKnowledge) {
         // Buscar si ya hay un mensaje system
         const systemMsgIndex = finalMessages.findIndex(m => m.role === 'system');
         
@@ -428,14 +482,14 @@ router.post('/chat', optionalAuth, async (req, res) => {
           // Agregar al mensaje system existente
           finalMessages[systemMsgIndex] = {
             ...finalMessages[systemMsgIndex],
-            content: finalMessages[systemMsgIndex].content + '\n\n' + knowledgeContext
+            content: finalMessages[systemMsgIndex].content + '\n\n' + combinedKnowledge
           };
         } else {
           // Crear nuevo mensaje system al inicio
           finalMessages = [
             {
               role: 'system',
-              content: knowledgeContext
+              content: combinedKnowledge
             },
             ...finalMessages
           ];
@@ -468,6 +522,34 @@ router.post('/chat', optionalAuth, async (req, res) => {
         sessionId: sessionId || undefined,
         mode: mode
       }, ALEON_SYSTEM_PROMPT);
+      
+      // POLÍTICA ANTI-MENTIRA: Si es pregunta técnica/específica y NO hay documentación, advertir
+      let antiLieWarning = '';
+      if (knowledgeSources.length === 0 && !knowledgeContext) {
+        // Extraer último mensaje para análisis
+        const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
+        const userQuery = lastUserMessage?.content || '';
+        
+        // Detectar si es pregunta técnica (contiene palabras clave)
+        const technicalKeywords = /cómo funciona|implementación|código|función|endpoint|módulo|sistema|arquitectura|base de datos|api/i;
+        if (technicalKeywords.test(userQuery)) {
+          antiLieWarning = `
+
+⚠️ ADVERTENCIA CRÍTICA - POLÍTICA ANTI-MENTIRA:
+- No se encontró documentación específica sobre este tema
+- NO inventes detalles técnicos, implementaciones o código
+- Si no tienes evidencia concreta, di claramente: "No tengo documentación específica sobre esto. Necesito que me proporciones el archivo o documento relevante."
+- Puedes dar contexto general SOLO si estás 100% seguro
+- PROHIBIDO especular sobre implementaciones sin evidencia`;
+          
+          console.log('[KNOWLEDGE] ⚠️ Pregunta técnica sin documentación - Aplicando política anti-mentira');
+        }
+      }
+      
+      // Agregar warning al system prompt si aplica
+      if (antiLieWarning) {
+        orchestratorContext.systemPrompt += antiLieWarning;
+      }
       
       // Usar el system prompt generado por el orchestrator
       const finalMessagesWithSystem = [
@@ -1032,6 +1114,55 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
     console.log(`[CHAT_V2] ✓ User message saved: ${userMessageId}`);
     
     // ============================================
+    // 5.5. RECUPERAR CONOCIMIENTO VECTORIAL (BGE-M3)
+    // ============================================
+    
+    console.log('[CHAT_V2] 🔍 Recuperando conocimiento vectorial...');
+    let vectorKnowledgeContext = '';
+    let knowledgeSources: any[] = [];
+    
+    try {
+      const { generateVectorString } = await import('../services/embeddingService');
+      const queryEmbedding = await generateVectorString(message);
+      
+      const { data: vectorResults, error: vectorError } = await supabase.rpc('search_knowledge', {
+        query_embedding: queryEmbedding,
+        match_threshold: 0.7,
+        match_count: 5
+      });
+      
+      if (vectorError) {
+        console.error('[CHAT_V2] Error en búsqueda vectorial:', vectorError);
+      } else if (vectorResults && vectorResults.length > 0) {
+        vectorKnowledgeContext = '\n\n🔍 CONOCIMIENTO DOCUMENTADO (Evidencia Real):\n\n';
+        vectorKnowledgeContext += vectorResults.map((r: any, i: number) => {
+          knowledgeSources.push({
+            path: r.source_path,
+            type: r.source_type,
+            score: r.score
+          });
+          return `[Documento ${i + 1}: ${r.source_path}]\n${r.content}\n(Relevancia: ${(r.score * 100).toFixed(1)}%)`;
+        }).join('\n\n---\n\n');
+        
+        console.log(`[CHAT_V2] ✓ ${vectorResults.length} documento(s) relevante(s)`);
+      } else {
+        console.log('[CHAT_V2] No se encontró documentación relevante');
+      }
+    } catch (vectorError) {
+      console.error('[CHAT_V2] Error recuperando documentación:', vectorError);
+    }
+    
+    // POLÍTICA ANTI-MENTIRA para preguntas técnicas
+    let antiLieWarning = '';
+    if (knowledgeSources.length === 0) {
+      const technicalKeywords = /cómo funciona|implementación|código|función|endpoint|módulo|sistema|arquitectura|base de datos|api/i;
+      if (technicalKeywords.test(message)) {
+        antiLieWarning = `\n\n⚠️ ADVERTENCIA - POLÍTICA ANTI-MENTIRA: No se encontró documentación específica. NO inventes detalles técnicos. Si no tienes evidencia, di: "No tengo documentación sobre esto. Necesito que me proporciones el archivo relevante."`;
+        console.log('[CHAT_V2] ⚠️ Pregunta técnica sin documentación - Aplicando política anti-mentira');
+      }
+    }
+    
+    // ============================================
     // 6. ORQUESTACIÓN (Intent + Tools + LLM)
     // ============================================
     
@@ -1093,6 +1224,11 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
     
     try {
       orchestratorContext = await Promise.race([orchestrationPromise, timeoutPromise]);
+      
+      // Inyectar conocimiento vectorial + anti-mentira en system prompt
+      if (vectorKnowledgeContext || antiLieWarning) {
+        orchestratorContext.systemPrompt += (vectorKnowledgeContext + antiLieWarning);
+      }
     } catch (error: any) {
       if (error.message === 'ORCHESTRATION_TIMEOUT') {
         console.warn('[CHAT_V2] ⏱️ Orchestration timeout - returning fallback');
@@ -1370,6 +1506,7 @@ Ejemplo malo: "Visita https://... para ver el precio."`
       answer: finalAnswer,
       session_id: sessionId,
       memories_to_add: [], // TODO: Implementar extracción de memories
+      sources: knowledgeSources.length > 0 ? knowledgeSources : undefined, // Agregar sources si hay
       metadata: {
         latency_ms,
         provider: llmResult.fallbackChain.final_provider,

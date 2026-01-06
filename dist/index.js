@@ -16,9 +16,12 @@ const profile_1 = __importDefault(require("./api/profile")); // Personalización
 const health_1 = __importDefault(require("./api/health")); // Health checks
 const email_1 = __importDefault(require("./api/email")); // Email accounts (SMTP/IMAP manual)
 const mail_1 = __importDefault(require("./api/mail")); // Mail send/inbox
+const systemMail_1 = __importDefault(require("./api/systemMail")); // System mail (SES ONLY - correos transaccionales)
 const mail_webhook_1 = __importDefault(require("./api/mail-webhook")); // AWS SES webhook
 const mail_inbound_1 = __importDefault(require("./api/mail-inbound")); // Mail inbound (SES→S3→Lambda→Core)
 const emailHub_1 = __importDefault(require("./api/emailHub")); // Email Hub Universal (IMAP/SMTP cualquier proveedor)
+const knowledge_1 = __importDefault(require("./api/knowledge")); // Knowledge Core (RAG)
+const vision_1 = __importDefault(require("./api/vision")); // Google Vision OCR
 const calendar_1 = __importDefault(require("./api/calendar")); // Calendario interno
 const telegram_1 = __importDefault(require("./api/telegram")); // Telegram bot por usuario
 const runtime_capabilities_1 = __importDefault(require("./api/runtime-capabilities")); // Runtime capabilities
@@ -182,6 +185,9 @@ app.use("/api/voice", voice_1.voiceRouter);
 app.use("/api/sessions", sessions_1.sessionsRouter);
 app.use("/api/memory", memory_1.default); // Memoria explícita (acuerdos/decisiones/hechos)
 app.use("/api/profile", profile_1.default); // Personalización de usuario
+app.use("/api/system/mail", systemMail_1.default); // System mail (SES ONLY - correos transaccionales)
+app.use("/api/knowledge", knowledge_1.default); // Knowledge Core (RAG)
+app.use("/api/vision", vision_1.default); // Google Vision OCR
 app.use("/api/email", email_1.default); // Email accounts (SMTP/IMAP manual)
 app.use("/api/mail", mail_1.default); // Mail send/inbox
 app.use("/api/mail", mail_webhook_1.default); // AWS SES webhook (same prefix)
@@ -201,6 +207,9 @@ console.log("[DEBUG] voiceRouter montado en /api/voice");
 console.log("[DEBUG] sessionsRouter montado en /api/sessions");
 console.log("[DEBUG] memoryRouter montado en /api/memory");
 console.log("[DEBUG] profileRouter montado en /api/profile");
+console.log("[DEBUG] systemMailRouter (SES ONLY) montado en /api/system/mail");
+console.log("[DEBUG] knowledgeRouter (RAG) montado en /api/knowledge");
+console.log("[DEBUG] visionRouter (Google Vision OCR) montado en /api/vision");
 console.log("[DEBUG] emailRouter montado en /api/email");
 console.log("[DEBUG] mailRouter montado en /api/mail");
 console.log("[DEBUG] emailHubRouter (Universal IMAP/SMTP) montado en /api/email");
