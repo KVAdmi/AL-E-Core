@@ -124,12 +124,32 @@ export function chunkDocument(text: string, maxChunkSize: number = 1000): string
 
 /**
  * Procesar documento completo: parse + chunk
+ * @param filePath - Ruta al archivo (puede ser temporal)
+ * @param forceExt - Forzar extensión (útil cuando filePath es temporal sin extensión)
  */
-export async function processDocument(filePath: string): Promise<{
+export async function processDocument(filePath: string, forceExt?: string): Promise<{
   parsed: ParsedDocument;
   chunks: string[];
 }> {
-  const parsed = await parseDocument(filePath);
+  const ext = forceExt || path.extname(filePath).toLowerCase();
+  
+  let parsed: ParsedDocument;
+  
+  switch (ext) {
+    case '.pdf':
+      parsed = await parsePDF(filePath);
+      break;
+    case '.docx':
+      parsed = await parseDOCX(filePath);
+      break;
+    case '.md':
+    case '.txt':
+      parsed = await parseText(filePath);
+      break;
+    default:
+      throw new Error(`Tipo de archivo no soportado: ${ext}`);
+  }
+  
   const chunks = chunkDocument(parsed.text);
   
   console.log(`[DOC PARSER] Procesado: ${parsed.metadata.filename}`);

@@ -131,7 +131,8 @@ router.post('/ingest', upload.single('file'), async (req, res) => {
     // Si es documento → Parser
     else if (['.pdf', '.docx', '.txt', '.md'].includes(ext)) {
       console.log('[KNOWLEDGE] 📄 Procesando documento...');
-      const { parsed, chunks } = await processDocument(file.path);
+      // Pasar extensión explícitamente porque multer usa nombres temporales
+      const { parsed, chunks } = await processDocument(file.path, ext);
       text = parsed.text;
       metadata = { ...metadata, ...parsed.metadata };
       
