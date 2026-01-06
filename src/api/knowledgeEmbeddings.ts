@@ -19,12 +19,19 @@ const router = Router();
 // CONFIGURACIÓN
 // ═══════════════════════════════════════════════════════════════
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY!;
-const HF_API_KEY = process.env.HF_API_KEY!;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const HF_API_KEY = process.env.HF_API_KEY;
 const HF_MODEL = process.env.HF_EMBEDDING_MODEL || 'BAAI/bge-m3';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+let supabaseClient: any = null;
+
+function getSupabaseClient() {
+  if (!supabaseClient && SUPABASE_URL && SUPABASE_KEY) {
+    supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY);
+  }
+  return supabaseClient;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // REGENERAR EMBEDDINGS
@@ -33,6 +40,14 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 router.post('/regenerate', async (req: Request, res: Response) => {
   try {
     console.log('[EMBEDDINGS] Iniciando regeneración...');
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      return res.status(500).json({
+        success: false,
+        error: 'Supabase no configurado'
+      });
+    }
 
     if (!HF_API_KEY) {
       return res.status(500).json({
@@ -141,6 +156,14 @@ async function generateEmbedding(text: string): Promise<number[]> {
 
 router.get('/stats', async (req: Request, res: Response) => {
   try {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      return res.status(500).json({
+        success: false,
+        error: 'Supabase no configurado'
+      });
+    }
+
     // Total chunks
     const { count: totalChunks } = await supabase
       .from('knowledge_chunks')

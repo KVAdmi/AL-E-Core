@@ -17,10 +17,17 @@ import { createClient } from '@supabase/supabase-js';
 // CONFIGURACIÓN
 // ═══════════════════════════════════════════════════════════════
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY!;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+let supabaseClient: any = null;
+
+function getSupabaseClient() {
+  if (!supabaseClient && SUPABASE_URL && SUPABASE_KEY) {
+    supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY);
+  }
+  return supabaseClient;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // KNOWLEDGE SEARCH (RAG Interno)
@@ -35,6 +42,11 @@ export async function knowledgeSearchHandler(args: {
   
   try {
     console.log(`[TOOL] knowledge_search: "${query}"`);
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      throw new Error('Supabase no configurado. Se requiere SUPABASE_URL y SUPABASE_SERVICE_KEY');
+    }
 
     // 1. Generar embedding del query (usando HuggingFace)
     const embedding = await generateEmbedding(query);
