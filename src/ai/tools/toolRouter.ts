@@ -15,6 +15,25 @@ import {
   EMAIL_TOOLS_DEFINITIONS
 } from './emailTools';
 
+import {
+  analyzeDocument,
+  extractTextFromImage,
+  DOCUMENT_TOOLS_DEFINITIONS
+} from './documentTools';
+
+import {
+  calculateFinancialProjection,
+  estimateProjectCost,
+  FINANCIAL_TOOLS_DEFINITIONS
+} from './financialTools';
+
+import {
+  createCalendarEvent,
+  listEvents,
+  extractAndSchedule,
+  CALENDAR_TOOLS_DEFINITIONS
+} from './calendarTools';
+
 // ═══════════════════════════════════════════════════════════════
 // TIPOS
 // ═══════════════════════════════════════════════════════════════
@@ -152,6 +171,118 @@ export async function executeTool(
           error: createResult.error
         };
 
+      // Document Analysis Tools
+      case 'analyze_document':
+        if (!parameters.fileUrl) {
+          throw new Error('fileUrl es requerido');
+        }
+        const docResult = await analyzeDocument(parameters.fileUrl, parameters.fileType);
+        return {
+          success: docResult.success,
+          data: docResult.success ? {
+            type: docResult.documentType,
+            text: docResult.extractedText?.substring(0, 2000), // Primeros 2000 chars
+            numbers: docResult.numbers?.slice(0, 10),
+            dates: docResult.dates?.slice(0, 5),
+            keyFindings: docResult.keyFindings,
+            risks: docResult.risks,
+            summary: docResult.summary
+          } : undefined,
+          error: docResult.error
+        };
+
+      case 'extract_text_from_image':
+        if (!parameters.imageUrl) {
+          throw new Error('imageUrl es requerido');
+        }
+        const ocrResult = await extractTextFromImage(parameters.imageUrl);
+        return {
+          success: ocrResult.success,
+          data: ocrResult.success ? {
+            text: ocrResult.extractedText,
+            summary: ocrResult.summary
+          } : undefined,
+          error: ocrResult.error
+        };
+
+      // Financial Tools
+      case 'calculate_financial_projection':
+        if (!parameters.project_name || !parameters.initial_investment || !parameters.monthly_costs || !parameters.monthly_revenue) {
+          throw new Error('project_name, initial_investment, monthly_costs y monthly_revenue son requeridos');
+        }
+        const projResult = await calculateFinancialProjection({
+          name: parameters.project_name,
+          initial_investment: parameters.initial_investment,
+          monthly_costs: parameters.monthly_costs,
+          monthly_revenue_base: parameters.monthly_revenue,
+          growth_rate: parameters.growth_rate
+        });
+        return {
+          success: projResult.success,
+          data: projResult
+        };
+
+      case 'estimate_project_cost':
+        if (!parameters.project_type || !parameters.complexity || !parameters.features) {
+          throw new Error('project_type, complexity y features son requeridos');
+        }
+        const costResult = await estimateProjectCost(
+          parameters.project_type,
+          parameters.complexity,
+          parameters.features
+        );
+        return {
+          success: costResult.success,
+          data: costResult
+        };
+
+      // Calendar Tools
+      case 'create_calendar_event':
+        if (!parameters.title || !parameters.start_date) {
+          throw new Error('title y start_date son requeridos');
+        }
+        const eventResult = await createCalendarEvent(userId, {
+          title: parameters.title,
+          description: parameters.description,
+          start_date: parameters.start_date,
+          end_date: parameters.end_date,
+          location: parameters.location,
+          attendees: parameters.attendees,
+          reminder_minutes: parameters.reminder_minutes
+        });
+        return {
+          success: eventResult.success,
+          data: eventResult.event,
+          error: eventResult.error
+        };
+
+      case 'list_calendar_events':
+        const listResult = await listEvents(
+          userId,
+          parameters.start_date,
+          parameters.end_date
+        );
+        return {
+          success: listResult.success,
+          data: { events: listResult.events },
+          error: listResult.error
+        };
+
+      case 'extract_and_schedule':
+        if (!parameters.text) {
+          throw new Error('text es requerido');
+        }
+        const scheduleResult = await extractAndSchedule(userId, parameters.text, {
+          source: parameters.source || 'chat',
+          source_id: parameters.source_id,
+          default_title: parameters.default_title
+        });
+        return {
+          success: scheduleResult.success,
+          data: { events: scheduleResult.events },
+          error: scheduleResult.error
+        };
+
       default:
         console.log(`[TOOL ROUTER] ⚠️  Tool no implementado: ${name}`);
         return {
@@ -174,8 +305,10 @@ export async function executeTool(
  */
 export function getAvailableTools(): any[] {
   return [
-    ...EMAIL_TOOLS_DEFINITIONS
-    // Aquí se agregarán: CALENDAR_TOOLS, TELEGRAM_TOOLS, etc.
+    ...EMAIL_TOOLS_DEFINITIONS,
+    ...DOCUMENT_TOOLS_DEFINITIONS,
+    ...FINANCIAL_TOOLS_DEFINITIONS,
+    ...CALENDAR_TOOLS_DEFINITIONS
   ];
 }
 
@@ -190,10 +323,33 @@ export function needsTools(query: string): boolean {
     'correo', 'email', 'mensaje', 'bandeja',
     'lee', 'leer', 'revisar', 'consultar',
     'responde', 'responder', 'contestar',
-    'envía', 'enviar', 'mandar', 'crear'
+    'envía', 'enviar', 'mandar'
   ];
   
-  return emailKeywords.some(keyword => lower.includes(keyword));
+  // Keywords de documentos
+  const docKeywords = [
+    'pdf', 'documento', 'archivo', 'excel',
+    'word', 'imagen', 'analiza', 'extrae'
+  ];
+  
+  // Keywords financieros
+  const finKeywords = [
+    'proyección', 'costo', 'roi', 'inversión',
+    'capex', 'opex', 'payback', 'financiero'
+  ];
+  
+  // Keywords de calendario
+  const calendarKeywords = [
+    'cita', 'reunión', 'agenda', 'calendario',
+    'evento', 'recordatorio', 'junta'
+  ];
+  
+  return (
+    emailKeywords.some(kw => lower.includes(kw)) ||
+    docKeywords.some(kw => lower.includes(kw)) ||
+    finKeywords.some(kw => lower.includes(kw)) ||
+    calendarKeywords.some(kw => lower.includes(kw))
+  );
 }
 
 /**
@@ -212,16 +368,45 @@ export function detectRequiredTools(query: string): string[] {
     }
   }
   
-  if (lower.includes('analiza') || lower.includes('analizar') || lower.includes('de qué trata')) {
+  if (lower.includes('analiza') && lower.includes('correo')) {
     tools.push('analyze_email');
   }
   
-  if (lower.includes('responde') || lower.includes('responder') || lower.includes('contesta')) {
-    tools.push('draft_reply', 'send_email');
+  if (lower.includes('responde') || lower.includes('responder')) {
+    tools.push('draft_reply');
   }
   
-  if (lower.includes('crea') || lower.includes('crear') || lower.includes('envía') || lower.includes('enviar')) {
-    tools.push('create_and_send_email');
+  if (lower.includes('envía') || lower.includes('enviar')) {
+    tools.push('send_email');
+  }
+  
+  // Document tools
+  if (lower.includes('pdf') || lower.includes('documento') || lower.includes('archivo')) {
+    tools.push('analyze_document');
+  }
+  
+  if (lower.includes('imagen') || lower.includes('ocr') || lower.includes('extrae texto')) {
+    tools.push('extract_text_from_image');
+  }
+  
+  // Financial tools
+  if (lower.includes('proyección') || lower.includes('roi') || lower.includes('payback')) {
+    tools.push('calculate_financial_projection');
+  }
+  
+  if (lower.includes('costo') && (lower.includes('proyecto') || lower.includes('desarrollo'))) {
+    tools.push('estimate_project_cost');
+  }
+  
+  // Calendar tools
+  if (lower.includes('agenda') || lower.includes('cita') || lower.includes('reunión')) {
+    if (lower.includes('crea') || lower.includes('agendar')) {
+      tools.push('create_calendar_event');
+    } else if (lower.includes('lista') || lower.includes('tengo')) {
+      tools.push('list_calendar_events');
+    } else if (lower.includes('detecta') || lower.includes('extrae')) {
+      tools.push('extract_and_schedule');
+    }
   }
   
   return tools;
