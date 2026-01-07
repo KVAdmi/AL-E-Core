@@ -219,6 +219,120 @@ export const SAVE_MEMORY_TOOL: ToolDefinition = {
 };
 
 // ═══════════════════════════════════════════════════════════════
+// MEETINGS TOOLS (Modo Altavoz + Upload)
+// ═══════════════════════════════════════════════════════════════
+
+export const START_LIVE_MEETING_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'start_live_meeting',
+    description: 'Inicia una sesión de grabación presencial (modo altavoz). El usuario debe tener su micrófono activo. Usa esto cuando el usuario diga: "inicia reunión", "graba la junta", "modo altavoz", "empieza a escuchar".',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Título de la reunión'
+        },
+        participants: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Lista de nombres de participantes (opcional)'
+        }
+      },
+      required: []
+    }
+  }
+};
+
+export const GET_MEETING_STATUS_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'get_meeting_status',
+    description: 'Obtiene el status de una reunión (transcript parcial en vivo, o transcript final + minuta). Usa esto cuando el usuario pregunte: "cómo va la reunión", "qué se ha dicho", "muéstrame el transcript", "qué acordamos".',
+    parameters: {
+      type: 'object',
+      properties: {
+        meetingId: {
+          type: 'string',
+          description: 'ID de la reunión'
+        }
+      },
+      required: ['meetingId']
+    }
+  }
+};
+
+export const STOP_MEETING_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'stop_meeting',
+    description: 'Finaliza una reunión en vivo y genera la minuta ejecutiva. Usa esto cuando el usuario diga: "detén la grabación", "finaliza la junta", "genera la minuta", "termina".',
+    parameters: {
+      type: 'object',
+      properties: {
+        meetingId: {
+          type: 'string',
+          description: 'ID de la reunión a finalizar'
+        }
+      },
+      required: ['meetingId']
+    }
+  }
+};
+
+export const SEND_MINUTES_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'send_minutes',
+    description: 'Envía la minuta de una reunión por email o Telegram. Usa esto cuando el usuario diga: "manda la minuta a...", "envía el resumen por telegram", "mándame la minuta".',
+    parameters: {
+      type: 'object',
+      properties: {
+        meetingId: {
+          type: 'string',
+          description: 'ID de la reunión'
+        },
+        sendEmail: {
+          type: 'boolean',
+          description: 'Si true, envía por email',
+          default: false
+        },
+        sendTelegram: {
+          type: 'boolean',
+          description: 'Si true, envía por Telegram',
+          default: false
+        }
+      },
+      required: ['meetingId']
+    }
+  }
+};
+
+export const SEARCH_MEETINGS_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'search_meetings',
+    description: 'Busca en reuniones pasadas usando búsqueda semántica. Usa esto cuando el usuario pregunte: "qué dijimos sobre...", "busca en las juntas", "qué acordamos con el proveedor", "menciones de X tema".',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Texto a buscar en reuniones'
+        },
+        limit: {
+          type: 'number',
+          description: 'Número máximo de resultados',
+          default: 5
+        }
+      },
+      required: ['query']
+    }
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
 // DOCUMENT ANALYSIS TOOLS
 // ═══════════════════════════════════════════════════════════════
 
@@ -331,6 +445,13 @@ export const ALL_TOOLS: ToolDefinition[] = [
   // Calendar (prioridad media)
   LIST_EVENTS_TOOL,
   CREATE_EVENT_TOOL,
+  
+  // Meetings (prioridad alta)
+  START_LIVE_MEETING_TOOL,
+  GET_MEETING_STATUS_TOOL,
+  STOP_MEETING_TOOL,
+  SEND_MINUTES_TOOL,
+  SEARCH_MEETINGS_TOOL,
   
   // Memory (prioridad media)
   SAVE_MEMORY_TOOL,

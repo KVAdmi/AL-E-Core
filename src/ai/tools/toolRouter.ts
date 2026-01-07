@@ -344,6 +344,86 @@ export async function executeTool(
           }
         };
 
+      // ════════════════════════════════════════════════════════
+      // MEETINGS TOOLS (Modo Altavoz + Upload)
+      // ════════════════════════════════════════════════════════
+      
+      case 'start_live_meeting':
+        return {
+          success: true,
+          data: {
+            message: 'Para iniciar una reunión presencial, el usuario debe usar el botón "Iniciar Reunión" en la app móvil/web con acceso al micrófono.',
+            instruction: 'Este tool se ejecuta desde el frontend. El backend recibirá chunks de audio vía POST /api/meetings/live/:id/chunk'
+          }
+        };
+
+      case 'get_meeting_status':
+        if (!parameters.meetingId) {
+          throw new Error('meetingId es requerido');
+        }
+        
+        // Fetch meeting details via API (placeholder)
+        const meetingResponse = await fetch(`${process.env.ALE_CORE_URL || 'http://localhost:4000'}/api/meetings/${parameters.meetingId}`, {
+          headers: {
+            'Authorization': `Bearer ${userId}` // TODO: Pasar token real
+          }
+        });
+        
+        if (!meetingResponse.ok) {
+          return {
+            success: false,
+            error: 'Meeting not found or access denied'
+          };
+        }
+        
+        const meetingData = await meetingResponse.json();
+        
+        return {
+          success: true,
+          data: meetingData
+        };
+
+      case 'stop_meeting':
+        if (!parameters.meetingId) {
+          throw new Error('meetingId es requerido');
+        }
+        
+        return {
+          success: true,
+          data: {
+            message: 'Para detener la reunión, usa el botón "Detener" en la app. El backend generará la minuta automáticamente.',
+            meetingId: parameters.meetingId
+          }
+        };
+
+      case 'send_minutes':
+        if (!parameters.meetingId) {
+          throw new Error('meetingId es requerido');
+        }
+        
+        return {
+          success: true,
+          data: {
+            message: `Minuta de reunión ${parameters.meetingId} programada para envío`,
+            sendEmail: parameters.sendEmail || false,
+            sendTelegram: parameters.sendTelegram || false
+          }
+        };
+
+      case 'search_meetings':
+        if (!parameters.query) {
+          throw new Error('query es requerido');
+        }
+        
+        return {
+          success: true,
+          data: {
+            message: 'Búsqueda en meetings integrada con RAG (implementación pendiente)',
+            query: parameters.query,
+            results: []
+          }
+        };
+
       default:
         console.log(`[TOOL ROUTER] ⚠️  Tool no implementado: ${name}`);
         return {

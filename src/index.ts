@@ -25,9 +25,11 @@ import runtimeCapabilitiesRouter from "./api/runtime-capabilities"; // Runtime c
 import p0Router from "./api/p0"; // P0 internal testing endpoint
 import toolsTestRouter from "./api/toolsTest"; // Tool calling test endpoint
 import knowledgeEmbeddingsRouter from "./api/knowledgeEmbeddings"; // Regenerar embeddings
+import meetingsRouter from "./api/meetings"; // Meetings module (modo altavoz + upload)
 import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
 import { startNotificationWorker } from "./workers/notificationWorker";
 import { startEmailSyncWorker } from "./workers/emailSyncWorker";
+import { startMeetingTimeoutWorker } from "./workers/meetingTimeoutWorker";
 
 const app = express();
 
@@ -222,6 +224,7 @@ app.use("/api/runtime-capabilities", runtimeCapabilitiesRouter); // Runtime capa
 app.use("/api/p0", p0Router); // P0 internal testing (service role only)
 app.use("/api/tools", toolsTestRouter); // Tool calling test (nuevas integraciones externas)
 app.use("/api/knowledge/embeddings", knowledgeEmbeddingsRouter); // Regenerar embeddings (enterprise)
+app.use("/api/meetings", meetingsRouter); // Meetings module (modo altavoz + upload)
 
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
@@ -241,6 +244,7 @@ console.log("[DEBUG] emailHubRouter (Universal IMAP/SMTP) montado en /api/mail")
 console.log("[DEBUG] calendarRouter montado en /api/calendar");
 console.log("[DEBUG] runtimeCapabilitiesRouter montado en /api/runtime-capabilities");
 console.log("[DEBUG] telegramRouter montado en /api/telegram");
+console.log("[DEBUG] meetingsRouter (altavoz + upload) montado en /api/meetings");
 
 const PORT = env.port || 4000;
 
@@ -258,4 +262,8 @@ app.listen(PORT, "0.0.0.0", () => {
 	// Iniciar email sync worker
 	console.log('[AL-E CORE] Iniciando email sync worker...');
 	startEmailSyncWorker();
+	
+	// Iniciar meeting timeout worker (iOS PWA reality)
+	console.log('[AL-E CORE] Iniciando meeting timeout worker...');
+	startMeetingTimeoutWorker();
 });

@@ -30,9 +30,11 @@ const runtime_capabilities_1 = __importDefault(require("./api/runtime-capabiliti
 const p0_1 = __importDefault(require("./api/p0")); // P0 internal testing endpoint
 const toolsTest_1 = __importDefault(require("./api/toolsTest")); // Tool calling test endpoint
 const knowledgeEmbeddings_1 = __importDefault(require("./api/knowledgeEmbeddings")); // Regenerar embeddings
+const meetings_1 = __importDefault(require("./api/meetings")); // Meetings module (modo altavoz + upload)
 const documentText_1 = require("./utils/documentText");
 const notificationWorker_1 = require("./workers/notificationWorker");
 const emailSyncWorker_1 = require("./workers/emailSyncWorker");
+const meetingTimeoutWorker_1 = require("./workers/meetingTimeoutWorker");
 const app = (0, express_1.default)();
 // Configurar multer para subida de archivos en memoria
 const upload = (0, multer_1.default)({
@@ -208,6 +210,7 @@ app.use("/api/runtime-capabilities", runtime_capabilities_1.default); // Runtime
 app.use("/api/p0", p0_1.default); // P0 internal testing (service role only)
 app.use("/api/tools", toolsTest_1.default); // Tool calling test (nuevas integraciones externas)
 app.use("/api/knowledge/embeddings", knowledgeEmbeddings_1.default); // Regenerar embeddings (enterprise)
+app.use("/api/meetings", meetings_1.default); // Meetings module (modo altavoz + upload)
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
@@ -226,6 +229,7 @@ console.log("[DEBUG] emailHubRouter (Universal IMAP/SMTP) montado en /api/mail")
 console.log("[DEBUG] calendarRouter montado en /api/calendar");
 console.log("[DEBUG] runtimeCapabilitiesRouter montado en /api/runtime-capabilities");
 console.log("[DEBUG] telegramRouter montado en /api/telegram");
+console.log("[DEBUG] meetingsRouter (altavoz + upload) montado en /api/meetings");
 const PORT = env_1.env.port || 4000;
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`[AL-E CORE] Servidor iniciado en puerto ${PORT}`);
@@ -239,4 +243,7 @@ app.listen(PORT, "0.0.0.0", () => {
     // Iniciar email sync worker
     console.log('[AL-E CORE] Iniciando email sync worker...');
     (0, emailSyncWorker_1.startEmailSyncWorker)();
+    // Iniciar meeting timeout worker (iOS PWA reality)
+    console.log('[AL-E CORE] Iniciando meeting timeout worker...');
+    (0, meetingTimeoutWorker_1.startMeetingTimeoutWorker)();
 });
