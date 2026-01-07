@@ -283,6 +283,65 @@ export async function executeTool(
           error: scheduleResult.error
         };
 
+      // Web Search Tool
+      case 'web_search':
+        if (!parameters.query) {
+          throw new Error('query es requerido para web_search');
+        }
+        
+        const { webSearch } = await import('../../services/tavilySearch');
+        const searchResults = await webSearch({
+          query: parameters.query,
+          maxResults: parameters.maxResults || 5
+        });
+        
+        return {
+          success: true,
+          data: {
+            query: parameters.query,
+            results: searchResults.results.map((r: any) => ({
+              title: r.title,
+              url: r.url,
+              content: r.content,
+              score: r.score
+            }))
+          }
+        };
+
+      // Memory Tool
+      case 'save_memory':
+        if (!parameters.content || !parameters.memoryType) {
+          throw new Error('content y memoryType son requeridos');
+        }
+        
+        const { supabase } = await import('../../db/supabase');
+        
+        const { data: memoryData, error: memoryError } = await supabase
+          .from('assistant_memories')
+          .insert({
+            user_id_uuid: userId,
+            workspace_id: 'default',  // TODO: Obtener del contexto
+            memory: parameters.content,
+            memory_type: parameters.memoryType,
+            importance: parameters.importance || 0.7,
+            created_at: new Date().toISOString()
+          })
+          .select()
+          .single();
+        
+        if (memoryError) {
+          throw memoryError;
+        }
+        
+        return {
+          success: true,
+          data: {
+            id: memoryData.id,
+            content: memoryData.memory,
+            type: memoryData.memory_type
+          }
+        };
+
       default:
         console.log(`[TOOL ROUTER] ⚠️  Tool no implementado: ${name}`);
         return {

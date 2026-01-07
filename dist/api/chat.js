@@ -515,34 +515,66 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
             // Usar modelo decidido por el orchestrator
             modelUsed = orchestratorContext.modelSelected;
             // ============================================
-            // C3) LLAMAR AL ROUTER LLM (SIN OPENAI)
+            // C3) TOOL CALLING: Preparar herramientas disponibles
             // ============================================
-            console.log(`[CHAT] Calling LLM router with model: ${modelUsed}`);
-            llmResponse = await (0, router_1.generate)({
-                messages: [
-                    { role: 'system', content: orchestratorContext.systemPrompt },
-                    ...finalMessages.filter(m => m.role !== 'system').map(m => ({
-                        role: m.role,
-                        content: m.content
-                    }))
-                ],
-                temperature: 0.7,
-                maxTokens: 600, // COST CONTROL
-                model: modelUsed
+            const { getToolsForContext } = await Promise.resolve().then(() => __importStar(require('../ai/tools/toolDefinitions')));
+            // Extraer último mensaje de usuario
+            const lastUserMessage = [...finalMessages].reverse().find((m) => m.role === 'user');
+            const userQuery = lastUserMessage?.content || '';
+            const toolsAvailable = getToolsForContext({
+                hasEmailAccess: orchestratorContext.isAuthenticated,
+                hasCalendarAccess: true, // Calendario interno siempre disponible
+                hasWebAccess: true, // Web search siempre disponible
+                userMessage: userQuery
             });
-            providerUsed = llmResponse.response.provider_used;
-            fallbackUsed = llmResponse.fallbackChain.fallback_used;
-            fallbackChain = llmResponse.fallbackChain.attempted;
-            console.log(`[CHAT] ✓ LLM response received from ${providerUsed}${fallbackUsed ? ` (fallback from ${fallbackChain.join(' → ')})` : ''}`);
+            console.log(`[CHAT] 🔧 Passing ${toolsAvailable.length} tools to LLM`);
             // ============================================
-            // C3.5) P1: EXTRACCIÓN REAL DE DATOS (Web Search)
+            // C4) LLAMAR AL TOOL LOOP (CON FUNCTION CALLING)
+            // ============================================
+            console.log(`[CHAT] Calling LLM with tool loop, model: ${modelUsed}`);
+            const conversationMessages = [
+                ...finalMessages.filter(m => m.role !== 'system').map(m => ({
+                    role: m.role,
+                    content: m.content
+                }))
+            ];
+            // Usar tool loop del orchestrator
+            const toolLoopResult = await orchestrator.executeToolLoop(userId, conversationMessages, orchestratorContext.systemPrompt, toolsAvailable, modelUsed, 3 // Max 3 iteraciones
+            );
+            // Formatear respuesta para compatibilidad con código existente
+            llmResponse = {
+                response: {
+                    text: toolLoopResult.content,
+                    tokens_in: 0, // TODO: Calcular tokens reales
+                    tokens_out: 0, // TODO: Calcular tokens reales
+                    provider_used: 'groq',
+                    model_used: modelUsed
+                },
+                fallbackChain: {
+                    fallback_used: false,
+                    attempted: []
+                }
+            };
+            providerUsed = 'groq';
+            fallbackUsed = false;
+            fallbackChain = [];
+            console.log(`[CHAT] ✓ LLM response received with ${toolLoopResult.toolExecutions.length} tool execution(s)`);
+            // Log tool executions
+            if (toolLoopResult.toolExecutions.length > 0) {
+                console.log(`[CHAT] 🔧 Tools executed:`);
+                toolLoopResult.toolExecutions.forEach((te) => {
+                    console.log(`[CHAT]    - ${te.tool}: ${te.success ? 'SUCCESS' : 'FAILED'}`);
+                });
+            }
+            // ============================================
+            // C5) P1: EXTRACCIÓN REAL DE DATOS (Web Search)
             // ============================================
             // Si usó web search Y la respuesta tiene >3 links, rechazar y regenerar
             if (orchestratorContext.webSearchUsed && orchestratorContext.intent.intent_type === 'time_sensitive') {
                 const linkCount = (llmResponse.response.text.match(/https?:\/\//g) || []).length;
                 if (linkCount > 3) {
                     console.log(`[WEB_SEARCH] ⚠️ Response contains ${linkCount} links - REGENERATING with extraction prompt`);
-                    // Re-generar con prompt forzado (mismo método que el original)
+                    // Re-generar con prompt forzado
                     const extractionMessages = [
                         { role: 'system', content: `${orchestratorContext.systemPrompt}
 

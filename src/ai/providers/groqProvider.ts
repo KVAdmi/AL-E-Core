@@ -13,8 +13,11 @@ const groq = new Groq({
 });
 
 export interface GroqMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | null;
+  tool_calls?: any[];
+  tool_call_id?: string;
+  name?: string;
 }
 
 export interface GroqChatOptions {
@@ -24,6 +27,8 @@ export interface GroqChatOptions {
   temperature?: number;
   maxTokens?: number;
   topP?: number;
+  tools?: any[];
+  toolChoice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
 }
 
 export interface GroqChatResponse {
@@ -36,6 +41,7 @@ export interface GroqChatResponse {
       total_tokens: number;
     };
     finish_reason: string;
+    tool_calls?: any[];
   };
 }
 
@@ -71,11 +77,25 @@ export async function callGroqChat(options: GroqChatOptions): Promise<GroqChatRe
       temperature: temperature,
       max_tokens: maxTokens,
       top_p: topP,
-      stream: false
+      stream: false,
+      // Tool calling support
+      ...(options.tools && options.tools.length > 0 && {
+        tools: options.tools,
+        tool_choice: options.toolChoice || 'auto'
+      })
     });
 
     const content = completion.choices[0]?.message?.content || '';
+    const toolCalls = completion.choices[0]?.message?.tool_calls;
     const usage = completion.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+    // Log tool calls si existen
+    if (toolCalls && toolCalls.length > 0) {
+      console.log(`[GROQ] 🔧 LLM requested ${toolCalls.length} tool call(s)`);
+      toolCalls.forEach((tc: any) => {
+        console.log(`[GROQ]    - ${tc.function.name}(${tc.function.arguments})`);
+      });
+    }
 
     console.log(`[GROQ] ✓ Respuesta recibida (${usage.completion_tokens} tokens)`);
     console.log(`[GROQ] Usage: ${usage.prompt_tokens} in + ${usage.completion_tokens} out = ${usage.total_tokens} total`);
@@ -89,7 +109,8 @@ export async function callGroqChat(options: GroqChatOptions): Promise<GroqChatRe
           completion_tokens: usage.completion_tokens,
           total_tokens: usage.total_tokens
         },
-        finish_reason: completion.choices[0]?.finish_reason || 'stop'
+        finish_reason: completion.choices[0]?.finish_reason || 'stop',
+        tool_calls: toolCalls || []
       }
     };
   } catch (error: any) {

@@ -413,6 +413,132 @@ export class Orchestrator {
   }
   
   /**
+   * STEP 6.5: Execute tool calling loop
+   * 
+   * Si el LLM retorna tool_calls, ejecutarlos y volver a llamar al LLM con resultados.
+   * Máximo 3 iteraciones para evitar loops infinitos.
+   */
+  async executeToolLoop(
+    userId: string,
+    messages: Array<any>,
+    systemPrompt: string,
+    tools: any[],
+    model: string,
+    maxIterations: number = 3
+  ): Promise<{ content: string; toolExecutions: Array<any> }> {
+    let iteration = 0;
+    const toolExecutions: Array<any> = [];
+    
+    while (iteration < maxIterations) {
+      iteration++;
+      console.log(`[ORCH] 🔄 Tool loop iteration ${iteration}/${maxIterations}`);
+      
+      // Llamar al LLM con tools
+      const { callGroqChat } = await import('./providers/groqProvider');
+      const response = await callGroqChat({
+        messages,
+        systemPrompt: iteration === 1 ? systemPrompt : undefined, // Solo primera vez
+        tools,
+        toolChoice: 'auto',
+        model,
+        maxTokens: 600
+      });
+      
+      // Si no hay tool_calls, retornar respuesta final
+      if (!response.raw.tool_calls || response.raw.tool_calls.length === 0) {
+        console.log('[ORCH] ✓ No more tool calls, returning final response');
+        return {
+          content: response.content,
+          toolExecutions
+        };
+      }
+      
+      // Ejecutar herramientas
+      console.log(`[ORCH] 🔧 Executing ${response.raw.tool_calls.length} tool(s)...`);
+      
+      // Agregar mensaje del assistant con tool_calls
+      messages.push({
+        role: 'assistant',
+        content: null,
+        tool_calls: response.raw.tool_calls
+      });
+      
+      // Ejecutar cada tool call
+      const { executeTool } = await import('./tools/toolRouter');
+      
+      for (const toolCall of response.raw.tool_calls) {
+        try {
+          const functionName = toolCall.function.name;
+          const functionArgs = JSON.parse(toolCall.function.arguments);
+          
+          console.log(`[ORCH]    - Executing: ${functionName}(${JSON.stringify(functionArgs).substring(0, 100)}...)`);
+          
+          // Ejecutar herramienta
+          const result = await executeTool(userId, {
+            name: functionName,
+            parameters: functionArgs
+          });
+          
+          toolExecutions.push({
+            tool: functionName,
+            args: functionArgs,
+            result,
+            success: result.success
+          });
+          
+          // Agregar resultado a mensajes
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            name: functionName,
+            content: JSON.stringify(result)
+          });
+          
+          console.log(`[ORCH]    ✓ Tool ${functionName} executed: ${result.success ? 'SUCCESS' : 'FAILED'}`);
+        } catch (error: any) {
+          console.error(`[ORCH]    ❌ Tool execution error:`, error);
+          
+          toolExecutions.push({
+            tool: toolCall.function.name,
+            args: {},
+            result: { success: false, error: error.message },
+            success: false
+          });
+          
+          // Agregar error como resultado
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            name: toolCall.function.name,
+            content: JSON.stringify({
+              success: false,
+              error: error.message || 'Unknown error'
+            })
+          });
+        }
+      }
+      
+      // Continuar loop para que el LLM procese los resultados
+    }
+    
+    console.log('[ORCH] ⚠️ Max tool iterations reached, forcing final response');
+    
+    // Si llegamos aquí, forzar respuesta final sin más tools
+    const { callGroqChat } = await import('./providers/groqProvider');
+    const finalResponse = await callGroqChat({
+      messages,
+      toolChoice: 'none',  // Forzar que NO use más tools
+      model,
+      maxTokens: 600
+    });
+    
+    return {
+      content: finalResponse.content,
+      toolExecutions
+    };
+  }
+  
+  /**
    * STEP 7: Construir system prompt completo
    * CRÍTICO: Tool result va PRIMERO para máxima visibilidad
    */
