@@ -277,6 +277,75 @@ export class Orchestrator {
     }
     
     // ═══════════════════════════════════════════════════════════════
+    // P0 HOY: EMAIL TOOLS ROUTER (Detectar email operations)
+    // ═══════════════════════════════════════════════════════════════
+    
+    const { needsTools, detectRequiredTools, executeTool } = await import('./tools/toolRouter');
+    
+    if (needsTools(userMessage)) {
+      console.log('[ORCH] 📧 EMAIL TOOLS DETECTED - Checking required tools...');
+      const requiredTools = detectRequiredTools(userMessage);
+      console.log(`[ORCH] 📧 Required tools: [${requiredTools.join(', ')}]`);
+      
+      // Ejecutar herramientas de email secuencialmente
+      if (requiredTools.length > 0) {
+        const toolResults: string[] = [];
+        
+        for (const toolName of requiredTools) {
+          console.log(`[ORCH] 📧 Executing email tool: ${toolName}`);
+          
+          // Determinar parámetros basados en la consulta
+          const params: any = {};
+          
+          if (toolName === 'list_emails') {
+            params.unreadOnly = userMessage.toLowerCase().includes('no leído') || userMessage.toLowerCase().includes('sin leer');
+            params.limit = 10;
+          } else if (toolName === 'read_email' || toolName === 'analyze_email') {
+            // Para read/analyze, necesitamos primero obtener el último email
+            const emails = await import('./tools/emailTools').then(m => m.listEmails(userId, { limit: 1 }));
+            if (emails && emails.length > 0) {
+              params.emailId = emails[0].id;
+            }
+          }
+          
+          const result = await executeTool(userId, { name: toolName, parameters: params });
+          
+          if (result.success) {
+            console.log(`[ORCH] ✓ Email tool ${toolName} succeeded`);
+            
+            // Formatear resultado para contexto
+            if (toolName === 'list_emails' && result.data) {
+              toolResults.push(`Encontré ${result.data.count} correos:\n${result.data.emails.map((e: any, i: number) => 
+                `${i+1}. De: ${e.from}\n   Asunto: ${e.subject}\n   Preview: ${e.preview}\n   Fecha: ${new Date(e.date).toLocaleString('es-MX')}`
+              ).join('\n\n')}`);
+            } else if (toolName === 'read_email' && result.data) {
+              toolResults.push(`Correo completo:\nDe: ${result.data.from}\nAsunto: ${result.data.subject}\nFecha: ${new Date(result.data.date).toLocaleString('es-MX')}\n\nContenido:\n${result.data.body}`);
+            } else if (toolName === 'analyze_email' && result.data) {
+              toolResults.push(`Análisis del correo:\nResumen: ${result.data.summary}\nSentimiento: ${result.data.sentiment}\nPuntos clave:\n${result.data.key_points.map((p: string, i: number) => `${i+1}. ${p}`).join('\n')}\nRequiere acción: ${result.data.action_required ? 'Sí' : 'No'}${result.data.detected_dates && result.data.detected_dates.length > 0 ? `\n\nCitas detectadas:\n${result.data.detected_dates.map((d: any) => `- ${d.date}: ${d.context} (${d.type})`).join('\n')}` : ''}`);
+            } else if (toolName === 'draft_reply' && result.data) {
+              toolResults.push(`Borrador de respuesta generado:\nPara: ${result.data.to}\nAsunto: ${result.data.subject}\n\nContenido:\n${result.data.body}`);
+            } else if (toolName === 'send_email' && result.data) {
+              toolResults.push(`✅ Correo enviado exitosamente. ID del mensaje: ${result.data.messageId}`);
+            }
+          } else {
+            console.error(`[ORCH] ❌ Email tool ${toolName} failed:`, result.error);
+            toolResults.push(`Error ejecutando ${toolName}: ${result.error}`);
+          }
+        }
+        
+        if (toolResults.length > 0) {
+          console.log('[ORCH] ✓ Email tools executed successfully, returning results');
+          return {
+            toolUsed: 'email_tools',
+            toolReason: `Executed email tools: ${requiredTools.join(', ')}`,
+            toolResult: toolResults.join('\n\n═══════════════════════════════════════\n\n'),
+            toolFailed: false
+          };
+        }
+      }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
     // P0 HOY: ACTION GATEWAY (Core manda)
     // ═══════════════════════════════════════════════════════════════
     
