@@ -31,6 +31,7 @@ const p0_1 = __importDefault(require("./api/p0")); // P0 internal testing endpoi
 const toolsTest_1 = __importDefault(require("./api/toolsTest")); // Tool calling test endpoint
 const knowledgeEmbeddings_1 = __importDefault(require("./api/knowledgeEmbeddings")); // Regenerar embeddings
 const meetings_1 = __importDefault(require("./api/meetings")); // Meetings module (modo altavoz + upload)
+const notifications_1 = __importDefault(require("./api/notifications")); // Notifications API (schedule, cancel)
 const documentText_1 = require("./utils/documentText");
 const notificationWorker_1 = require("./workers/notificationWorker");
 const emailSyncWorker_1 = require("./workers/emailSyncWorker");
@@ -211,6 +212,7 @@ app.use("/api/p0", p0_1.default); // P0 internal testing (service role only)
 app.use("/api/tools", toolsTest_1.default); // Tool calling test (nuevas integraciones externas)
 app.use("/api/knowledge/embeddings", knowledgeEmbeddings_1.default); // Regenerar embeddings (enterprise)
 app.use("/api/meetings", meetings_1.default); // Meetings module (modo altavoz + upload)
+app.use("/api/notifications", notifications_1.default); // Notifications API (schedule, cancel)
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
@@ -230,6 +232,7 @@ console.log("[DEBUG] calendarRouter montado en /api/calendar");
 console.log("[DEBUG] runtimeCapabilitiesRouter montado en /api/runtime-capabilities");
 console.log("[DEBUG] telegramRouter montado en /api/telegram");
 console.log("[DEBUG] meetingsRouter (altavoz + upload) montado en /api/meetings");
+console.log("[DEBUG] notificationsRouter montado en /api/notifications");
 const PORT = env_1.env.port || 4000;
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`[AL-E CORE] Servidor iniciado en puerto ${PORT}`);

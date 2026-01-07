@@ -26,6 +26,7 @@ import p0Router from "./api/p0"; // P0 internal testing endpoint
 import toolsTestRouter from "./api/toolsTest"; // Tool calling test endpoint
 import knowledgeEmbeddingsRouter from "./api/knowledgeEmbeddings"; // Regenerar embeddings
 import meetingsRouter from "./api/meetings"; // Meetings module (modo altavoz + upload)
+import notificationsRouter from "./api/notifications"; // Notifications API (schedule, cancel)
 import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
 import { startNotificationWorker } from "./workers/notificationWorker";
 import { startEmailSyncWorker } from "./workers/emailSyncWorker";
@@ -225,6 +226,7 @@ app.use("/api/p0", p0Router); // P0 internal testing (service role only)
 app.use("/api/tools", toolsTestRouter); // Tool calling test (nuevas integraciones externas)
 app.use("/api/knowledge/embeddings", knowledgeEmbeddingsRouter); // Regenerar embeddings (enterprise)
 app.use("/api/meetings", meetingsRouter); // Meetings module (modo altavoz + upload)
+app.use("/api/notifications", notificationsRouter); // Notifications API (schedule, cancel)
 
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
@@ -245,6 +247,7 @@ console.log("[DEBUG] calendarRouter montado en /api/calendar");
 console.log("[DEBUG] runtimeCapabilitiesRouter montado en /api/runtime-capabilities");
 console.log("[DEBUG] telegramRouter montado en /api/telegram");
 console.log("[DEBUG] meetingsRouter (altavoz + upload) montado en /api/meetings");
+console.log("[DEBUG] notificationsRouter montado en /api/notifications");
 
 const PORT = env.port || 4000;
 
