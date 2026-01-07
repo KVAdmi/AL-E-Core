@@ -32,6 +32,8 @@ const toolsTest_1 = __importDefault(require("./api/toolsTest")); // Tool calling
 const knowledgeEmbeddings_1 = __importDefault(require("./api/knowledgeEmbeddings")); // Regenerar embeddings
 const meetings_1 = __importDefault(require("./api/meetings")); // Meetings module (modo altavoz + upload)
 const notifications_1 = __importDefault(require("./api/notifications")); // Notifications API (schedule, cancel)
+const events_1 = __importDefault(require("./api/events")); // KUNNA events (multi-app service-to-service)
+const decide_1 = __importDefault(require("./api/decide")); // KUNNA rule engine (deterministic actions)
 const documentText_1 = require("./utils/documentText");
 const notificationWorker_1 = require("./workers/notificationWorker");
 const emailSyncWorker_1 = require("./workers/emailSyncWorker");
@@ -213,6 +215,8 @@ app.use("/api/tools", toolsTest_1.default); // Tool calling test (nuevas integra
 app.use("/api/knowledge/embeddings", knowledgeEmbeddings_1.default); // Regenerar embeddings (enterprise)
 app.use("/api/meetings", meetings_1.default); // Meetings module (modo altavoz + upload)
 app.use("/api/notifications", notifications_1.default); // Notifications API (schedule, cancel)
+app.use("/api/events", events_1.default); // KUNNA events (multi-app service-to-service)
+app.use("/api/decide", decide_1.default); // KUNNA rule engine (deterministic actions)
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
 console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
@@ -233,6 +237,8 @@ console.log("[DEBUG] runtimeCapabilitiesRouter montado en /api/runtime-capabilit
 console.log("[DEBUG] telegramRouter montado en /api/telegram");
 console.log("[DEBUG] meetingsRouter (altavoz + upload) montado en /api/meetings");
 console.log("[DEBUG] notificationsRouter montado en /api/notifications");
+console.log("[DEBUG] eventsRouter (KUNNA multi-app) montado en /api/events");
+console.log("[DEBUG] decideRouter (KUNNA rule engine) montado en /api/decide");
 const PORT = env_1.env.port || 4000;
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`[AL-E CORE] Servidor iniciado en puerto ${PORT}`);

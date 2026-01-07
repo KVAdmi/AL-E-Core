@@ -27,6 +27,8 @@ import toolsTestRouter from "./api/toolsTest"; // Tool calling test endpoint
 import knowledgeEmbeddingsRouter from "./api/knowledgeEmbeddings"; // Regenerar embeddings
 import meetingsRouter from "./api/meetings"; // Meetings module (modo altavoz + upload)
 import notificationsRouter from "./api/notifications"; // Notifications API (schedule, cancel)
+import eventsRouter from "./api/events"; // KUNNA events (multi-app service-to-service)
+import decideRouter from "./api/decide"; // KUNNA rule engine (deterministic actions)
 import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
 import { startNotificationWorker } from "./workers/notificationWorker";
 import { startEmailSyncWorker } from "./workers/emailSyncWorker";
@@ -227,6 +229,8 @@ app.use("/api/tools", toolsTestRouter); // Tool calling test (nuevas integracion
 app.use("/api/knowledge/embeddings", knowledgeEmbeddingsRouter); // Regenerar embeddings (enterprise)
 app.use("/api/meetings", meetingsRouter); // Meetings module (modo altavoz + upload)
 app.use("/api/notifications", notificationsRouter); // Notifications API (schedule, cancel)
+app.use("/api/events", eventsRouter); // KUNNA events (multi-app service-to-service)
+app.use("/api/decide", decideRouter); // KUNNA rule engine (deterministic actions)
 
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
@@ -248,6 +252,8 @@ console.log("[DEBUG] runtimeCapabilitiesRouter montado en /api/runtime-capabilit
 console.log("[DEBUG] telegramRouter montado en /api/telegram");
 console.log("[DEBUG] meetingsRouter (altavoz + upload) montado en /api/meetings");
 console.log("[DEBUG] notificationsRouter montado en /api/notifications");
+console.log("[DEBUG] eventsRouter (KUNNA multi-app) montado en /api/events");
+console.log("[DEBUG] decideRouter (KUNNA rule engine) montado en /api/decide");
 
 const PORT = env.port || 4000;
 
