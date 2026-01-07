@@ -76,7 +76,7 @@ router.post('/live/start', async (req: Request, res: Response) => {
         description,
         mode: 'live',
         status: 'recording',
-        // happened_at: new Date().toISOString(), // TODO: Enable after migration 023
+        happened_at: new Date().toISOString(),
         participants,
         auto_send_enabled,
         send_email,
