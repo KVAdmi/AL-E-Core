@@ -75,14 +75,16 @@ export async function executeTool(
           data: {
             count: emails.length,
             emails: emails.map(e => ({
-              id: e.id,
+              emailId: e.id,  // ← Renombrar a emailId para ser más explícito
               from: e.from_address,
+              from_name: e.from_name,
               subject: e.subject,
-              preview: e.body_preview,
+              preview: e.body_preview || '(Sin preview disponible)',
               date: e.date,
               is_read: e.is_read,
               has_attachments: e.has_attachments
-            }))
+            })),
+            instruction: '🔥 IMPORTANTE: Para leer el contenido completo de cualquiera de estos correos, usa read_email con el emailId correspondiente.'
           }
         };
 

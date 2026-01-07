@@ -53,13 +53,13 @@ export const READ_EMAIL_TOOL: ToolDefinition = {
   type: 'function',
   function: {
     name: 'read_email',
-    description: 'Lee el contenido completo de un correo específico. Usa esto cuando el usuario pida leer un correo en particular o analizar el contenido de un email.',
+    description: 'Lee el contenido completo de un correo específico. USA ESTO OBLIGATORIAMENTE cuando el usuario diga: "léeme ese correo", "qué dice", "dame más detalles", "leélo", "ábrelo", "muéstramelo", "el contenido", "qué decía", o cualquier referencia a ver el contenido de un email que YA mencionaste. Si acabas de listar correos con list_emails, usa el emailId del correo más relevante que mencionaste.',
     parameters: {
       type: 'object',
       properties: {
         emailId: {
           type: 'string',
-          description: 'ID del correo a leer'
+          description: 'ID del correo a leer. Si el usuario se refiere al último correo que mencionaste, usa ese emailId.'
         }
       },
       required: ['emailId']
