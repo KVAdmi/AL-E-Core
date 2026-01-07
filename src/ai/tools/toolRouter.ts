@@ -359,25 +359,31 @@ export function detectRequiredTools(query: string): string[] {
   const lower = query.toLowerCase();
   const tools: string[] = [];
   
-  // Email tools
-  if (lower.includes('lee') || lower.includes('leer') || lower.includes('muestra')) {
-    if (lower.includes('último') || lower.includes('reciente')) {
+  // Email tools - MEJORADO para detectar más variaciones
+  const hasEmailIntent = lower.includes('correo') || lower.includes('email') || lower.includes('mensaje') || lower.includes('bandeja');
+  
+  if (hasEmailIntent) {
+    // Detectar lectura de correos
+    if (lower.includes('lee') || lower.includes('leer') || lower.includes('muestra') || 
+        lower.includes('checa') || lower.includes('checar') || lower.includes('revisar') ||
+        lower.includes('ver') || lower.includes('consulta') || lower.includes('dime')) {
       tools.push('list_emails');
-    } else {
-      tools.push('read_email');
     }
-  }
-  
-  if (lower.includes('analiza') && lower.includes('correo')) {
-    tools.push('analyze_email');
-  }
-  
-  if (lower.includes('responde') || lower.includes('responder')) {
-    tools.push('draft_reply');
-  }
-  
-  if (lower.includes('envía') || lower.includes('enviar')) {
-    tools.push('send_email');
+    
+    // Detectar análisis
+    if (lower.includes('analiza') || lower.includes('análisis') || lower.includes('resume')) {
+      tools.push('analyze_email');
+    }
+    
+    // Detectar respuesta
+    if (lower.includes('responde') || lower.includes('responder') || lower.includes('contestar')) {
+      tools.push('draft_reply');
+    }
+    
+    // Detectar envío
+    if (lower.includes('envía') || lower.includes('enviar') || lower.includes('mandar')) {
+      tools.push('send_email');
+    }
   }
   
   // Document tools

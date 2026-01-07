@@ -17,6 +17,7 @@ declare global {
         email?: string;
         [key: string]: any;
       };
+      userId?: string; // ← AGREGAR ESTO para acceso rápido
     }
   }
 }
@@ -60,6 +61,7 @@ export async function optionalAuth(req: Request, res: Response, next: NextFuncti
       email: data.user.email,
       ...data.user,
     };
+    req.userId = data.user.id; // ← AGREGAR ESTO para acceso directo
 
     console.log('[AUTH] ✓ User authenticated:', req.user.id, req.user.email);
     next();
@@ -112,13 +114,13 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         detail: error?.message || 'Authentication failed',
       });
     }
-
     // 5) Token válido
     req.user = {
       id: data.user.id,
       email: data.user.email,
       ...data.user,
     };
+    req.userId = data.user.id; // ← AGREGAR ESTO para acceso directo
 
     console.log('[AUTH] ✓ User authenticated (required):', req.user.id, req.user.email);
     next();

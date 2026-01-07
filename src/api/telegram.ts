@@ -29,13 +29,15 @@ const router = express.Router();
 
 router.post('/bots/connect', async (req, res) => {
   try {
-    const { ownerUserId, botUsername, botToken } = req.body;
+    // ✅ FIX: Obtener userId del token (req.userId viene de requireAuth middleware)
+    const ownerUserId = req.userId || req.body.ownerUserId;
+    const { botUsername, botToken } = req.body;
     
     if (!ownerUserId || !botUsername || !botToken) {
       return res.status(400).json({
         ok: false,
         error: 'MISSING_REQUIRED_FIELDS',
-        message: 'Campos requeridos: ownerUserId, botUsername, botToken'
+        message: 'Campos requeridos: botUsername, botToken (ownerUserId del token)'
       });
     }
     
@@ -184,13 +186,14 @@ router.post('/bots/connect', async (req, res) => {
 
 router.get('/bots', async (req, res) => {
   try {
-    const { ownerUserId } = req.query;
+    // ✅ FIX: Obtener userId del token (req.userId viene de requireAuth middleware)
+    const ownerUserId = req.userId || req.query.ownerUserId as string;
     
     if (!ownerUserId) {
       return res.status(400).json({
         ok: false,
         error: 'MISSING_OWNER_USER_ID',
-        message: 'ownerUserId es requerido'
+        message: 'Autenticación requerida - no se pudo identificar al usuario'
       });
     }
     
@@ -564,13 +567,14 @@ router.post('/send', async (req, res) => {
 
 router.get('/chats', async (req, res) => {
   try {
-    const { ownerUserId } = req.query;
+    // ✅ FIX: Obtener userId del token
+    const ownerUserId = req.userId || req.query.ownerUserId as string;
     
     if (!ownerUserId) {
       return res.status(400).json({
         ok: false,
         error: 'MISSING_OWNER_USER_ID',
-        message: 'ownerUserId es requerido'
+        message: 'Autenticación requerida - no se pudo identificar al usuario'
       });
     }
     

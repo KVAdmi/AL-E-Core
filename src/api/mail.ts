@@ -1041,13 +1041,15 @@ router.get('/inbox', async (req, res) => {
 
 router.get('/messages', async (req, res) => {
   try {
-    const { ownerUserId, limit } = req.query;
+    // ✅ FIX: Obtener userId del token
+    const ownerUserId = req.userId || req.query.ownerUserId as string;
+    const { limit } = req.query;
     
     if (!ownerUserId) {
       return res.status(400).json({
         ok: false,
         error: 'MISSING_OWNER_USER_ID',
-        message: 'ownerUserId es requerido'
+        message: 'Autenticación requerida - no se pudo identificar al usuario'
       });
     }
     

@@ -29,8 +29,9 @@ const router = express.Router();
 
 router.post('/accounts', async (req, res) => {
   try {
+    // ✅ FIX: Obtener userId del token
+    const ownerUserId = req.userId || req.body.ownerUserId;
     const {
-      ownerUserId,
       providerLabel,
       provider, // NUEVO: ses_inbound, ses, gmail, outlook, smtp, imap
       domain, // NUEVO: para AWS SES
@@ -62,7 +63,7 @@ router.post('/accounts', async (req, res) => {
       return res.status(400).json({
         ok: false,
         error: 'MISSING_OWNER_USER_ID',
-        message: 'ownerUserId es requerido'
+        message: 'Autenticación requerida - no se pudo identificar al usuario'
       });
     }
     
@@ -187,7 +188,8 @@ router.post('/accounts', async (req, res) => {
 
 router.get('/accounts', async (req, res) => {
   try {
-    const { ownerUserId } = req.query;
+    // ✅ FIX: Obtener userId del token
+    const ownerUserId = req.userId || req.query.ownerUserId as string;
     
     console.log('[EMAIL GET] ownerUserId:', ownerUserId);
     
@@ -195,7 +197,7 @@ router.get('/accounts', async (req, res) => {
       return res.status(400).json({
         ok: false,
         error: 'MISSING_OWNER_USER_ID',
-        message: 'ownerUserId es requerido'
+        message: 'Autenticación requerida - no se pudo identificar al usuario'
       });
     }
     
