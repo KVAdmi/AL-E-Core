@@ -521,13 +521,11 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
             // Extraer último mensaje de usuario
             const lastUserMessage = [...finalMessages].reverse().find((m) => m.role === 'user');
             const userQuery = lastUserMessage?.content || '';
-            const toolsAvailable = getToolsForContext({
-                hasEmailAccess: orchestratorContext.isAuthenticated,
-                hasCalendarAccess: true, // Calendario interno siempre disponible
-                hasWebAccess: true, // Web search siempre disponible
-                userMessage: userQuery
-            });
-            console.log(`[CHAT] 🔧 Passing ${toolsAvailable.length} tools to LLM`);
+            // 🔥 HOT FIX: SIEMPRE pasar TODAS las herramientas
+            // El LLM decide cuándo usarlas, NO el orchestrator
+            const { ALL_TOOLS } = await Promise.resolve().then(() => __importStar(require('../ai/tools/toolDefinitions')));
+            const toolsAvailable = ALL_TOOLS;
+            console.log(`[CHAT] 🔧 HOT FIX: Passing ALL ${toolsAvailable.length} tools to LLM (LLM decides when to use them)`);
             // ============================================
             // C4) LLAMAR AL TOOL LOOP (CON FUNCTION CALLING)
             // ============================================
