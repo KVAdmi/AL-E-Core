@@ -20,6 +20,7 @@ import express from 'express';
 import { supabase } from '../db/supabase';
 import { encrypt, decrypt, generateSecret } from '../utils/encryption';
 import TelegramBot from 'node-telegram-bot-api';
+import { requireAuth } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -27,17 +28,16 @@ const router = express.Router();
 // POST /api/telegram/bots/connect - Conectar bot de usuario
 // ═══════════════════════════════════════════════════════════════
 
-router.post('/bots/connect', async (req, res) => {
+router.post('/bots/connect', requireAuth, async (req, res) => {
   try {
-    // ✅ FIX: Obtener userId del token (req.userId viene de requireAuth middleware)
-    const ownerUserId = req.userId || req.body.ownerUserId;
+    const ownerUserId = req.userId!; // Garantizado por requireAuth
     const { botUsername, botToken } = req.body;
     
-    if (!ownerUserId || !botUsername || !botToken) {
+    if (!botUsername || !botToken) {
       return res.status(400).json({
         ok: false,
         error: 'MISSING_REQUIRED_FIELDS',
-        message: 'Campos requeridos: botUsername, botToken (ownerUserId del token)'
+        message: 'Campos requeridos: botUsername, botToken'
       });
     }
     
@@ -184,18 +184,9 @@ router.post('/bots/connect', async (req, res) => {
 // GET /api/telegram/bots - Listar bots del usuario
 // ═══════════════════════════════════════════════════════════════
 
-router.get('/bots', async (req, res) => {
+router.get('/bots', requireAuth, async (req, res) => {
   try {
-    // ✅ FIX: Obtener userId del token (req.userId viene de requireAuth middleware)
-    const ownerUserId = req.userId || req.query.ownerUserId as string;
-    
-    if (!ownerUserId) {
-      return res.status(400).json({
-        ok: false,
-        error: 'MISSING_OWNER_USER_ID',
-        message: 'Autenticación requerida - no se pudo identificar al usuario'
-      });
-    }
+    const ownerUserId = req.userId!; // Garantizado por requireAuth
     
     const { data, error } = await supabase
       .from('telegram_bots')
@@ -438,15 +429,16 @@ router.post('/webhook/:botId/:secret', async (req, res) => {
 // POST /api/telegram/send - Enviar mensaje
 // ═══════════════════════════════════════════════════════════════
 
-router.post('/send', async (req, res) => {
+router.post('/send', requireAuth, async (req, res) => {
   try {
-    const { ownerUserId, chatId, text } = req.body;
+    const ownerUserId = req.userId; // Del middleware requireAuth
+    const { chatId, text } = req.body;
     
-    if (!ownerUserId || !chatId || !text) {
+    if (!chatId || !text) {
       return res.status(400).json({
         ok: false,
         error: 'MISSING_REQUIRED_FIELDS',
-        message: 'Campos requeridos: ownerUserId, chatId, text'
+        message: 'Campos requeridos: chatId, text'
       });
     }
     
@@ -565,18 +557,9 @@ router.post('/send', async (req, res) => {
 // GET /api/telegram/chats - Listar chats del usuario
 // ═══════════════════════════════════════════════════════════════
 
-router.get('/chats', async (req, res) => {
+router.get('/chats', requireAuth, async (req, res) => {
   try {
-    // ✅ FIX: Obtener userId del token
-    const ownerUserId = req.userId || req.query.ownerUserId as string;
-    
-    if (!ownerUserId) {
-      return res.status(400).json({
-        ok: false,
-        error: 'MISSING_OWNER_USER_ID',
-        message: 'Autenticación requerida - no se pudo identificar al usuario'
-      });
-    }
+    const ownerUserId = req.userId!; // Garantizado por requireAuth
     
     // Obtener chats con info del bot
     const { data, error } = await supabase
@@ -631,7 +614,7 @@ router.get('/chats', async (req, res) => {
 // POST /api/telegram/bot/settings - Actualizar settings del chat
 // ═══════════════════════════════════════════════════════════════
 
-router.post('/bot/settings', async (req, res) => {
+router.post('/bot/settings', requireAuth, async (req, res) => {
   try {
     const { chatId, auto_send_enabled } = req.body;
     
