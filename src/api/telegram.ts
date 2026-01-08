@@ -133,7 +133,8 @@ router.post('/bots/connect', requireAuth, async (req, res) => {
     }
     
     // Configurar webhook en Telegram
-    const webhookUrl = `https://api.al-eon.com/api/telegram/webhook/${botId}/${webhookSecret}`;
+    // TEMPORAL: Usar IP directa de EC2 hasta configurar DNS
+    const webhookUrl = `http://100.27.201.233:3000/api/telegram/webhook/${botId}/${webhookSecret}`;
     
     try {
       const bot = new TelegramBot(botToken);
