@@ -10,6 +10,16 @@
 - **Tablas aisladas**: `ae_events` y `ae_decisions` (sin RLS, service-to-service)
 - **Rule Engine determinístico**: Sin LLM, solo reglas configurables
 - **Zero impact en AL-Eon**: Routes completamente separadas (`/api/events`, `/api/decide`)
+- **CORS configurado**: Soporta `https://kunna.help` y previews de Netlify
+
+### Nota Importante: Supabase Separadas
+
+⚠️ **KUNNA tiene su propia base de datos Supabase.**  
+⚠️ **AL-E Core NO se conecta a la Supabase de KUNNA.**
+
+- **AL-E Core** → Supabase del Core (tablas `ae_events`, `ae_decisions`)
+- **KUNNA Frontend** → Supabase de KUNNA (usuarios, perfiles, configuración)
+- **Comunicación**: KUNNA → HTTP API → AL-E Core (service-to-service)
 
 ## Base de Datos
 
@@ -83,7 +93,7 @@ Recibe un evento desde KUNNA y lo guarda en `ae_events`.
 **Request:**
 
 ```bash
-curl -X POST https://your-core.com/api/events \
+curl -X POST https://YOUR_CORE_URL/api/events \
   -H "Content-Type: application/json" \
   -H "X-App-Id: kunna" \
   -H "X-Workspace-Id: 123e4567-e89b-12d3-a456-426614174000" \
@@ -141,7 +151,7 @@ Aplica el rule engine determinístico al contexto del usuario y devuelve accione
 **Request:**
 
 ```bash
-curl -X POST https://your-core.com/api/decide \
+curl -X POST https://YOUR_CORE_URL/api/decide \
   -H "Content-Type: application/json" \
   -H "X-App-Id: kunna" \
   -H "X-Workspace-Id: 123e4567-e89b-12d3-a456-426614174000" \
@@ -278,7 +288,7 @@ Evento `sos_manual` O `current_risk_level == "critical"`.
 
 ```bash
 # 1. Enviar primer checkin_failed
-curl -X POST https://core.infinitykode.com/api/events \
+curl -X POST https://YOUR_CORE_URL/api/events \
   -H "Content-Type: application/json" \
   -H "X-App-Id: kunna" \
   -H "X-Workspace-Id: workspace-uuid" \
@@ -291,7 +301,7 @@ curl -X POST https://core.infinitykode.com/api/events \
   }'
 
 # 2. Enviar segundo checkin_failed (dentro de 2 horas)
-curl -X POST https://core.infinitykode.com/api/events \
+curl -X POST https://YOUR_CORE_URL/api/events \
   -H "Content-Type: application/json" \
   -H "X-App-Id: kunna" \
   -H "X-Workspace-Id: workspace-uuid" \
@@ -304,7 +314,7 @@ curl -X POST https://core.infinitykode.com/api/events \
   }'
 
 # 3. Solicitar decisión
-curl -X POST https://core.infinitykode.com/api/decide \
+curl -X POST https://YOUR_CORE_URL/api/decide \
   -H "Content-Type: application/json" \
   -H "X-App-Id: kunna" \
   -H "X-Workspace-Id: workspace-uuid" \
@@ -333,7 +343,7 @@ curl -X POST https://core.infinitykode.com/api/decide \
 ### Escenario 2: Inactividad + Riesgo Elevado
 
 ```bash
-curl -X POST https://core.infinitykode.com/api/decide \
+curl -X POST https://YOUR_CORE_URL/api/decide \
   -H "Content-Type: application/json" \
   -H "X-App-Id: kunna" \
   -H "X-Workspace-Id: workspace-uuid" \
@@ -364,7 +374,7 @@ curl -X POST https://core.infinitykode.com/api/decide \
 
 ```bash
 # 1. Enviar evento sos_manual
-curl -X POST https://core.infinitykode.com/api/events \
+curl -X POST https://YOUR_CORE_URL/api/events \
   -H "Content-Type: application/json" \
   -H "X-App-Id: kunna" \
   -H "X-Workspace-Id: workspace-uuid" \
@@ -380,7 +390,7 @@ curl -X POST https://core.infinitykode.com/api/events \
   }'
 
 # 2. Solicitar decisión con event_id
-curl -X POST https://core.infinitykode.com/api/decide \
+curl -X POST https://YOUR_CORE_URL/api/decide \
   -H "Content-Type: application/json" \
   -H "X-App-Id: kunna" \
   -H "X-Workspace-Id: workspace-uuid" \
@@ -458,14 +468,14 @@ pm2 logs al-e-core --lines 100
 ### Health check
 
 ```bash
-curl https://core.infinitykode.com/health
+curl https://YOUR_CORE_URL/health
 # Esperado: {"status":"ok", "service":"al-e-core", ...}
 ```
 
 ### Test POST /api/events
 
 ```bash
-curl -X POST https://core.infinitykode.com/api/events \
+curl -X POST https://YOUR_CORE_URL/api/events \
   -H "Content-Type: application/json" \
   -H "X-App-Id: kunna" \
   -H "X-Workspace-Id: test-workspace-uuid" \
@@ -481,7 +491,7 @@ curl -X POST https://core.infinitykode.com/api/events \
 ### Test POST /api/decide
 
 ```bash
-curl -X POST https://core.infinitykode.com/api/decide \
+curl -X POST https://YOUR_CORE_URL/api/decide \
   -H "Content-Type: application/json" \
   -H "X-App-Id: kunna" \
   -H "X-Workspace-Id: test-workspace-uuid" \
@@ -520,31 +530,127 @@ curl -X POST https://core.infinitykode.com/api/decide \
 
 ### Error 401: Unauthorized
 
+**Causa**: Token incorrecto o headers faltantes.
+
+**Solución**:
 ```bash
-# Verificar token en .env
+# Verificar token en .env del Core
 grep SERVICE_TOKEN_KUNNA /home/ubuntu/AL-E\ Core/.env
 
 # Verificar headers en curl
-curl -v https://core.infinitykode.com/api/events ...
-# Debe incluir: Authorization: Bearer <token>
+curl -v https://YOUR_CORE_URL/api/events ...
+# Debe incluir:
+# - Authorization: Bearer <token>
+# - X-App-Id: kunna
+# - X-Workspace-Id: <uuid>
+```
+
+### Error 403: Forbidden
+
+**Causa**: CORS bloqueando request desde kunna.help.
+
+**Solución**:
+```bash
+# Verificar en logs del Core:
+pm2 logs al-e-core | grep CORS
+
+# Debe mostrar: [CORS] Origin en lista permitida: https://kunna.help
+
+# Si no está, agregar a .env:
+ALE_ALLOWED_ORIGINS=https://al-eon.com,https://kunna.help,...
+
+# Restart:
+pm2 restart al-e-core
+```
+
+### Error 404: Not Found
+
+**Causa**: Endpoints no registrados o PM2 no reiniciado.
+
+**Solución**:
+```bash
+# Verificar logs de startup:
+pm2 logs al-e-core --lines 100 | grep "eventsRouter"
+
+# Debe mostrar:
+# [DEBUG] eventsRouter (KUNNA multi-app) montado en /api/events
+# [DEBUG] decideRouter (KUNNA rule engine) montado en /api/decide
+
+# Si no aparece:
+cd /home/ubuntu/AL-E\ Core
+git pull origin main
+npm run build
+pm2 restart al-e-core
 ```
 
 ### Error 400: Invalid event_type
 
+**Causa**: Tipo de evento no está en lista permitida.
+
+**Lista válida**:
 ```bash
-# Ver lista permitida:
-# checkin_manual, checkin_auto, checkin_failed, location_update,
-# route_started, route_completed, anomaly_detected, risk_level_changed,
-# sos_manual, sos_auto, safe_confirmation
+checkin_manual, checkin_auto, checkin_failed, location_update,
+route_started, route_completed, anomaly_detected, risk_level_changed,
+sos_manual, sos_auto, safe_confirmation
 ```
 
 ### Error 500: Database error
 
-```bash
-# Verificar migración aplicada:
-psql <SUPABASE_DB_URL> -c "SELECT * FROM ae_events LIMIT 1;"
+**Causa**: Migration 025 no aplicada o Supabase credentials incorrectas.
 
-# Verificar SUPABASE_SERVICE_ROLE_KEY en .env
+**Solución**:
+```bash
+# Verificar migración aplicada en Supabase:
+# Ir a: https://supabase.com/dashboard/project/<PROJECT_ID>/editor
+# Buscar tablas: ae_events, ae_decisions
+
+# Si no existen, aplicar migration:
+# SQL Editor → ejecutar migrations/025_kunna_events_decisions.sql
+
+# Verificar env vars:
+grep SUPABASE_SERVICE_ROLE_KEY /home/ubuntu/AL-E\ Core/.env
+```
+
+---
+
+## CORS Configuration
+
+### Dominios Permitidos
+
+Por defecto, AL-E Core permite:
+- `https://al-eon.com` (AL-Eon production)
+- `https://kunna.help` (KUNNA production)
+- `https://*.netlify.app` (Previews de Netlify - ambas apps)
+- `http://localhost:3000`, `http://localhost:3001` (desarrollo local)
+
+### Configurar CORS
+
+En `.env` del Core:
+```bash
+ALE_ALLOWED_ORIGINS=https://al-eon.com,https://kunna.help,http://localhost:3000
+```
+
+### Verificar CORS en Logs
+
+```bash
+pm2 logs al-e-core | grep CORS
+
+# Output esperado:
+# [CORS] Orígenes permitidos: [ 'https://al-eon.com', 'https://kunna.help', ... ]
+# [CORS] Origin en lista permitida - PERMITIDO: https://kunna.help
+```
+
+### Headers CORS
+
+Los siguientes headers están permitidos:
+- `Content-Type`
+- `Authorization`
+- `X-App-Id`
+- `X-Workspace-Id`
+
+Si necesitas agregar más headers, modificar `src/index.ts`:
+```typescript
+allowedHeaders: ['Content-Type', 'Authorization', 'X-App-Id', 'X-Workspace-Id', 'X-Custom-Header']
 ```
 
 ---

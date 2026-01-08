@@ -50,6 +50,7 @@ const allowedOrigins = process.env.ALE_ALLOWED_ORIGINS
   ? process.env.ALE_ALLOWED_ORIGINS.split(',').map(o => o.trim())
   : [
       'https://al-eon.com',
+      'https://kunna.help',
       'http://localhost:3000', 
       'http://localhost:3001'
     ];
@@ -87,7 +88,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-App-Id', 'X-Workspace-Id']
 };
 
 // Configurar CORS globalmente
@@ -102,7 +103,7 @@ app.use((req, res, next) => {
     if (!origin || allowedOrigins.includes(origin) || (origin && netlifyRegex.test(origin))) {
       res.header('Access-Control-Allow-Origin', origin || '*');
       res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PATCH, DELETE');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-App-Id, X-Workspace-Id');
       res.header('Access-Control-Allow-Credentials', 'true');
       return res.sendStatus(200);
     }
