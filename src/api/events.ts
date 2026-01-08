@@ -83,7 +83,16 @@ router.post('/', validateMultiAppAuth, async (req, res) => {
 
     if (error) {
       console.error('[POST /api/events] Error inserting event:', error);
-      return res.status(500).json({ error: 'Failed to save event' });
+      console.error('[POST /api/events] Error details:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      return res.status(500).json({ 
+        error: 'Failed to save event',
+        details: error.message || 'Unknown error'
+      });
     }
 
     console.log(`[POST /api/events] Event saved: ${data.id} (${event_type} for ${user_id})`);
