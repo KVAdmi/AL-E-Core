@@ -8,10 +8,10 @@ import { Request, Response, NextFunction } from 'express';
 // Service tokens por app/workspace (en producción usar env vars o DB)
 const SERVICE_TOKENS = new Map<string, Set<string>>([
   ['kunna', new Set([
-    process.env.KUNNA_SERVICE_TOKEN || 'kunna-dev-token-12345',
+    process.env.SERVICE_TOKEN_KUNNA || 'kunna-dev-token-12345',
   ])],
   ['aleon', new Set([
-    process.env.ALEON_SERVICE_TOKEN || 'aleon-dev-token-67890',
+    process.env.SERVICE_TOKEN_ALEON || 'aleon-dev-token-67890',
   ])],
 ]);
 
