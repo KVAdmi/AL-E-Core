@@ -253,38 +253,72 @@ router.post('/webhook/:botId/:secret', async (req, res) => {
       const chatId = update.message.chat.id;
       const userId = update.message.from.id;
       const username = update.message.from.username;
+      const firstName = update.message.from.first_name;
+      const lastName = update.message.from.last_name;
       const text = update.message.text;
       const messageId = update.message.message_id;
+      const messageDate = new Date(update.message.date * 1000); // Unix timestamp to Date
       
-      console.log(`[TELEGRAM] Mensaje de @${username} (${chatId}): ${text}`);
+      // Construir nombre del chat
+      const chatName = firstName && lastName 
+        ? `${firstName} ${lastName}` 
+        : firstName || username || `Usuario ${userId}`;
+      
+      console.log(`[TELEGRAM] Mensaje de ${chatName} (@${username}) [${chatId}]: ${text}`);
       
       // Registrar/actualizar chat
-      const { data: existingChat } = await supabase
+      const { data: existingChat, error: chatSelectError } = await supabase
         .from('telegram_chats')
         .select('id')
         .eq('bot_id', botId)
         .eq('chat_id', chatId)
         .maybeSingle();
       
+      if (chatSelectError) {
+        console.error('[TELEGRAM] Error checking existing chat:', chatSelectError);
+      }
+      
       if (existingChat) {
-        await supabase
+        const { error: chatUpdateError } = await supabase
           .from('telegram_chats')
-          .update({ last_seen_at: new Date().toISOString() })
+          .update({ 
+            chat_name: chatName,
+            last_message_text: text,
+            last_message_at: messageDate.toISOString(),
+            last_seen_at: new Date().toISOString() 
+          })
           .eq('id', existingChat.id);
+        
+        if (chatUpdateError) {
+          console.error('[TELEGRAM] Error updating chat:', chatUpdateError);
+        } else {
+          console.log(`[TELEGRAM] ✓ Chat actualizado: ${existingChat.id}`);
+        }
       } else {
-        await supabase
+        const { data: newChat, error: chatInsertError } = await supabase
           .from('telegram_chats')
           .insert({
             owner_user_id: bot.owner_user_id,
             bot_id: botId,
             chat_id: chatId,
             telegram_user_id: userId,
-            telegram_username: username || null
-          });
+            telegram_username: username || null,
+            chat_name: chatName,
+            last_message_text: text,
+            last_message_at: messageDate.toISOString()
+          })
+          .select()
+          .single();
+        
+        if (chatInsertError) {
+          console.error('[TELEGRAM] Error creating chat:', chatInsertError);
+        } else {
+          console.log(`[TELEGRAM] ✓ Chat creado: ${newChat.id}`);
+        }
       }
       
       // Guardar mensaje inbound
-      await supabase
+      const { error: messageError } = await supabase
         .from('telegram_messages')
         .insert({
           owner_user_id: bot.owner_user_id,
@@ -295,6 +329,12 @@ router.post('/webhook/:botId/:secret', async (req, res) => {
           telegram_message_id: messageId,
           status: 'received'
         });
+      
+      if (messageError) {
+        console.error('[TELEGRAM] Error saving message:', messageError);
+      } else {
+        console.log(`[TELEGRAM] ✓ Mensaje guardado: ${messageId}`);
+      }
       
       // TODO: Enviar a orchestrator para procesamiento
       // Por ahora, responder con mensaje simple
@@ -665,6 +705,82 @@ router.post('/bot/settings', requireAuth, async (req, res) => {
         chatId: data.id,
         auto_send_enabled: data.auto_send_enabled
       }
+    });
+    
+  } catch (error: any) {
+    console.error('[TELEGRAM] Error:', error);
+    return res.status(500).json({
+      ok: false,
+      error: 'INTERNAL_ERROR',
+      message: error.message
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// GET /api/telegram/messages - Obtener mensajes de un chat
+// ═══════════════════════════════════════════════════════════════
+
+router.get('/messages', requireAuth, async (req, res) => {
+  try {
+    const ownerUserId = req.userId!; // Garantizado por requireAuth
+    const { chatId } = req.query;
+    
+    if (!chatId) {
+      return res.status(400).json({
+        ok: false,
+        error: 'MISSING_CHAT_ID',
+        message: 'Parámetro requerido: chatId'
+      });
+    }
+    
+    // Primero verificar que el chat pertenezca al usuario
+    const { data: chat, error: chatError } = await supabase
+      .from('telegram_chats')
+      .select('id, bot_id, chat_id')
+      .eq('id', chatId as string)
+      .eq('owner_user_id', ownerUserId)
+      .single();
+    
+    if (chatError || !chat) {
+      return res.status(404).json({
+        ok: false,
+        error: 'CHAT_NOT_FOUND',
+        message: 'Chat no encontrado o no pertenece al usuario'
+      });
+    }
+    
+    // Obtener mensajes del chat (últimos 100)
+    const { data: messages, error: messagesError } = await supabase
+      .from('telegram_messages')
+      .select('id, text, direction, status, telegram_message_id, created_at')
+      .eq('owner_user_id', ownerUserId)
+      .eq('bot_id', chat.bot_id)
+      .eq('chat_id', chat.chat_id)
+      .order('created_at', { ascending: true })
+      .limit(100);
+    
+    if (messagesError) {
+      console.error('[TELEGRAM] Error fetching messages:', messagesError);
+      return res.status(500).json({
+        ok: false,
+        error: 'DB_ERROR',
+        message: messagesError.message
+      });
+    }
+    
+    // Formatear mensajes para el frontend
+    const formattedMessages = (messages || []).map(msg => ({
+      id: msg.id,
+      text: msg.text,
+      sender_type: msg.direction === 'inbound' ? 'user' : 'bot',
+      sent_at: msg.created_at,
+      status: msg.status
+    }));
+    
+    return res.json({
+      ok: true,
+      messages: formattedMessages
     });
     
   } catch (error: any) {
