@@ -68,7 +68,7 @@ const VERIFICATION_PATTERNS = {
 
 const TRANSACTIONAL_PATTERNS = {
   // Email (cualquier acción relacionada con correo)
-  email_action: /\b(correo|email|emails|gmail|mail|mails|inbox|bandeja|mensaje|mensajes|smtp|imap)\b/i,
+  email_action: /\b(correo|correos|email|emails|gmail|mail|mails|inbox|bandeja|mensaje|mensajes|smtp|imap|tengo.*correo|revisa.*correo|checa.*correo|mis correos|nuevo.*correo|último.*correo|ultima.*correo)\b/i,
   
   // Calendar (cualquier acción relacionada con agenda/eventos)
   // Pattern ULTRA FLEXIBLE: captura variaciones naturales del español mexicano
@@ -110,9 +110,11 @@ const STABLE_KNOWLEDGE_PATTERNS = {
  * Solo determina la estrategia de ejecución.
  */
 export function classifyIntent(message: string): IntentClassification {
-  const lowerMsg = message.toLowerCase();
+  // Limpiar mensaje: quitar prefijos de nombre de usuario (ej: "p.garibay: mensaje")
+  const cleanMessage = message.replace(/^[a-z0-9._]+:\s*/i, '').trim();
+  const lowerMsg = cleanMessage.toLowerCase();
   
-  console.log(`[INTENT] 🔍 Analyzing message: "${message.substring(0, 80)}..."`);
+  console.log(`[INTENT] 🔍 Analyzing message: "${cleanMessage.substring(0, 80)}..."`);
   
   let timeSensitiveScore = 0;
   let verificationScore = 0;

@@ -1049,6 +1049,53 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
     console.log(`[CHAT_V2] userId: ${userId}, authenticated: ${!!req.user}`);
     
     // ============================================
+    // 2.5. PROCESAR ATTACHMENTS (DOCUMENTOS)
+    // ============================================
+    
+    const attachmentsRaw = (req.body.attachments ?? req.body.files ?? []) as any[];
+    const safeAttachments = Array.isArray(attachmentsRaw) ? attachmentsRaw : [];
+    
+    console.log(`[CHAT_V2] 📎 Attachments recibidos: ${safeAttachments.length}`);
+    
+    let attachmentsContext = '';
+    
+    if (safeAttachments.length > 0) {
+      try {
+        console.log(`[CHAT_V2] 📄 Procesando ${safeAttachments.length} documento(s)...`);
+        console.log(`[CHAT_V2] Archivos: ${safeAttachments.map((a: any) => a.name).join(', ')}`);
+        
+        // Descargar archivos desde URLs públicas
+        const { downloadAttachments, validateAttachment } = await import('../services/attachmentDownload');
+        const { extractTextFromFiles } = await import('../utils/documentText');
+        
+        const validAttachments = safeAttachments.filter(validateAttachment);
+        
+        if (validAttachments.length > 0) {
+          const downloadedFiles = await downloadAttachments(validAttachments);
+          
+          if (downloadedFiles.length > 0) {
+            const extractedDocs = await extractTextFromFiles(downloadedFiles);
+            
+            if (extractedDocs.length > 0) {
+              const docsBlock = extractedDocs
+                .map((doc, i) => {
+                  const text = (doc.text || '').slice(0, 50000); // Límite 50k chars por doc
+                  return `\n[DOCUMENTO ${i + 1}] ${doc.name} (${doc.type})\n${'-'.repeat(60)}\n${text}\n`;
+                })
+                .join('\n');
+              
+              attachmentsContext = `\n\n=== DOCUMENTOS CARGADOS ===\n${docsBlock}\n=== FIN DOCUMENTOS ===\n`;
+              
+              console.log(`[CHAT_V2] ✅ Procesados ${extractedDocs.length} documento(s), ${attachmentsContext.length} caracteres`);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[CHAT_V2] ❌ Error procesando attachments:', err);
+      }
+    }
+    
+    // ============================================
     // 3. RESOLVER SESSION (crear si no existe)
     // ============================================
     
@@ -1269,9 +1316,13 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
     try {
       orchestratorContext = await Promise.race([orchestrationPromise, timeoutPromise]);
       
-      // Inyectar conocimiento vectorial + anti-mentira en system prompt
-      if (vectorKnowledgeContext || antiLieWarning) {
-        orchestratorContext.systemPrompt += (vectorKnowledgeContext + antiLieWarning);
+      // Inyectar conocimiento vectorial + attachments + anti-mentira en system prompt
+      if (vectorKnowledgeContext || attachmentsContext || antiLieWarning) {
+        orchestratorContext.systemPrompt += (vectorKnowledgeContext + attachmentsContext + antiLieWarning);
+        
+        if (attachmentsContext) {
+          console.log(`[CHAT_V2] 📎 Contexto de documentos agregado al prompt (${attachmentsContext.length} chars)`);
+        }
       }
     } catch (error: any) {
       if (error.message === 'ORCHESTRATION_TIMEOUT') {
@@ -1568,6 +1619,20 @@ Ejemplo malo: "Visita https://... para ver el precio."`
     
     // P0: Log obligatorio de errores con contexto completo
     if (sessionId) {
+      // Sanitizar error stack para evitar referencias circulares
+      const errorMetadata = {
+        error: error.message || 'Unknown error',
+        error_type: error.name || 'UnknownError',
+        intent_detected: orchestratorContext?.intent?.intent_type,
+        tool_expected: orchestratorContext?.toolUsed,
+        tool_executed: false,
+        failure_reason: error.code === 'ETIMEDOUT' ? 'TIMEOUT' : 
+                        error.message?.includes('OAUTH') ? 'OAUTH_ERROR' :
+                        error.message?.includes('provider') ? 'PROVIDER_TIMEOUT' :
+                        'UNKNOWN_ERROR',
+        stack: typeof error.stack === 'string' ? error.stack.substring(0, 1000) : undefined // Truncar stack
+      };
+
       await supabase.from('ae_requests').insert({
         request_id: req.body.request_id || uuidv4(),
         session_id: sessionId,
@@ -1577,18 +1642,7 @@ Ejemplo malo: "Visita https://... para ver el precio."`
         method: 'POST',
         status_code: 500,
         latency_ms,
-        metadata: {
-          error: error.message,
-          error_type: error.name || 'UnknownError',
-          intent_detected: orchestratorContext?.intent?.intent_type,
-          tool_expected: orchestratorContext?.toolUsed,
-          tool_executed: false,
-          failure_reason: error.code === 'ETIMEDOUT' ? 'TIMEOUT' : 
-                          error.message.includes('OAUTH') ? 'OAUTH_ERROR' :
-                          error.message.includes('provider') ? 'PROVIDER_TIMEOUT' :
-                          'UNKNOWN_ERROR',
-          stack: error.stack
-        }
+        metadata: errorMetadata
       });
     }
     

@@ -34,7 +34,17 @@ export function makeTitleFromText(text: string, maxWords: number = 8): string {
  */
 export function safeJson(obj: any): string {
   try {
-    return JSON.stringify(obj);
+    // Usar replacer para manejar referencias circulares
+    const seen = new WeakSet();
+    return JSON.stringify(obj, (key, value) => {
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) {
+          return '[Circular Reference]';
+        }
+        seen.add(value);
+      }
+      return value;
+    });
   } catch (error) {
     console.error('[SAFE-JSON] Error serializando objeto:', error);
     return '{}';
