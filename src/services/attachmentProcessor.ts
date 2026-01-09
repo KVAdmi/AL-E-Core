@@ -4,7 +4,7 @@
  */
 
 import vision from '@google-cloud/vision';
-import pdf from 'pdf-parse';
+import PDFParser from 'pdf-parse';
 import mammoth from 'mammoth';
 import axios from 'axios';
 
@@ -33,7 +33,7 @@ export async function processAttachment(
     
     // PDF
     if (mimeType === 'application/pdf') {
-      const data = await pdf(buffer);
+      const data = await PDFParser(buffer);
       return {
         success: true,
         type: 'pdf',
