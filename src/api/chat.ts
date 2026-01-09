@@ -234,24 +234,45 @@ router.post('/chat', optionalAuth, async (req, res) => {
         }
         
       } else {
-        // MODO LEGACY: Attachments con URLs directas (compatibilidad)
-        console.log(`[ATTACHMENTS] Modo: Legacy URLs (${safeAttachments.length} attachment(s))`);
+        // MODO UNIFICADO: Attachments con URLs directas
+        console.log(`[ATTACHMENTS] Procesando ${safeAttachments.length} attachment(s)...`);
         
-        const processed = await processAttachments(safeAttachments);
+        const { processAttachment } = await import('../services/attachmentProcessor');
         
-        // Log para debug
-        processed.forEach(p => {
-          console.log(`[ATTACHMENTS] - ${p.name} (${p.type}): ${p.error ? 'ERROR' : 'OK'}`);
-        });
+        for (let i = 0; i < safeAttachments.length; i++) {
+          const att = safeAttachments[i];
+          
+          try {
+            const url = att.url || att.signedUrl || '';
+            const mimeType = att.type || att.mimeType || 'application/octet-stream';
+            const name = att.name || `archivo_${i + 1}`;
+            
+            if (!url) {
+              console.warn(`[ATTACHMENTS] Attachment ${i + 1} sin URL, skip`);
+              continue;
+            }
+            
+            console.log(`[ATTACHMENTS] ${i + 1}. ${name} (${mimeType})`);
+            
+            const result = await processAttachment(url, mimeType);
+            
+            if (result.success && result.text) {
+              const excerpt = result.text.length > 30000 ? result.text.substring(0, 30000) + '...' : result.text;
+              attachmentsContext += `\n\n[ARCHIVO: ${name}]\nTipo: ${result.type}\n\n${excerpt}\n`;
+              console.log(`[ATTACHMENTS] ✓ ${name}: ${result.text.length} caracteres`);
+            } else {
+              console.error(`[ATTACHMENTS] ✗ ${name}: ${result.error}`);
+              attachmentsContext += `\n\n[ARCHIVO: ${name}]\nError: No pude leer este archivo\n`;
+            }
+            
+          } catch (error: any) {
+            console.error(`[ATTACHMENTS] Error en attachment ${i + 1}:`, error);
+          }
+        }
         
-        // Extraer texto de documentos
-        attachmentsContext = attachmentsToContext(processed);
-        
-        // Extraer URLs de imágenes para visión multimodal
-        imageUrls = extractImageUrls(processed);
-        
-        if (imageUrls.length > 0) {
-          console.log(`[ATTACHMENTS] ${imageUrls.length} imagen(es) para visión multimodal`);
+        if (attachmentsContext) {
+          attachmentsContext = `\n\n═══ ARCHIVOS ADJUNTOS ═══${attachmentsContext}\n═══ FIN ═══\n`;
+          console.log(`[ATTACHMENTS] ✓ Total: ${attachmentsContext.length} caracteres`);
         }
       }
     }
