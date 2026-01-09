@@ -17,11 +17,21 @@ export interface LiaIntentResult {
 
 export type AssistantMode = string;
 
+export interface AttachmentInfo {
+  name?: string;
+  type?: string;
+  size?: number;
+  url?: string;
+  bucket?: string;
+  path?: string;
+}
+
 export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp?: number;
   meta?: Record<string, any>;
+  attachments?: AttachmentInfo[];
 }
 
 export interface ChatRequest {

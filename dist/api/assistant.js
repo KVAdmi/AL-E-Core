@@ -42,6 +42,7 @@ const assistantService_1 = require("../services/assistantService");
 const intentDetector_1 = require("../integrations/intentDetector");
 const externalData_1 = require("../integrations/externalData");
 const language_1 = require("../utils/language");
+const attachmentDetector_1 = require("../utils/attachmentDetector");
 const supabase_1 = require("../db/supabase");
 const os = __importStar(require("os"));
 const router = express_1.default.Router();
@@ -136,6 +137,17 @@ router.post('/chat', async (req, res) => {
             override: chatRequest.meta?.responseLanguage
         });
         // ============================================
+        // DETECCIÓN DE ATTACHMENTS (CRÍTICO)
+        // ============================================
+        const attachmentDetection = (0, attachmentDetector_1.detectAttachments)(userText, lastUserMessage?.attachments);
+        console.log('[ATTACHMENTS] Detección:', {
+            hasAttachments: attachmentDetection.hasAttachments,
+            count: attachmentDetection.attachmentCount,
+            types: attachmentDetection.attachmentTypes,
+            textualReferences: attachmentDetection.textualReferences,
+            restrictedMode: attachmentDetection.restrictedMode
+        });
+        // ============================================
         // RECUPERAR MEMORIA RELEVANTE (RAG)
         // ============================================
         const relevantMemories = await supabase_1.db.getRelevantMemories(chatRequest.workspaceId || 'default', chatRequest.userId, chatRequest.mode || 'aleon');
@@ -148,6 +160,18 @@ router.post('/chat', async (req, res) => {
             mode: chatRequest.mode || 'aleon',
             messages: chatRequest.messages
         };
+        // INYECTAR MODO RESTRINGIDO SI HAY ATTACHMENTS
+        if (attachmentDetection.restrictedMode) {
+            const restrictionPrompt = (0, attachmentDetector_1.generateAttachmentRestrictionPrompt)();
+            payload.messages = [
+                {
+                    role: 'system',
+                    content: restrictionPrompt
+                },
+                ...payload.messages
+            ];
+            console.log('[ATTACHMENTS] ⚠️ MODO RESTRINGIDO ACTIVADO');
+        }
         // Agregar instrucciones de idioma al contexto si no es inglés por defecto
         if (responseLanguage !== 'en') {
             const languageInstructions = (0, language_1.generateLanguageInstructions)(responseLanguage);

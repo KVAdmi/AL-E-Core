@@ -6,6 +6,7 @@ import { saveMemory } from '../memory/memoryService';
 import { detectExternalDataIntent } from '../integrations/intentDetector';
 import { getExchangeRateUSDToMXN } from '../integrations/externalData';
 import { detectLanguage, determineResponseLanguage, generateLanguageInstructions } from '../utils/language';
+import { detectAttachments, generateAttachmentRestrictionPrompt } from '../utils/attachmentDetector';
 import { ChatRequest, ChatResponse, AssistantMode } from '../types';
 import { db } from '../db/supabase';
 import * as os from 'os';
@@ -117,6 +118,22 @@ router.post('/chat', async (req, res) => {
     });
 
     // ============================================
+    // DETECCIÓN DE ATTACHMENTS (CRÍTICO)
+    // ============================================
+    const attachmentDetection = detectAttachments(
+      userText,
+      lastUserMessage?.attachments
+    );
+
+    console.log('[ATTACHMENTS] Detección:', {
+      hasAttachments: attachmentDetection.hasAttachments,
+      count: attachmentDetection.attachmentCount,
+      types: attachmentDetection.attachmentTypes,
+      textualReferences: attachmentDetection.textualReferences,
+      restrictedMode: attachmentDetection.restrictedMode
+    });
+
+    // ============================================
     // RECUPERAR MEMORIA RELEVANTE (RAG)
     // ============================================
     const relevantMemories = await db.getRelevantMemories(
@@ -134,6 +151,19 @@ router.post('/chat', async (req, res) => {
       mode: chatRequest.mode || 'aleon',
       messages: chatRequest.messages
     };
+
+    // INYECTAR MODO RESTRINGIDO SI HAY ATTACHMENTS
+    if (attachmentDetection.restrictedMode) {
+      const restrictionPrompt = generateAttachmentRestrictionPrompt();
+      payload.messages = [
+        {
+          role: 'system',
+          content: restrictionPrompt
+        },
+        ...payload.messages
+      ];
+      console.log('[ATTACHMENTS] ⚠️ MODO RESTRINGIDO ACTIVADO');
+    }
 
     // Agregar instrucciones de idioma al contexto si no es inglés por defecto
     if (responseLanguage !== 'en') {
