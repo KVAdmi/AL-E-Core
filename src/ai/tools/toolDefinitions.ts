@@ -26,7 +26,7 @@ export const LIST_EMAILS_TOOL: ToolDefinition = {
   type: 'function',
   function: {
     name: 'list_emails',
-    description: 'Lista los correos electrónicos del usuario. Usa esto cuando el usuario pida: "revisa mis correos", "¿tengo emails?", "checa mi inbox", "correos nuevos", "emails no leídos", etc.',
+    description: 'OBLIGATORIO: Lista los correos electrónicos del usuario. USA ESTA HERRAMIENTA SIEMPRE que el usuario: 1) Pregunte por correos ("¿tengo correos?", "revisa mi email", "cuál es el último correo?", "correos nuevos", "emails no leídos"), 2) Mencione email/correo en general, 3) Pregunte por comunicaciones recientes. NUNCA respondas sobre correos sin llamar esta función primero.',
     parameters: {
       type: 'object',
       properties: {
