@@ -333,6 +333,13 @@ export class Orchestrator {
             if (emails && emails.length > 0) {
               params.emailId = emails[0].id;
             }
+          } else if (toolName === 'send_email' || toolName === 'create_and_send_email') {
+            // 🚨 NUNCA ejecutar send_email desde intent classifier
+            // send_email SOLO debe ejecutarse via tool calling nativo de OpenAI
+            console.error('[ORCH] ❌ BLOQUEADO: send_email no puede ejecutarse desde intent classifier');
+            console.error('[ORCH] ❌ Razón: Falta to/subject/body - estos deben venir del LLM tool call');
+            toolResults.push('⚠️ Para enviar correos, por favor proporciona destinatario, asunto y contenido completo.');
+            continue; // Saltar este tool
           }
           
           const result = await executeTool(userId, { name: toolName, parameters: params });
@@ -496,7 +503,50 @@ export class Orchestrator {
       for (const toolCall of response.raw.tool_calls) {
         try {
           const functionName = toolCall.function.name;
-          const functionArgs = JSON.parse(toolCall.function.arguments);
+          
+          // 🔥 LOG CRUDO ANTES DE PARSEAR
+          console.log(`[ORCH] 📋 RAW TOOL CALL:`, JSON.stringify(toolCall, null, 2));
+          console.log(`[ORCH] 📋 RAW ARGUMENTS (before parse):`, toolCall.function.arguments);
+          
+          let functionArgs: any = {};
+          try {
+            functionArgs = JSON.parse(toolCall.function.arguments);
+            console.log(`[ORCH] ✅ PARSED ARGUMENTS:`, JSON.stringify(functionArgs, null, 2));
+          } catch (parseError: any) {
+            console.error(`[ORCH] ❌ ERROR PARSING ARGUMENTS:`, parseError.message);
+            console.error(`[ORCH] ❌ ARGUMENTS STRING:`, toolCall.function.arguments);
+            throw new Error(`Failed to parse tool arguments: ${parseError.message}`);
+          }
+          
+          // 🚨 VALIDACIÓN CRÍTICA PARA send_email
+          if (functionName === 'send_email' || functionName === 'create_and_send_email') {
+            if (!functionArgs.to || !functionArgs.subject || !functionArgs.body) {
+              console.error(`[ORCH] ❌ send_email llamado con argumentos incompletos:`);
+              console.error(`[ORCH]    - to: ${functionArgs.to || 'MISSING'}`);
+              console.error(`[ORCH]    - subject: ${functionArgs.subject || 'MISSING'}`);
+              console.error(`[ORCH]    - body: ${functionArgs.body ? functionArgs.body.substring(0, 50) + '...' : 'MISSING'}`);
+              
+              // NO ejecutar, agregar error al resultado
+              messages.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                name: functionName,
+                content: JSON.stringify({
+                  success: false,
+                  error: 'Faltan parámetros obligatorios: to, subject y body son requeridos'
+                })
+              });
+              
+              toolExecutions.push({
+                tool: functionName,
+                args: functionArgs,
+                result: { success: false, error: 'Missing required parameters' },
+                success: false
+              });
+              
+              continue; // Saltar ejecución
+            }
+          }
           
           console.log(`[ORCH]    - Executing: ${functionName}(${JSON.stringify(functionArgs).substring(0, 100)}...)`);
           
@@ -753,8 +803,8 @@ GUARDRAILS OBLIGATORIOS (HARD RULES)
 
 🚨 REGLA SUPREMA - CAPACIDADES REALES (NO NEGOCIABLE):
 El archivo runtime-capabilities.json define qué capacidades están REALMENTE disponibles:
-- mail.send: false ✗ (AWS SES NO CONFIGURADO)
-- mail.inbox: false ✗
+- mail.send: true ✓ (EMAIL HUB ACTIVO)
+- mail.inbox: true ✓ (EMAIL HUB ACTIVO)
 - calendar.create: true ✓
 - calendar.list: true ✓
 - calendar.update: true ✓
