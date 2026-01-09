@@ -27,6 +27,7 @@ const MAX_MESSAGES_PER_SYNC = 50; // Límite para evitar sobrecarga
  */
 async function syncAccount(account: any): Promise<void> {
   console.log('[SYNC WORKER] 🔄 Sincronizando cuenta:', account.id, '(' + account.from_email + ')');
+  console.log('[SYNC WORKER] 👤 owner_user_id:', account.owner_user_id);
   
   // Crear sync log
   const logId = await syncLogRepo.createSyncLog({
@@ -96,6 +97,7 @@ async function syncAccount(account: any): Promise<void> {
       // Guardar en DB
       for (const msg of imapMessages) {
         try {
+          console.log('[SYNC WORKER] 💾 Guardando mensaje con owner_user_id:', account.owner_user_id);
           const created = await messagesRepo.createEmailMessage({
             account_id: account.id,
             owner_user_id: account.owner_user_id,
