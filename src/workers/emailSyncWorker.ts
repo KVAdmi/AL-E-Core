@@ -55,79 +55,84 @@ async function syncAccount(account: any): Promise<void> {
     let totalNew = 0;
     const errors: string[] = [];
     
-    // Sincronizar solo INBOX por ahora (para evitar sobrecarga)
-    const inboxFolder = folders.find(f => f.imap_path === 'INBOX');
+    // 🔥 SINCRONIZAR TODOS LOS FOLDERS (INBOX, SENT, DRAFTS, SPAM, ETC)
+    console.log(`[SYNC WORKER] 📂 Sincronizando ${folders.length} folders`);
     
-    if (!inboxFolder) {
-      console.log('[SYNC WORKER] ⚠️ Folder INBOX no encontrado');
-      await syncLogRepo.completeSyncLog(logId, {
-        status: 'failed',
-        messages_fetched: 0,
-        messages_new: 0,
-        messages_updated: 0,
-        errors: 'INBOX folder not found'
-      });
-      return;
-    }
+    // Priorizar ciertos folders (INBOX primero, luego Sent, luego otros)
+    const priorityOrder = ['INBOX', '[Gmail]/Sent Mail', 'Sent', '[Gmail]/Spam', 'Spam', '[Gmail]/Drafts', 'Drafts'];
+    const sortedFolders = folders.sort((a, b) => {
+      const aIndex = priorityOrder.indexOf(a.imap_path);
+      const bIndex = priorityOrder.indexOf(b.imap_path);
+      if (aIndex === -1 && bIndex === -1) return 0;
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    });
     
-    try {
-      // Obtener último UID sincronizado
-      const lastUid = await messagesRepo.getLastSyncedUid(account.id, inboxFolder.id);
-      
-      console.log('[SYNC WORKER] 📬 Sincronizando INBOX, último UID:', lastUid);
-      
-      // Sincronizar mensajes
-      const imapMessages = await syncIMAPMessages(
-        {
-          host: account.imap_host,
-          port: account.imap_port,
-          secure: account.imap_secure,
-          user: account.imap_user,
-          pass_enc: account.imap_pass_enc
-        },
-        inboxFolder.imap_path || 'INBOX',
-        lastUid,
-        MAX_MESSAGES_PER_SYNC
-      );
-      
-      console.log('[SYNC WORKER] 📨 Mensajes obtenidos:', imapMessages.length);
-      
-      totalFetched += imapMessages.length;
-      
-      // Guardar en DB
-      for (const msg of imapMessages) {
-        try {
-          console.log('[SYNC WORKER] 💾 Guardando mensaje con owner_user_id:', account.owner_user_id);
-          const created = await messagesRepo.createEmailMessage({
-            account_id: account.id,
-            owner_user_id: account.owner_user_id,
-            folder_id: inboxFolder.id,
-            message_uid: msg.uid.toString(),
-            message_id: msg.messageId,
-            from_address: msg.from.email,
-            from_name: msg.from.name,
-            to_addresses: msg.to.map(t => t.email),
-            cc_addresses: msg.cc?.map(c => c.email),
-            subject: msg.subject,
-            body_text: msg.bodyText,
-            body_html: msg.bodyHtml,
-            body_preview: msg.bodyPreview,
-            has_attachments: msg.hasAttachments,
-            attachment_count: msg.attachments.length,
-            date: msg.date,
-            in_reply_to: msg.inReplyTo,
-            size_bytes: msg.size
-          });
-          
-          if (created) totalNew++;
-        } catch (error: any) {
-          console.error('[SYNC WORKER] ⚠️ Error al guardar mensaje:', error.message);
-          errors.push(`Error saving message ${msg.messageId}: ${error.message}`);
+    // Sincronizar cada folder
+    for (const folder of sortedFolders) {
+      try {
+        console.log(`[SYNC WORKER] 📬 Sincronizando folder: ${folder.imap_path} (${folder.folder_name})`);
+        
+        // Obtener último UID sincronizado para este folder
+        const lastUid = await messagesRepo.getLastSyncedUid(account.id, folder.id);
+        
+        console.log(`[SYNC WORKER] � Último UID en ${folder.imap_path}: ${lastUid}`);
+        
+        // Sincronizar mensajes de este folder
+        const imapMessages = await syncIMAPMessages(
+          {
+            host: account.imap_host,
+            port: account.imap_port,
+            secure: account.imap_secure,
+            user: account.imap_user,
+            pass_enc: account.imap_pass_enc
+          },
+          folder.imap_path,
+          lastUid,
+          MAX_MESSAGES_PER_SYNC
+        );
+        
+        console.log(`[SYNC WORKER] 📨 ${folder.imap_path}: ${imapMessages.length} mensajes`);
+        
+        totalFetched += imapMessages.length;
+        
+        // Guardar en DB
+        for (const msg of imapMessages) {
+          try {
+            const created = await messagesRepo.createEmailMessage({
+              account_id: account.id,
+              owner_user_id: account.owner_user_id,
+              folder_id: folder.id, // ✅ ASIGNAR AL FOLDER CORRECTO
+              message_uid: msg.uid.toString(),
+              message_id: msg.messageId,
+              from_address: msg.from.email,
+              from_name: msg.from.name,
+              to_addresses: msg.to.map(t => t.email),
+              cc_addresses: msg.cc?.map(c => c.email),
+              subject: msg.subject,
+              body_text: msg.bodyText,
+              body_html: msg.bodyHtml,
+              body_preview: msg.bodyPreview,
+              has_attachments: msg.hasAttachments,
+              attachment_count: msg.attachments.length,
+              date: msg.date,
+              in_reply_to: msg.inReplyTo,
+              size_bytes: msg.size
+            });
+            
+            if (created) totalNew++;
+          } catch (error: any) {
+            console.error(`[SYNC WORKER] ⚠️ Error guardando mensaje en ${folder.imap_path}:`, error.message);
+            errors.push(`${folder.imap_path}/${msg.messageId}: ${error.message}`);
+          }
         }
+        
+        console.log(`[SYNC WORKER] ✅ ${folder.imap_path}: ${imapMessages.length} fetched, ${totalNew} nuevos`);
+      } catch (error: any) {
+        console.error(`[SYNC WORKER] ❌ Error sincronizando ${folder.imap_path}:`, error.message);
+        errors.push(`${folder.imap_path}: ${error.message}`);
       }
-    } catch (error: any) {
-      console.error('[SYNC WORKER] ❌ Error al sincronizar INBOX:', error.message);
-      errors.push(`INBOX: ${error.message}`);
     }
     
     // Completar sync log
