@@ -92,6 +92,28 @@ export async function getEmailFolderByPath(
 }
 
 /**
+ * Obtener folder por tipo (Inbox, Sent, Drafts, etc)
+ */
+export async function getEmailFolderByType(
+  accountId: string,
+  folderType: string
+): Promise<EmailFolder | null> {
+  const { data, error } = await supabase
+    .from('email_folders')
+    .select('*')
+    .eq('account_id', accountId)
+    .eq('folder_type', folderType)
+    .maybeSingle();
+  
+  if (error) {
+    console.error('[REPO] ❌ Error al buscar folder por tipo:', error);
+    return null;
+  }
+  
+  return data;
+}
+
+/**
  * Listar folders de una cuenta
  */
 export async function listEmailFolders(

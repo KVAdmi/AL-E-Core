@@ -581,6 +581,43 @@ router.post('/send', requireAuth, async (req, res) => {
     
     console.log('[EMAIL HUB] ✅ Correo enviado:', result.messageId);
     
+    // 🔥 GUARDAR CORREO ENVIADO EN DB CON FOLDER "SENT"
+    try {
+      // Buscar folder "Sent" de esta cuenta
+      const sentFolder = await foldersRepo.getEmailFolderByType(account.id, 'Sent');
+      
+      if (sentFolder) {
+        console.log('[EMAIL HUB] 💾 Guardando correo enviado en folder Sent:', sentFolder.id);
+        
+        // Guardar mensaje enviado
+        await messagesRepo.createEmailMessage({
+          account_id: account.id,
+          owner_user_id: userId,
+          folder_id: sentFolder.id, // ✅ SENT FOLDER
+          message_id: result.messageId || `sent-${Date.now()}`,
+          from_address: account.from_email,
+          from_name: account.from_name,
+          to_addresses: toArray,
+          cc_addresses: ccArray,
+          bcc_addresses: bccArray,
+          subject: sanitizeSubject(subject),
+          body_text: body_text,
+          body_html: body_html,
+          has_attachments: false,
+          attachment_count: 0,
+          date: new Date(),
+          in_reply_to: in_reply_to
+        });
+        
+        console.log('[EMAIL HUB] ✅ Correo guardado en Sent folder');
+      } else {
+        console.warn('[EMAIL HUB] ⚠️ No se encontró folder Sent para guardar el correo');
+      }
+    } catch (saveError: any) {
+      console.error('[EMAIL HUB] ⚠️ Error al guardar correo enviado (no crítico):', saveError.message);
+      // NO fallar el request si esto falla, el correo ya se envió
+    }
+    
     return res.json({
       success: true,
       message_id: result.messageId
