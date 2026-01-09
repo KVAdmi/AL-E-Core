@@ -67,8 +67,9 @@ const VERIFICATION_PATTERNS = {
 // P0: Detectores SIMPLES - El transactionalExecutor maneja los regexes específicos
 
 const TRANSACTIONAL_PATTERNS = {
-  // Email (cualquier acción relacionada con correo)
-  email_action: /\b(correo|correos|email|emails|gmail|mail|mails|inbox|bandeja|mensaje|mensajes|smtp|imap|tengo.*correo|revisa.*correo|checa.*correo|mis correos|nuevo.*correo|último.*correo|ultima.*correo)\b/i,
+  // Email - CUALQUIER acción relacionada con correo
+  // CRÍTICO: Incluye comandos de ENVÍO como "respondele", "contesta", "dile"
+  email_action: /\b(correo|correos|email|emails|gmail|mail|mails|inbox|bandeja|mensaje|mensajes|smtp|imap|tengo.*correo|revisa.*correo|checa.*correo|mis correos|nuevo.*correo|último.*correo|ultima.*correo|responde|respondele|respondele|contesta|contestale|contéstale|dile|dícele|manda|mandal[eo]|envía|envíale|enviar?|enviale|mandar?|send|reply|forward|reenvía|reenvia)\b/i,
   
   // Calendar (cualquier acción relacionada con agenda/eventos)
   // Pattern ULTRA FLEXIBLE: captura variaciones naturales del español mexicano
