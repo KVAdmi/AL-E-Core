@@ -40,7 +40,7 @@ router.post('/resync', async (req, res) => {
     console.log('[FOLDERS API] 🔄 Iniciando resincronización de folders...');
     
     // Obtener todas las cuentas activas
-    const accounts = await accountsRepo.getActiveEmailAccounts();
+    const accounts = await accountsRepo.listActiveEmailAccounts();
     console.log(`[FOLDERS API] 📧 Encontradas ${accounts.length} cuentas activas`);
     
     if (accounts.length === 0) {
