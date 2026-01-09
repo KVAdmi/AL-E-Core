@@ -153,19 +153,32 @@ export class Orchestrator {
     try {
       console.log(`[ORCH] 🔍 Loading memories for userId: ${userId}, workspaceId: ${workspaceId}`);
       
-      // Memorias de usuario (buscar en user_id_uuid o user_id)
+      // Memorias de usuario (buscar en TODAS las columnas de user_id)
       const { data: userMemories, error: userError } = await supabase
         .from('assistant_memories')
-        .select('id, memory, importance, created_at, mode')
+        .select('id, memory, importance, created_at, mode, user_id, user_id_uuid, user_id_old')
         .eq('workspace_id', workspaceId)
-        .or(`user_id_uuid.eq.${userId},user_id.eq.${userId}`)
+        .or(`user_id_uuid.eq.${userId},user_id.eq.${userId},user_id_old.eq.${userId}`) // BUSCAR EN LAS 3
         .gte('importance', 0.1) // BAJADO: para incluir agreements importantes
         .order('importance', { ascending: false })
         .limit(20); // AUMENTADO: para traer más memorias
       
       if (userError) {
-        console.error('[ORCH] ❌ Error loading user memories:', userError);
+        console.error('[ORCH] ❌ Error loading user memories:', JSON.stringify(userError, null, 2));
         console.error('[ORCH] Query params:', { workspace_id: workspaceId, userId });
+        console.error('[ORCH] Query was: SELECT * FROM assistant_memories WHERE workspace_id = ? AND (user_id_uuid = ? OR user_id = ? OR user_id_old = ?) AND importance >= 0.1 ORDER BY importance DESC LIMIT 20');
+        
+        // INTENTAR QUERY SIN FILTROS PARA VER QUÉ HAY
+        console.log('[ORCH] 🔍 Intentando query SIN filtros para debug...');
+        const { data: allMemories, error: allError } = await supabase
+          .from('assistant_memories')
+          .select('*')
+          .limit(5);
+        
+        if (!allError && allMemories) {
+          console.log('[ORCH] 📊 Primeras 5 memorias en la tabla:', JSON.stringify(allMemories, null, 2));
+        }
+        
         return [];
       }
       
@@ -176,7 +189,10 @@ export class Orchestrator {
           id: m.id,
           preview: m.memory.substring(0, 80) + '...',
           importance: m.importance,
-          mode: m.mode
+          mode: m.mode,
+          user_id: m.user_id,
+          user_id_uuid: m.user_id_uuid,
+          user_id_old: m.user_id_old
         })));
       }
       
