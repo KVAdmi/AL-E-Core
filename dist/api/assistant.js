@@ -42,7 +42,7 @@ const assistantService_1 = require("../services/assistantService");
 const intentDetector_1 = require("../integrations/intentDetector");
 const externalData_1 = require("../integrations/externalData");
 const language_1 = require("../utils/language");
-const attachmentDetector_1 = require("../utils/attachmentDetector");
+const attachmentProcessor_1 = require("../utils/attachmentProcessor");
 const supabase_1 = require("../db/supabase");
 const os = __importStar(require("os"));
 const router = express_1.default.Router();
@@ -137,16 +137,21 @@ router.post('/chat', async (req, res) => {
             override: chatRequest.meta?.responseLanguage
         });
         // ============================================
-        // DETECCIÓN DE ATTACHMENTS (CRÍTICO)
+        // PROCESAMIENTO DE ATTACHMENTS (CRÍTICO)
         // ============================================
-        const attachmentDetection = (0, attachmentDetector_1.detectAttachments)(userText, lastUserMessage?.attachments);
-        console.log('[ATTACHMENTS] Detección:', {
-            hasAttachments: attachmentDetection.hasAttachments,
-            count: attachmentDetection.attachmentCount,
-            types: attachmentDetection.attachmentTypes,
-            textualReferences: attachmentDetection.textualReferences,
-            restrictedMode: attachmentDetection.restrictedMode
-        });
+        let attachmentContext = '';
+        if (lastUserMessage?.attachments && lastUserMessage.attachments.length > 0) {
+            console.log(`[ATTACHMENTS] Procesando ${lastUserMessage.attachments.length} archivo(s)...`);
+            try {
+                const processedAttachments = await (0, attachmentProcessor_1.processAttachments)(lastUserMessage.attachments);
+                attachmentContext = (0, attachmentProcessor_1.generateAttachmentContext)(processedAttachments);
+                console.log(`[ATTACHMENTS] ✅ Contexto generado: ${attachmentContext.length} caracteres`);
+            }
+            catch (error) {
+                console.error('[ATTACHMENTS] ❌ Error procesando attachments:', error.message);
+                attachmentContext = `\n[⚠️ Error procesando archivos adjuntos: ${error.message}]\n`;
+            }
+        }
         // ============================================
         // RECUPERAR MEMORIA RELEVANTE (RAG)
         // ============================================
@@ -160,17 +165,16 @@ router.post('/chat', async (req, res) => {
             mode: chatRequest.mode || 'aleon',
             messages: chatRequest.messages
         };
-        // INYECTAR MODO RESTRINGIDO SI HAY ATTACHMENTS
-        if (attachmentDetection.restrictedMode) {
-            const restrictionPrompt = (0, attachmentDetector_1.generateAttachmentRestrictionPrompt)();
+        // INYECTAR CONTENIDO DE ATTACHMENTS PROCESADOS
+        if (attachmentContext) {
             payload.messages = [
                 {
                     role: 'system',
-                    content: restrictionPrompt
+                    content: attachmentContext
                 },
                 ...payload.messages
             ];
-            console.log('[ATTACHMENTS] ⚠️ MODO RESTRINGIDO ACTIVADO');
+            console.log('[ATTACHMENTS] ✅ Contenido inyectado en contexto');
         }
         // Agregar instrucciones de idioma al contexto si no es inglés por defecto
         if (responseLanguage !== 'en') {

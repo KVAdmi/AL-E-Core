@@ -6,7 +6,7 @@ import { saveMemory } from '../memory/memoryService';
 import { detectExternalDataIntent } from '../integrations/intentDetector';
 import { getExchangeRateUSDToMXN } from '../integrations/externalData';
 import { detectLanguage, determineResponseLanguage, generateLanguageInstructions } from '../utils/language';
-import { detectAttachments, generateAttachmentRestrictionPrompt } from '../utils/attachmentDetector';
+import { processAttachments, generateAttachmentContext } from '../utils/attachmentProcessor';
 import { ChatRequest, ChatResponse, AssistantMode } from '../types';
 import { db } from '../db/supabase';
 import * as os from 'os';
@@ -118,20 +118,23 @@ router.post('/chat', async (req, res) => {
     });
 
     // ============================================
-    // DETECCIÓN DE ATTACHMENTS (CRÍTICO)
+    // PROCESAMIENTO DE ATTACHMENTS (CRÍTICO)
     // ============================================
-    const attachmentDetection = detectAttachments(
-      userText,
-      lastUserMessage?.attachments
-    );
-
-    console.log('[ATTACHMENTS] Detección:', {
-      hasAttachments: attachmentDetection.hasAttachments,
-      count: attachmentDetection.attachmentCount,
-      types: attachmentDetection.attachmentTypes,
-      textualReferences: attachmentDetection.textualReferences,
-      restrictedMode: attachmentDetection.restrictedMode
-    });
+    let attachmentContext = '';
+    
+    if (lastUserMessage?.attachments && lastUserMessage.attachments.length > 0) {
+      console.log(`[ATTACHMENTS] Procesando ${lastUserMessage.attachments.length} archivo(s)...`);
+      
+      try {
+        const processedAttachments = await processAttachments(lastUserMessage.attachments);
+        attachmentContext = generateAttachmentContext(processedAttachments);
+        
+        console.log(`[ATTACHMENTS] ✅ Contexto generado: ${attachmentContext.length} caracteres`);
+      } catch (error: any) {
+        console.error('[ATTACHMENTS] ❌ Error procesando attachments:', error.message);
+        attachmentContext = `\n[⚠️ Error procesando archivos adjuntos: ${error.message}]\n`;
+      }
+    }
 
     // ============================================
     // RECUPERAR MEMORIA RELEVANTE (RAG)
@@ -152,17 +155,16 @@ router.post('/chat', async (req, res) => {
       messages: chatRequest.messages
     };
 
-    // INYECTAR MODO RESTRINGIDO SI HAY ATTACHMENTS
-    if (attachmentDetection.restrictedMode) {
-      const restrictionPrompt = generateAttachmentRestrictionPrompt();
+    // INYECTAR CONTENIDO DE ATTACHMENTS PROCESADOS
+    if (attachmentContext) {
       payload.messages = [
         {
           role: 'system',
-          content: restrictionPrompt
+          content: attachmentContext
         },
         ...payload.messages
       ];
-      console.log('[ATTACHMENTS] ⚠️ MODO RESTRINGIDO ACTIVADO');
+      console.log('[ATTACHMENTS] ✅ Contenido inyectado en contexto');
     }
 
     // Agregar instrucciones de idioma al contexto si no es inglés por defecto
