@@ -20,6 +20,7 @@ import { webSearch, formatTavilyResults, shouldUseWebSearch, TavilySearchRespons
 import { classifyIntent, generateFallbackContext, IntentClassification } from '../services/intentClassifier';
 import { selectResponseMode, ResponseMode, ModeClassification } from '../services/modeSelector';
 import crypto from 'crypto';
+import { SEND_EMAIL_TOOL, LIST_EMAILS_TOOL, READ_EMAIL_TOOL, ToolDefinition } from './tools/toolDefinitions';
 
 // ═══════════════════════════════════════════════════════════════
 // COST CONTROL CONSTANTS
@@ -81,6 +82,7 @@ export interface OrchestratorContext {
   toolFailed: boolean;
   toolError?: string;
   tavilyResponse?: TavilySearchResponse;
+  tools?: ToolDefinition[]; // Tools array para Groq function calling
   
   // Model
   modelSelected: string;
@@ -1001,6 +1003,31 @@ AL-E: "No tengo capacidad de acceder a internet..."
     const { modelSelected, modelReason } = this.decideModel(lastUserMessage, chunks, memories);
     console.log(`[ORCH] STEP 6: ✓ Model: ${modelSelected}`);
     
+    // STEP 6.5: Build tools array if email operations detected
+    const tools: ToolDefinition[] = [];
+    const requiresToolCalling = intent.tools_required.some(t => 
+      t === 'send_email' || t === 'list_emails' || t === 'read_email'
+    );
+    
+    if (requiresToolCalling) {
+      console.log('[ORCH] 🔧 Email tools detected - building tools array for Groq');
+      
+      if (intent.tools_required.includes('send_email')) {
+        tools.push(SEND_EMAIL_TOOL);
+        console.log('[ORCH]   - Added SEND_EMAIL_TOOL');
+      }
+      if (intent.tools_required.includes('list_emails')) {
+        tools.push(LIST_EMAILS_TOOL);
+        console.log('[ORCH]   - Added LIST_EMAILS_TOOL');
+      }
+      if (intent.tools_required.includes('read_email')) {
+        tools.push(READ_EMAIL_TOOL);
+        console.log('[ORCH]   - Added READ_EMAIL_TOOL');
+      }
+      
+      console.log(`[ORCH] 🔧 Total tools prepared: ${tools.length}`);
+    }
+    
     // STEP 7: Build system prompt (incluye tool result si existe)
     console.log('[ORCH] STEP 7: Building system prompt...');
     const systemPrompt = this.buildSystemPrompt(userIdentity, memories, chunks, basePrompt, toolResult, modeClassification);
@@ -1055,6 +1082,7 @@ AL-E: "No tengo capacidad de acceder a internet..."
       toolFailed,
       toolError,
       tavilyResponse,
+      tools: tools.length > 0 ? tools : undefined, // Pasar tools si hay
       modelSelected,
       modelReason,
       systemPrompt,

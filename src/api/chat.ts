@@ -579,12 +579,13 @@ router.post('/chat', optionalAuth, async (req, res) => {
       const lastUserMessage = [...finalMessages].reverse().find((m: any) => m.role === 'user');
       const userQuery = lastUserMessage?.content || '';
       
-      // 🔥 HOT FIX: SIEMPRE pasar TODAS las herramientas
-      // El LLM decide cuándo usarlas, NO el orchestrator
+      // 🔥 DECISIÓN DE TOOLS: Usar los del orchestrator SI los preparó, sino ALL_TOOLS
       const { ALL_TOOLS } = await import('../ai/tools/toolDefinitions');
-      const toolsAvailable = ALL_TOOLS;
+      const toolsAvailable = orchestratorContext.tools && orchestratorContext.tools.length > 0
+        ? orchestratorContext.tools  // Usar tools específicos del orchestrator
+        : ALL_TOOLS;  // Fallback a todos los tools
       
-      console.log(`[CHAT] 🔧 HOT FIX: Passing ALL ${toolsAvailable.length} tools to LLM (LLM decides when to use them)`);
+      console.log(`[CHAT] 🔧 Passing ${toolsAvailable.length} tools to LLM ${orchestratorContext.tools ? '(from orchestrator)' : '(ALL_TOOLS)'}`);
       
       // ============================================
       // C4) LLAMAR AL TOOL LOOP (CON FUNCTION CALLING)

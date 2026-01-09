@@ -258,7 +258,15 @@ export function classifyIntent(message: string): IntentClassification {
     
     // Determinar herramientas específicas
     if (TRANSACTIONAL_PATTERNS.email_action.test(lowerMsg)) {
-      tools_required.push('email');
+      // Detectar tipo específico de acción de email
+      if (/\b(envía|envíale|enviale|manda|mandale|mandále|send|responde|respondele|contesta|contestale|dile|dícele)\b/i.test(lowerMsg)) {
+        tools_required.push('send_email');
+      } else if (/\b(lee|leeme|léeme|read|abre|ábrelo|muestra|muestrame|muéstrame)\b/i.test(lowerMsg)) {
+        tools_required.push('read_email');
+      } else {
+        // Default: listar correos
+        tools_required.push('list_emails');
+      }
     }
     if (TRANSACTIONAL_PATTERNS.calendar_action.test(lowerMsg)) {
       tools_required.push('calendar');
