@@ -156,19 +156,29 @@ export class Orchestrator {
       // Memorias de usuario (buscar en user_id_uuid o user_id)
       const { data: userMemories, error: userError } = await supabase
         .from('assistant_memories')
-        .select('id, memory, importance, created_at')
+        .select('id, memory, importance, created_at, mode')
         .eq('workspace_id', workspaceId)
         .or(`user_id_uuid.eq.${userId},user_id.eq.${userId}`)
-        .gte('importance', 0.3) // Threshold más bajo para incluir más memorias
+        .gte('importance', 0.1) // BAJADO: para incluir agreements importantes
         .order('importance', { ascending: false })
-        .limit(10);
+        .limit(20); // AUMENTADO: para traer más memorias
       
       if (userError) {
         console.error('[ORCH] ❌ Error loading user memories:', userError);
+        console.error('[ORCH] Query params:', { workspace_id: workspaceId, userId });
         return [];
       }
       
       console.log(`[ORCH] ✅ Loaded ${userMemories?.length || 0} memories from assistant_memories table`);
+      
+      if (userMemories && userMemories.length > 0) {
+        console.log('[ORCH] 📝 Sample memories:', userMemories.slice(0, 2).map(m => ({
+          id: m.id,
+          preview: m.memory.substring(0, 80) + '...',
+          importance: m.importance,
+          mode: m.mode
+        })));
+      }
       
       // Mapear al formato esperado (memory → content)
       const mappedMemories = (userMemories || []).map(m => ({
@@ -176,7 +186,8 @@ export class Orchestrator {
         content: m.memory, // La columna se llama 'memory' no 'content'
         memory_type: 'user',
         importance: m.importance,
-        created_at: m.created_at
+        created_at: m.created_at,
+        mode: m.mode
       }));
       
       return mappedMemories;
