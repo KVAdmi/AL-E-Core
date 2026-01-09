@@ -32,7 +32,7 @@ export async function processAttachment(
     
     // PDF
     if (mimeType === 'application/pdf') {
-      const pdfParse = await import('pdf-parse');
+      const pdfParse = require('pdf-parse');
       const data = await pdfParse(buffer);
       return {
         success: true,
