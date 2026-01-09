@@ -184,7 +184,9 @@ export async function getEmailFolderById(
 }
 
 /**
- * Sincronizar folders desde IMAP
+ * Sincronizar folders desde IMAP (UPSERT)
+ * 
+ * Actualiza folders existentes o crea nuevos
  */
 export async function syncFoldersFromIMAP(
   accountId: string,
@@ -228,17 +230,52 @@ export async function syncFoldersFromIMAP(
     }
     
     try {
-      const folder = await createEmailFolder({
-        account_id: accountId,
-        owner_user_id: userId,
-        folder_name: imapFolder.path,
-        folder_type: folderType,
-        imap_path: imapFolder.path,
-        icon,
-        sort_order: sortOrder
-      });
+      // 🔥 UPSERT: Buscar folder existente por folder_type (más confiable que por nombre)
+      const { data: existingFolder } = await supabase
+        .from('email_folders')
+        .select('*')
+        .eq('account_id', accountId)
+        .eq('folder_type', folderType)
+        .single();
       
-      syncedFolders.push(folder);
+      if (existingFolder) {
+        // Actualizar folder existente con la ruta IMAP correcta
+        console.log(`[REPO] 🔄 Actualizando folder ${folderType}: ${existingFolder.imap_path} → ${imapFolder.path}`);
+        
+        const { data: updated, error: updateError } = await supabase
+          .from('email_folders')
+          .update({
+            folder_name: imapFolder.path,
+            imap_path: imapFolder.path,
+            icon,
+            sort_order: sortOrder,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingFolder.id)
+          .select()
+          .single();
+        
+        if (updateError) {
+          console.error('[REPO] ❌ Error actualizando folder:', updateError);
+        } else if (updated) {
+          syncedFolders.push(updated);
+        }
+      } else {
+        // Crear nuevo folder
+        console.log(`[REPO] ➕ Creando nuevo folder ${folderType}: ${imapFolder.path}`);
+        
+        const folder = await createEmailFolder({
+          account_id: accountId,
+          owner_user_id: userId,
+          folder_name: imapFolder.path,
+          folder_type: folderType,
+          imap_path: imapFolder.path,
+          icon,
+          sort_order: sortOrder
+        });
+        
+        syncedFolders.push(folder);
+      }
     } catch (error) {
       console.error('[REPO] ⚠️ Error al sincronizar folder:', imapFolder.path, error);
     }
