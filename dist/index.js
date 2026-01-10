@@ -20,6 +20,7 @@ const systemMail_1 = __importDefault(require("./api/systemMail")); // System mai
 const mail_webhook_1 = __importDefault(require("./api/mail-webhook")); // AWS SES webhook
 const mail_inbound_1 = __importDefault(require("./api/mail-inbound")); // Mail inbound (SES→S3→Lambda→Core)
 const emailHub_1 = __importDefault(require("./api/emailHub")); // Email Hub Universal (IMAP/SMTP cualquier proveedor)
+const emailFolders_1 = __importDefault(require("./api/emailFolders")); // Email Folders (resync folders desde IMAP)
 const aiEmail_1 = __importDefault(require("./api/aiEmail")); // AI Email (análisis, clasificación, draft-reply, auto-reply)
 const contacts_1 = __importDefault(require("./api/contacts")); // Contacts API
 const knowledge_1 = __importDefault(require("./api/knowledge")); // Knowledge Core (RAG)
@@ -204,6 +205,7 @@ app.use("/api/mail", mail_webhook_1.default); // AWS SES webhook (same prefix)
 app.use("/api/mail", mail_inbound_1.default); // Mail inbound (SES+S3)
 app.use("/api/email", mail_1.default); // Mail send/inbox TAMBIÉN en /api/email (para compatibilidad frontend)
 app.use("/api/email", emailHub_1.default); // Email Hub Universal (IMAP/SMTP cualquier proveedor)
+app.use("/api/email/folders", emailFolders_1.default); // Email Folders (resync desde IMAP - universal)
 app.use("/api/mail", emailHub_1.default); // Email Hub Universal TAMBIÉN en /api/mail (compatibilidad frontend)
 app.use("/api/ai", aiEmail_1.default); // AI Email endpoints (analyze-email, draft-reply, send-auto-reply)
 app.use("/api/mail", aiEmail_1.default); // AI Email endpoints TAMBIÉN en /api/mail (compatibilidad)

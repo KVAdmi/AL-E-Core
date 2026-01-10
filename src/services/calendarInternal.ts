@@ -316,6 +316,37 @@ export async function executeCalendarAction(
     console.log(`[CALENDAR_INTERNAL] ✅ Event created with ID: ${newEvent.id}`);
     console.log(`[CALENDAR_INTERNAL] ✅ Event data:`, JSON.stringify(newEvent));
     
+    // 🔔 P0 CRÍTICO: Crear notification_job (1 hora antes por defecto)
+    const notificationMinutes = 60; // 1 hora antes
+    const runAt = new Date(eventInfo.startDate.getTime() - notificationMinutes * 60 * 1000);
+    
+    console.log('[CALENDAR_INTERNAL] 🔔 Creating notification_job...');
+    const { data: notificationJob, error: notificationError } = await supabase
+      .from('notification_jobs')
+      .insert({
+        owner_user_id: userId,
+        type: 'event_reminder',
+        channel: 'telegram',
+        run_at: runAt.toISOString(),
+        status: 'pending',
+        payload: {
+          eventId: newEvent.id,
+          title: newEvent.title,
+          start_at: newEvent.start_at,
+          location: newEvent.location || ''
+        }
+      })
+      .select()
+      .single();
+    
+    if (notificationError) {
+      console.error('[CALENDAR_INTERNAL] ⚠️ Notification job failed (non-fatal):', notificationError);
+      // NO fallar la transacción completa por esto
+    } else {
+      console.log(`[CALENDAR_INTERNAL] ✅ Notification job created with ID: ${notificationJob.id}`);
+      console.log(`[CALENDAR_INTERNAL] ✅ Will notify at: ${runAt.toISOString()}`);
+    }
+    
     const formattedDate = eventInfo.startDate.toLocaleString('es-MX', {
       timeZone: 'America/Mexico_City',
       weekday: 'long',
@@ -336,9 +367,10 @@ export async function executeCalendarAction(
         title: newEvent.title,
         startAt: newEvent.start_at,
         endAt: newEvent.end_at,
-        timezone: newEvent.timezone
+        timezone: newEvent.timezone,
+        notificationJobId: notificationJob?.id || null
       },
-      userMessage: `Listo. Agendé "${eventInfo.title}" el ${formattedDate}.`
+      userMessage: `Listo. Agendé "${eventInfo.title}" el ${formattedDate}. Te notificaré 1 hora antes.`
     };
     
   } catch (error: any) {

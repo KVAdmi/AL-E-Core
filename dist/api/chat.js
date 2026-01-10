@@ -41,7 +41,6 @@ const uuid_1 = require("uuid");
 const supabase_1 = require("../db/supabase");
 const env_1 = require("../config/env");
 const helpers_1 = require("../utils/helpers");
-const attachments_1 = require("../utils/attachments");
 const chunkRetrieval_1 = require("../services/chunkRetrieval");
 const auth_1 = require("../middleware/auth");
 const attachmentDownload_1 = require("../services/attachmentDownload");
@@ -223,19 +222,38 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                 }
             }
             else {
-                // MODO LEGACY: Attachments con URLs directas (compatibilidad)
-                console.log(`[ATTACHMENTS] Modo: Legacy URLs (${safeAttachments.length} attachment(s))`);
-                const processed = await (0, attachments_1.processAttachments)(safeAttachments);
-                // Log para debug
-                processed.forEach(p => {
-                    console.log(`[ATTACHMENTS] - ${p.name} (${p.type}): ${p.error ? 'ERROR' : 'OK'}`);
-                });
-                // Extraer texto de documentos
-                attachmentsContext = (0, attachments_1.attachmentsToContext)(processed);
-                // Extraer URLs de imágenes para visión multimodal
-                imageUrls = (0, attachments_1.extractImageUrls)(processed);
-                if (imageUrls.length > 0) {
-                    console.log(`[ATTACHMENTS] ${imageUrls.length} imagen(es) para visión multimodal`);
+                // MODO UNIFICADO: Attachments con URLs directas
+                console.log(`[ATTACHMENTS] Procesando ${safeAttachments.length} attachment(s)...`);
+                const { processAttachment } = await Promise.resolve().then(() => __importStar(require('../services/attachmentProcessor')));
+                for (let i = 0; i < safeAttachments.length; i++) {
+                    const att = safeAttachments[i];
+                    try {
+                        const url = att.url || att.signedUrl || '';
+                        const mimeType = att.type || att.mimeType || 'application/octet-stream';
+                        const name = att.name || `archivo_${i + 1}`;
+                        if (!url) {
+                            console.warn(`[ATTACHMENTS] Attachment ${i + 1} sin URL, skip`);
+                            continue;
+                        }
+                        console.log(`[ATTACHMENTS] ${i + 1}. ${name} (${mimeType})`);
+                        const result = await processAttachment(url, mimeType);
+                        if (result.success && result.text) {
+                            const excerpt = result.text.length > 30000 ? result.text.substring(0, 30000) + '...' : result.text;
+                            attachmentsContext += `\n\n[ARCHIVO: ${name}]\nTipo: ${result.type}\n\n${excerpt}\n`;
+                            console.log(`[ATTACHMENTS] ✓ ${name}: ${result.text.length} caracteres`);
+                        }
+                        else {
+                            console.error(`[ATTACHMENTS] ✗ ${name}: ${result.error}`);
+                            attachmentsContext += `\n\n[ARCHIVO: ${name}]\nError: No pude leer este archivo\n`;
+                        }
+                    }
+                    catch (error) {
+                        console.error(`[ATTACHMENTS] Error en attachment ${i + 1}:`, error);
+                    }
+                }
+                if (attachmentsContext) {
+                    attachmentsContext = `\n\n═══ ARCHIVOS ADJUNTOS ═══${attachmentsContext}\n═══ FIN ═══\n`;
+                    console.log(`[ATTACHMENTS] ✓ Total: ${attachmentsContext.length} caracteres`);
                 }
             }
         }
@@ -521,11 +539,12 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
             // Extraer último mensaje de usuario
             const lastUserMessage = [...finalMessages].reverse().find((m) => m.role === 'user');
             const userQuery = lastUserMessage?.content || '';
-            // 🔥 HOT FIX: SIEMPRE pasar TODAS las herramientas
-            // El LLM decide cuándo usarlas, NO el orchestrator
+            // 🔥 DECISIÓN DE TOOLS: Usar los del orchestrator SI los preparó, sino ALL_TOOLS
             const { ALL_TOOLS } = await Promise.resolve().then(() => __importStar(require('../ai/tools/toolDefinitions')));
-            const toolsAvailable = ALL_TOOLS;
-            console.log(`[CHAT] 🔧 HOT FIX: Passing ALL ${toolsAvailable.length} tools to LLM (LLM decides when to use them)`);
+            const toolsAvailable = orchestratorContext.tools && orchestratorContext.tools.length > 0
+                ? orchestratorContext.tools // Usar tools específicos del orchestrator
+                : ALL_TOOLS; // Fallback a todos los tools
+            console.log(`[CHAT] 🔧 Passing ${toolsAvailable.length} tools to LLM ${orchestratorContext.tools ? '(from orchestrator)' : '(ALL_TOOLS)'}`);
             // ============================================
             // C4) LLAMAR AL TOOL LOOP (CON FUNCTION CALLING)
             // ============================================
