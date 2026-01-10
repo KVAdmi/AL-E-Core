@@ -1020,8 +1020,33 @@ AL-E: "No tengo capacidad de acceder a internet..."
     
     // STEP 5: Tool decision & execution (intent-driven + MODE-aware)
     console.log('[ORCH] STEP 5: Tool execution...');
-    const { toolUsed, toolReason, toolResult, toolFailed, toolError, tavilyResponse } = 
-      await this.decideAndExecuteTool(lastUserMessage, intent, userId, modeClassification);
+    
+    // 🔥 P0 FIX: NO ejecutar tools aquí - dejar que el LLM los ejecute via function calling
+    // SOLO ejecutar si NO requiere tool calling (web_search legacy, etc)
+    const requiresToolCalling = intent.tools_required.some(t => 
+      t === 'send_email' || t === 'list_emails' || t === 'read_email'
+    );
+    
+    let toolUsed = 'none';
+    let toolReason: string | undefined;
+    let toolResult: string | undefined;
+    let toolFailed = false;
+    let toolError: string | undefined;
+    let tavilyResponse: any;
+    
+    if (!requiresToolCalling) {
+      // Legacy: ejecutar tools que no son function calling (web_search, etc)
+      const toolExecutionResult = await this.decideAndExecuteTool(lastUserMessage, intent, userId, modeClassification);
+      toolUsed = toolExecutionResult.toolUsed;
+      toolReason = toolExecutionResult.toolReason;
+      toolResult = toolExecutionResult.toolResult;
+      toolFailed = toolExecutionResult.toolFailed;
+      toolError = toolExecutionResult.toolError;
+      tavilyResponse = toolExecutionResult.tavilyResponse;
+    } else {
+      console.log('[ORCH] ⚡ Email tools detected - will use function calling (not pre-execution)');
+    }
+    
     console.log(`[ORCH] STEP 5: ✓ Tool: ${toolUsed}, failed: ${toolFailed}`);
     
     // STEP 6: Model decision (ahora Groq by default)
@@ -1031,27 +1056,22 @@ AL-E: "No tengo capacidad de acceder a internet..."
     
     // STEP 6.5: Build tools array if email operations detected
     const tools: ToolDefinition[] = [];
-    const requiresToolCalling = intent.tools_required.some(t => 
-      t === 'send_email' || t === 'list_emails' || t === 'read_email'
-    );
     
     if (requiresToolCalling) {
       console.log('[ORCH] 🔧 Email tools detected - building tools array for Groq');
       
-      if (intent.tools_required.includes('send_email')) {
-        tools.push(SEND_EMAIL_TOOL);
-        console.log('[ORCH]   - Added SEND_EMAIL_TOOL');
-      }
-      if (intent.tools_required.includes('list_emails')) {
-        tools.push(LIST_EMAILS_TOOL);
-        console.log('[ORCH]   - Added LIST_EMAILS_TOOL');
-      }
-      if (intent.tools_required.includes('read_email')) {
-        tools.push(READ_EMAIL_TOOL);
-        console.log('[ORCH]   - Added READ_EMAIL_TOOL');
-      }
+      // 🔥 P0 FIX: SIEMPRE incluir los 3 tools básicos de email
+      // El LLM decide cuál usar según el contexto
+      tools.push(LIST_EMAILS_TOOL);
+      tools.push(READ_EMAIL_TOOL);
+      tools.push(SEND_EMAIL_TOOL);
       
+      console.log('[ORCH]   - Added LIST_EMAILS_TOOL');
+      console.log('[ORCH]   - Added READ_EMAIL_TOOL');
+      console.log('[ORCH]   - Added SEND_EMAIL_TOOL');
       console.log(`[ORCH] 🔧 Total tools prepared: ${tools.length}`);
+    } else {
+      console.log('[ORCH] ℹ️ No email tools required for this request');
     }
     
     // STEP 7: Build system prompt (incluye tool result si existe)
