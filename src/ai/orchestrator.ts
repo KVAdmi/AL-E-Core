@@ -468,6 +468,10 @@ export class Orchestrator {
     while (iteration < maxIterations) {
       iteration++;
       console.log(`[ORCH] 🔄 Tool loop iteration ${iteration}/${maxIterations}`);
+      console.log(`[ORCH] 🔧 Tools array length: ${tools.length}`);
+      if (tools.length > 0) {
+        console.log(`[ORCH] 🔧 Tools: ${tools.map((t: any) => t.function?.name || 'unknown').join(', ')}`);
+      }
       
       // Llamar al LLM con tools
       const { callGroqChat } = await import('./providers/groqProvider');
