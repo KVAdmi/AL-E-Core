@@ -10,7 +10,7 @@
 
 import { IntentClassification } from './intentClassifier';
 import { executeCalendarAction } from './calendarInternal';
-import { executeMailAction } from './mailInternal';
+import { listEmails } from '../ai/tools/emailTools';
 import { webSearch, formatTavilyResults } from './tavilySearch';
 
 // ═══════════════════════════════════════════════════════════════
@@ -97,7 +97,7 @@ export async function executeAction(
   // MAIL ACTIONS
   // ═══════════════════════════════════════════════════════════════
   
-  if (intent.tools_required.includes('mail_inbox') || intent.tools_required.includes('email')) {
+  if (intent.tools_required.includes('mail_inbox') || intent.tools_required.includes('email') || intent.tools_required.includes('list_emails')) {
     
     if (!CAPABILITIES['mail.inbox']) {
       return {
@@ -109,10 +109,57 @@ export async function executeAction(
       };
     }
     
-    console.log('[ACTION_GATEWAY] 🔥 FORCING mail.inbox execution...');
+    console.log('[ACTION_GATEWAY] 🔥 FORCING list_emails execution...');
     
-    // Ejecutar acción de mail
-    return await executeMailAction(userMessage, ctx.userId);
+    try {
+      // Ejecutar list_emails real
+      const emails = await listEmails(ctx.userId, {
+        folderType: 'inbox',
+        limit: 5
+      });
+      
+      if (!emails || emails.length === 0) {
+        return {
+          success: true,
+          action: 'mail.inbox',
+          evidence: {
+            count: 0,
+            emails: []
+          },
+          userMessage: 'No tienes correos nuevos en tu bandeja de entrada.'
+        };
+      }
+      
+      // Formatear evidencia
+      const formattedEmails = emails.map(e => ({
+        from: e.from_name || e.from_address,
+        subject: e.subject,
+        date: e.date,
+        preview: e.body_preview || e.body_text?.substring(0, 100)
+      }));
+      
+      return {
+        success: true,
+        action: 'mail.inbox',
+        evidence: {
+          count: emails.length,
+          emails: formattedEmails
+        },
+        userMessage: `Tienes ${emails.length} correos en tu bandeja:\n\n${
+          emails.map((e, i) => `${i+1}. De: ${e.from_name || e.from_address}\n   Asunto: ${e.subject}\n   Fecha: ${e.date}`).join('\n\n')
+        }`
+      };
+      
+    } catch (error: any) {
+      console.error('[ACTION_GATEWAY] Mail error:', error);
+      return {
+        success: false,
+        action: 'mail.inbox',
+        evidence: null,
+        userMessage: 'Hubo un error al revisar tus correos.',
+        reason: error.message
+      };
+    }
   }
   
   // ═══════════════════════════════════════════════════════════════
