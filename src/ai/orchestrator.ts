@@ -401,17 +401,38 @@ export class Orchestrator {
       console.log('[ORCH] Evidence:', JSON.stringify(actionResult.evidence));
     }
     
-    // MODE C: Validate evidence requirement
-    if (modeClassification.evidenceRequired && !actionResult.evidence) {
+    // 🔥 P0 CRÍTICO: VALIDACIÓN ESTRICTA DE EVIDENCIA
+    // Tools que SIEMPRE requieren evidencia (no negociable)
+    const TOOLS_REQUIRE_EVIDENCE = [
+      'send_email',
+      'create_calendar_event',
+      'calendar',
+      'telegram_notify',
+      'web_search' // Si se ejecuta, debe haber resultados reales
+    ];
+    
+    const requiresEvidence = 
+      modeClassification.evidenceRequired || 
+      TOOLS_REQUIRE_EVIDENCE.includes(actionResult.action);
+    
+    if (requiresEvidence && !actionResult.evidence) {
       const { getNoEvidenceError } = await import('../services/modeSelector');
       const errorMsg = getNoEvidenceError(modeClassification.mode);
-      console.log(`[ORCH] ⚠️ MODE C: Evidence required but not provided - ${errorMsg}`);
+      
+      // 🚨 LOG CRÍTICO: Esto es una violación P0
+      console.error(`[ORCH] 🚨 P0 VIOLATION: Tool "${actionResult.action}" ejecutado SIN evidencia`);
+      console.error(`[ORCH] 🚨 Reason: ${actionResult.reason || 'unknown'}`);
+      console.error(`[ORCH] 🚨 Mode: ${modeClassification.mode}, Evidence required: ${modeClassification.evidenceRequired}`);
+      
+      // Mensaje técnico explícito para el usuario
+      const technicalError = `No pude completar la acción "${actionResult.action}". Motivo técnico: ${actionResult.reason || 'sin evidencia verificable'}`;
+      
       return {
         toolUsed: actionResult.action,
         toolReason: errorMsg,
-        toolResult: errorMsg,
+        toolResult: technicalError, // Mensaje técnico para el LLM
         toolFailed: true,
-        toolError: errorMsg
+        toolError: technicalError
       };
     }
     

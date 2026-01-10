@@ -183,6 +183,15 @@ export function classifyIntent(message: string): IntentClassification {
     reasoning.push('🔴 Datos en tiempo real detectados (tipo cambio/clima/precios) → Web search requerido');
   }
   
+  // 🔥 P0 CRÍTICO: Detección de URLs → FETCH WEB OBLIGATORIO
+  const urlPattern = /https?:\/\/[^\s]+/i;
+  const hasUrl = urlPattern.test(cleanMessage);
+  if (hasUrl) {
+    verificationScore += 10; // MÁXIMA PRIORIDAD - URL proporcionada
+    reasoning.push('🔴 URL detectada → Fetch web OBLIGATORIO (NO responder sin contenido real)');
+    console.log('[INTENT] 🚨 URL DETECTED - Web fetch REQUIRED');
+  }
+  
   // ═══════════════════════════════════════════════════════════════
   // SCORE: Transactional (Email/Calendar/Telegram)
   // ═══════════════════════════════════════════════════════════════

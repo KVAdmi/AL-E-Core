@@ -26,10 +26,16 @@ export const LIST_EMAILS_TOOL: ToolDefinition = {
   type: 'function',
   function: {
     name: 'list_emails',
-    description: 'OBLIGATORIO: Lista los correos electrónicos del usuario. USA ESTA HERRAMIENTA SIEMPRE que el usuario: 1) Pregunte por correos ("¿tengo correos?", "revisa mi email", "cuál es el último correo?", "correos nuevos", "emails no leídos"), 2) Mencione email/correo en general, 3) Pregunte por comunicaciones recientes. NUNCA respondas sobre correos sin llamar esta función primero.',
+    description: '🔥 OBLIGATORIO: Lista los correos electrónicos del usuario. Por defecto lee INBOX (entrantes). USA ESTA HERRAMIENTA SIEMPRE que el usuario: 1) Pregunte por correos ("¿tengo correos?", "revisa mi email", "cuál es el último correo?", "correos nuevos", "emails no leídos"), 2) Mencione email/correo en general, 3) Pregunte por comunicaciones recientes. NUNCA respondas sobre correos sin llamar esta función primero. 🚨 REGLA CRÍTICA: "último correo" = INBOX (entrantes), NO SENT (enviados). Solo usar folderType="sent" si el usuario EXPLÍCITAMENTE dice "correos enviados" o "que mandé".',
     parameters: {
       type: 'object',
       properties: {
+        folderType: {
+          type: 'string',
+          enum: ['inbox', 'sent', 'drafts', 'trash', 'archive'],
+          description: '🔥 Tipo de carpeta. DEFAULT: "inbox" (entrantes). Solo usar "sent" si el usuario dice EXPLÍCITAMENTE "enviados" o "que mandé". REGLA: "último correo" o "mis correos" = SIEMPRE inbox.',
+          default: 'inbox'
+        },
         unreadOnly: {
           type: 'boolean',
           description: 'Si true, solo muestra correos no leídos. Usar cuando el usuario diga "no leídos" o "sin leer".'

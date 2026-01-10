@@ -57,6 +57,9 @@ export interface DraftEmail {
 
 /**
  * Listar correos del usuario
+ * 
+ * 🔥 P0 FIX: Por defecto lee INBOX (entrantes), NO SENT (enviados)
+ * Solo leer SENT si se solicita explícitamente con folderType: 'sent'
  */
 export async function listEmails(
   userId: string,
@@ -64,10 +67,15 @@ export async function listEmails(
     accountEmail?: string;
     unreadOnly?: boolean;
     limit?: number;
+    folderType?: 'inbox' | 'sent' | 'drafts' | 'trash' | 'archive'; // 🔥 NUEVO
   }
 ): Promise<EmailMessage[]> {
   try {
     console.log('[EMAIL TOOLS] Listando correos para usuario:', userId);
+    
+    // 🔥 P0 FIX: Por defecto = INBOX (entrantes)
+    const folderType = filters?.folderType || 'inbox';
+    console.log(`[EMAIL TOOLS] 📁 Leyendo carpeta: ${folderType.toUpperCase()}`);
 
     // Obtener cuentas del usuario
     const { data: accounts, error: accountError } = await supabase
@@ -91,11 +99,31 @@ export async function listEmails(
       }
     }
 
-    // Construir query
+    // 🔥 P0 FIX: Obtener folder_id por folder_type
+    const { data: folders, error: folderError } = await supabase
+      .from('email_folders')
+      .select('id, account_id')
+      .in('account_id', accountIds)
+      .eq('folder_type', folderType);
+    
+    if (folderError) {
+      console.error('[EMAIL TOOLS] Error obteniendo folders:', folderError);
+      throw new Error(`Error al obtener carpeta ${folderType}: ${folderError.message}`);
+    }
+    
+    if (!folders || folders.length === 0) {
+      console.log(`[EMAIL TOOLS] ⚠️ No se encontró carpeta tipo "${folderType}" para las cuentas del usuario`);
+      return [];
+    }
+    
+    const folderIds = folders.map(f => f.id);
+    console.log(`[EMAIL TOOLS] 📁 Buscando en ${folderIds.length} folder(s) tipo "${folderType}"`);
+
+    // Construir query - 🔥 AHORA FILTRA POR FOLDER_ID
     let query = supabase
       .from('email_messages')
       .select('*')
-      .in('account_id', accountIds)
+      .in('folder_id', folderIds) // 🔥 FILTRO CORRECTO
       .order('date', { ascending: false });
 
     if (filters?.unreadOnly) {
@@ -115,7 +143,7 @@ export async function listEmails(
       throw new Error(`Error al listar correos: ${messagesError.message}`);
     }
 
-    console.log(`[EMAIL TOOLS] ✓ ${messages?.length || 0} correos encontrados`);
+    console.log(`[EMAIL TOOLS] ✓ ${messages?.length || 0} correos encontrados en carpeta "${folderType}"`);
     return messages || [];
 
   } catch (error: any) {
