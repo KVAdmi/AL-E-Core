@@ -471,9 +471,10 @@ export class Orchestrator {
       console.log(`[ORCH] 🔧 Tools array length: ${tools.length}`);
       if (tools.length > 0) {
         console.log(`[ORCH] 🔧 Tools: ${tools.map((t: any) => t.function?.name || 'unknown').join(', ')}`);
+        console.log(`[ORCH] 🔧 Tools structure: ${JSON.stringify(tools, null, 2)}`);
       }
       
-      // Llamar al LLM con tools
+      // ✅ USAR GROQ SIEMPRE - Groq Llama 3.3 70B soporta tool calling nativo
       const { callGroqChat } = await import('./providers/groqProvider');
       const response = await callGroqChat({
         messages,
