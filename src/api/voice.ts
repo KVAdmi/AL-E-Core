@@ -257,7 +257,7 @@ router.post('/stt', upload.single('audio'), async (req, res) => {
       
       const transcriptionPromise = groq.audio.transcriptions.create({
         file: fs.createReadStream(tempFilePath),
-        model: 'whisper-large-v3',
+        model: 'whisper-large-v3-turbo',
         language: language || undefined, // auto-detect si no se especifica
         response_format: 'json',
         temperature: 0.0 // Máxima precisión
@@ -290,7 +290,7 @@ router.post('/stt', upload.single('audio'), async (req, res) => {
             audio_size_bytes: audioFile.size,
             audio_mimetype: audioFile.mimetype,
             stt_provider: 'groq',
-            stt_model: 'whisper-large-v3',
+            stt_model: 'whisper-large-v3-turbo',
             transcript_length: transcription.text.length,
             language: language || 'auto',
             detected_language: transcription.language || 'unknown'
@@ -387,7 +387,7 @@ router.get('/capabilities', (req, res) => {
       maxFileSize: '10MB',
       languages: ['auto', 'es', 'en', 'fr', 'de', 'pt', 'it', 'ja', 'ko', 'zh'],
       provider: 'groq',
-      model: 'whisper-large-v3',
+      model: 'whisper-large-v3-turbo',
       timeout_ms: STT_TIMEOUT_MS
     },
     status: 'ready' // ✅ Producción lista
