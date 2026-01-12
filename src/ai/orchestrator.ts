@@ -584,6 +584,17 @@ export class Orchestrator {
             parameters: functionArgs
           });
           
+          // 🚨 VALIDACIÓN ANTI-MENTIRA: send_email DEBE tener messageId
+          if ((functionName === 'send_email' || functionName === 'create_and_send_email') && result.success) {
+            if (!result.data?.messageId) {
+              console.error(`[ORCH] 🚨 P0 VIOLATION: send_email retornó success SIN messageId`);
+              result.success = false;
+              result.error = 'Error técnico: sin confirmación del proveedor SMTP';
+            } else {
+              console.log(`[ORCH] ✅ send_email con evidencia: messageId=${result.data.messageId}`);
+            }
+          }
+          
           toolExecutions.push({
             tool: functionName,
             args: functionArgs,

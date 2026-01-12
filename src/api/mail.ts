@@ -1,26 +1,19 @@
 /**
  * =====================================================
- * MAIL SEND API - AL-E CORE (DESHABILITADO)
+ * MAIL SEND API - AL-E CORE (FUNCIONAL)
  * =====================================================
  * 
- * ⚠️ AWS SES NO ESTÁ IMPLEMENTADO AÚN.
+ * ✅ SMTP REAL IMPLEMENTADO
  * 
  * REGLAS OBLIGATORIAS:
- * 1. NO CONFIRMES ENVÍO DE CORREOS
- * 2. NO SIMULES SMTP
- * 3. NO GENERES messageId FALSO
+ * 1. SOLO success=true si hay messageId REAL del proveedor
+ * 2. NO SIMULAR SMTP
+ * 3. NO GENERAR messageId FALSO
+ * 4. VALIDAR que info.messageId existe antes de responder success
+ * 5. GUARDAR mensaje en email_messages con messageId real
  * 
- * mail.send DEBE RESPONDER SIEMPRE:
- * {
- *   "success": false,
- *   "action": "mail.send",
- *   "evidence": null,
- *   "userMessage": "El envío de correos aún no está configurado.",
- *   "reason": "SMTP_NOT_CONFIGURED"
- * }
- * 
- * CUANDO AWS SES ESTÉ REAL, SE REACTIVA.
- * HASTA ENTONCES, CERO HUMO.
+ * PROVIDER: SMTP de la cuenta del usuario (Hostinger, Gmail, etc.)
+ * EVIDENCIA: info.messageId del transporter nodemailer
  * =====================================================
  */
 

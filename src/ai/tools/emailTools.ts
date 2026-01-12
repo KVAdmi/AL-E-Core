@@ -250,14 +250,22 @@ export async function draftReply(
     // Generar respuesta basada en análisis
     const responseBody = generateResponseBody(email, analysis, customInstructions);
 
+    // 🚨 FIX: Usar message_id real del correo (RFC header), no el ID de DB
+    const emailAny = email as any;
+    const inReplyTo = emailAny.message_id || emailAny.in_reply_to || undefined;
+    
+    if (!inReplyTo) {
+      console.warn('[EMAIL TOOLS] ⚠️ Email sin message_id, reply sin threading');
+    }
+
     const draft: DraftEmail = {
       to: email.from_address,
       subject: email.subject.startsWith('RE:') ? email.subject : `RE: ${email.subject}`,
       body: responseBody,
-      in_reply_to: emailId
+      in_reply_to: inReplyTo // 🔥 Ahora usa Message-ID real
     };
 
-    console.log('[EMAIL TOOLS] ✓ Borrador generado');
+    console.log('[EMAIL TOOLS] ✓ Borrador generado con threadId:', inReplyTo);
     return draft;
 
   } catch (error: any) {

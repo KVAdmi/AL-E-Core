@@ -230,6 +230,15 @@ router.post('/stt', upload.single('audio'), async (req, res) => {
         message: 'Se requiere un archivo de audio'
       });
     }
+    
+    // 🚨 VALIDACIÓN ANTI-MENTIRA: audio.size > 0
+    if (!audioFile.size || audioFile.size === 0) {
+      console.error('[STT] ❌ Audio file size is 0');
+      return res.status(400).json({
+        error: 'EMPTY_AUDIO_FILE',
+        message: 'El archivo de audio está vacío. Por favor, vuelve a grabar.'
+      });
+    }
 
     if (!audioFile.mimetype.startsWith('audio/')) {
       return res.status(400).json({
@@ -273,6 +282,8 @@ router.post('/stt', upload.single('audio'), async (req, res) => {
       const audioSeconds = Math.ceil(audioFile.size / 16000); // Estimación aproximada
       
       console.log(`[STT] ✅ Transcripción completada en ${latency_ms}ms`);
+      console.log(`[STT] 📊 Duración estimada: ${audioSeconds}s`);
+      console.log(`[STT] 🌍 Idioma detectado: ${transcription.language || 'auto'}`);
       console.log(`[STT] Texto: "${transcription.text.substring(0, 100)}..."`);
       
       // Log en ae_requests
