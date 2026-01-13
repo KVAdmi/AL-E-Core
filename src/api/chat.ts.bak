@@ -3,7 +3,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../db/supabase';
 import { env } from '../config/env';
 import { isUuid, makeTitleFromText, safeJson, estimateTokens, estimateCost } from '../utils/helpers';
-import { markdownToSpeakable, shouldSpeak } from '../utils/textCleaners';
 import { AssistantRequest } from '../ai/IAssistantProvider';
 import { 
   processAttachments, 
@@ -951,8 +950,6 @@ Ejemplo malo: "Visita https://... para ver el precio."` },
     
     res.json({
       answer: answer,
-      speak_text: markdownToSpeakable(answer),
-      should_speak: shouldSpeak(answer),
       session_id: sessionId,
       memories_to_add: []
     });
@@ -962,8 +959,6 @@ Ejemplo malo: "Visita https://... para ver el precio."` },
     
     res.status(500).json({
       answer: 'Error interno del servidor',
-      speak_text: 'Ocurrió un error al procesar tu solicitud.',
-      should_speak: true,
       session_id: sessionId,
       memories_to_add: []
     });
@@ -1392,8 +1387,6 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
         
         return res.json({
           answer: fallbackMessage,
-          speak_text: markdownToSpeakable(fallbackMessage),
-          should_speak: true,
           session_id: sessionId,
           memories_to_add: [],
           metadata: {
@@ -1458,8 +1451,6 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
       
       return res.json({
         answer,
-        speak_text: markdownToSpeakable(answer),
-        should_speak: shouldSpeak(answer),
         session_id: sessionId,
         memories_to_add: [],
         metadata: {
@@ -1646,8 +1637,6 @@ Ejemplo malo: "Visita https://... para ver el precio."`
     
     return res.json({
       answer: finalAnswer,
-      speak_text: markdownToSpeakable(finalAnswer),
-      should_speak: shouldSpeak(finalAnswer),
       session_id: sessionId,
       memories_to_add: [], // TODO: Implementar extracción de memories
       sources: knowledgeSources.length > 0 ? knowledgeSources : undefined, // Agregar sources si hay
@@ -1698,8 +1687,6 @@ Ejemplo malo: "Visita https://... para ver el precio."`
     return res.status(500).json({
       error: 'INTERNAL_ERROR',
       message: error.message,
-      speak_text: 'Ocurrió un error al procesar tu solicitud.',
-      should_speak: true,
       session_id: sessionId,
       memories_to_add: []
     });
