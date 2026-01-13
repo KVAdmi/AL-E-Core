@@ -60,18 +60,18 @@ export async function webSearch(options: TavilySearchOptions): Promise<TavilySea
       {
         api_key: TAVILY_API_KEY,
         query: query,
-        search_depth: searchDepth,
-        max_results: maxResults,
+        search_depth: 'advanced', // 🚨 FORZAR ADVANCED siempre para mejores resultados
+        max_results: 10, // 🚨 AUMENTAR resultados para más posibilidades
         include_domains: includeDomains,
         exclude_domains: excludeDomains,
         include_answer: true,
-        include_raw_content: false
+        include_raw_content: true // 🚨 INCLUIR contenido RAW para más contexto
       },
       {
         headers: {
           'Content-Type': 'application/json'
         },
-        timeout: 15000 // 15 segundos timeout
+        timeout: 20000 // 🚨 20 segundos - más tiempo para búsqueda profunda
       }
     );
 
@@ -90,29 +90,21 @@ export async function webSearch(options: TavilySearchOptions): Promise<TavilySea
       console.log(`[TAVILY]   ${idx + 1}. ${r.title} (score: ${r.score.toFixed(2)})`);
     });
     
-    // 🚨 P0: VALIDAR RELEVANCIA - Filtrar resultados irrelevantes
-    const MIN_RELEVANCE_SCORE = 0.3; // Score mínimo para considerar relevante
-    const relevantResults = results.filter(r => r.score >= MIN_RELEVANCE_SCORE);
-    
-    if (relevantResults.length === 0 && results.length > 0) {
-      console.warn(`[TAVILY] ⚠️ P0 WARNING: Todos los resultados tienen score bajo (< ${MIN_RELEVANCE_SCORE})`);
-      console.warn(`[TAVILY] Esto indica que la query "${query}" NO tiene resultados relevantes`);
-      // Retornar como si no hubiera resultados
+    // 🚨 P0: Si Tavily retorna resultados pero todos parecen irrelevantes, IGUAL los pasamos
+    // El LLM debe decidir si son útiles, NO el Core
+    if (results.length === 0) {
+      console.warn(`[TAVILY] ⚠️ No se encontraron resultados para: "${query}"`);
       return {
         query,
         results: [],
         responseTime,
-        success: false // 🚨 FALSE porque los resultados no son útiles
+        success: false
       };
-    }
-    
-    if (relevantResults.length < results.length) {
-      console.log(`[TAVILY] Filtered ${results.length - relevantResults.length} low-relevance results`);
     }
 
     return {
       query,
-      results: relevantResults,
+      results, // 🚨 PASAMOS TODOS los resultados, incluso con score bajo
       responseTime,
       success: true
     };
