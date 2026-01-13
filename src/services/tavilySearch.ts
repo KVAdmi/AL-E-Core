@@ -89,10 +89,30 @@ export async function webSearch(options: TavilySearchOptions): Promise<TavilySea
     results.forEach((r, idx) => {
       console.log(`[TAVILY]   ${idx + 1}. ${r.title} (score: ${r.score.toFixed(2)})`);
     });
+    
+    // 🚨 P0: VALIDAR RELEVANCIA - Filtrar resultados irrelevantes
+    const MIN_RELEVANCE_SCORE = 0.3; // Score mínimo para considerar relevante
+    const relevantResults = results.filter(r => r.score >= MIN_RELEVANCE_SCORE);
+    
+    if (relevantResults.length === 0 && results.length > 0) {
+      console.warn(`[TAVILY] ⚠️ P0 WARNING: Todos los resultados tienen score bajo (< ${MIN_RELEVANCE_SCORE})`);
+      console.warn(`[TAVILY] Esto indica que la query "${query}" NO tiene resultados relevantes`);
+      // Retornar como si no hubiera resultados
+      return {
+        query,
+        results: [],
+        responseTime,
+        success: false // 🚨 FALSE porque los resultados no son útiles
+      };
+    }
+    
+    if (relevantResults.length < results.length) {
+      console.log(`[TAVILY] Filtered ${results.length - relevantResults.length} low-relevance results`);
+    }
 
     return {
       query,
-      results,
+      results: relevantResults,
       responseTime,
       success: true
     };
