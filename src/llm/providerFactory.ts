@@ -4,8 +4,9 @@
  * =====================================================
  * 
  * Factory con fallback automático:
- * - Mistral AI (primario)
- * - OpenRouter (fallback)
+ * - Groq (primario - usado para tool calling)
+ * - Mistral AI (secundario)
+ * - OpenRouter (terciario)
  * =====================================================
  */
 
@@ -21,41 +22,98 @@ export interface LLMProvider {
   createCompletion(messages: Message[], options?: CompletionOptions): Promise<CompletionResponse>;
 }
 
+// Groq Provider Wrapper
+class GroqProviderWrapper implements LLMProvider {
+  private groqProvider: any;
+
+  constructor(apiKey: string) {
+    // Import dinámico de groqProvider existente
+    import('../ai/providers/groqProvider').then(module => {
+      this.groqProvider = module;
+    });
+  }
+
+  async createCompletion(messages: Message[], options?: CompletionOptions): Promise<CompletionResponse> {
+    if (!this.groqProvider) {
+      const module = await import('../ai/providers/groqProvider');
+      this.groqProvider = module;
+    }
+
+    // Adaptar a formato Groq
+    const response = await this.groqProvider.callGroqChat(messages, options?.tools);
+    
+    return {
+      content: response.content,
+      usage: response.usage,
+      tool_calls: response.tool_calls
+    } as CompletionResponse;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // PROVIDER FACTORY
 // ═══════════════════════════════════════════════════════════════
 
 class LLMProviderFactory {
-  private primaryProvider: LLMProvider | null = null;
-  private fallbackProvider: LLMProvider | null = null;
-  private currentProvider: 'mistral' | 'openrouter' = 'mistral';
+  private groqProvider: LLMProvider | null = null;
+  private mistralProvider: LLMProvider | null = null;
+  private openrouterProvider: LLMProvider | null = null;
+  private currentProvider: 'groq' | 'mistral' | 'openrouter' = 'groq';
 
   constructor() {
     this.initialize();
   }
 
   private initialize(): void {
+    const groqKey = process.env.GROQ_API_KEY;
     const mistralKey = process.env.MISTRAL_API_KEY;
     const openrouterKey = process.env.OPENROUTER_API_KEY;
-    const provider = process.env.LLM_PROVIDER || 'mistral';
+    const provider = process.env.LLM_PROVIDER || 'groq';
 
-    // Configurar providers disponibles
+    // Configurar providers disponibles (GROQ primero)
+    if (groqKey) {
+      this.groqProvider = new GroqProviderWrapper(groqKey);
+      console.log('[LLM FACTORY] ✅ Groq configurado (primario para tool calling)');
+    }
+
     if (mistralKey) {
-      this.primaryProvider = new MistralProvider(mistralKey);
-      console.log('[LLM FACTORY] Mistral AI configurado (primario)');
+      this.mistralProvider = new MistralProvider(mistralKey);
+      console.log('[LLM FACTORY] ✅ Mistral AI configurado (secundario)');
     }
 
     if (openrouterKey) {
-      this.fallbackProvider = new OpenRouterProvider(openrouterKey);
-      console.log('[LLM FACTORY] OpenRouter configurado (fallback)');
+      this.openrouterProvider = new OpenRouterProvider(openrouterKey);
+      console.log('[LLM FACTORY] ✅ OpenRouter configurado (terciario)');
     }
 
-    // Validar que al menos uno esté disponible (solo warning si no hay)
-    if (!this.primaryProvider && !this.fallbackProvider) {
-      console.warn('[LLM FACTORY] ⚠️  No hay providers LLM configurados. Tool calling no estará disponible hasta configurar MISTRAL_API_KEY o OPENROUTER_API_KEY');
+    // Validar que al menos uno esté disponible
+    if (!this.groqProvider && !this.mistralProvider && !this.openrouterProvider) {
+      console.error('[LLM FACTORY] ❌ CRÍTICO: No hay providers LLM configurados. Tool calling NO funcionará.');
+      console.error('[LLM FACTORY] Configurar al menos uno: GROQ_API_KEY (recomendado), MISTRAL_API_KEY, o OPENROUTER_API_KEY');
+    } else {
+      const available = [
+        this.groqProvider ? 'Groq' : null,
+        this.mistralProvider ? 'Mistral' : null,
+        this.openrouterProvider ? 'OpenRouter' : null
+      ].filter(Boolean).join(', ');
+      console.log(`[LLM FACTORY] 🎯 Providers disponibles: ${available}`);
     }
 
-    this.currentProvider = provider === 'openrouter' ? 'openrouter' : 'mistral';
+    // Determinar provider activo
+    if (provider === 'groq' && this.groqProvider) {
+      this.currentProvider = 'groq';
+    } else if (provider === 'mistral' && this.mistralProvider) {
+      this.currentProvider = 'mistral';
+    } else if (provider === 'openrouter' && this.openrouterProvider) {
+      this.currentProvider = 'openrouter';
+    } else {
+      // Auto-select: Groq > Mistral > OpenRouter
+      if (this.groqProvider) this.currentProvider = 'groq';
+      else if (this.mistralProvider) this.currentProvider = 'mistral';
+      else if (this.openrouterProvider) this.currentProvider = 'openrouter';
+    }
+
+    console.log(`[LLM FACTORY] 🚀 Provider activo: ${this.currentProvider.toUpperCase()}`);
   }
 
   /**
@@ -67,55 +125,48 @@ class LLMProviderFactory {
   ): Promise<CompletionResponse> {
     
     // Validar que hay providers disponibles
-    if (!this.primaryProvider && !this.fallbackProvider) {
-      throw new Error('No hay providers LLM configurados. Configura MISTRAL_API_KEY o OPENROUTER_API_KEY en el servidor');
+    if (!this.groqProvider && !this.mistralProvider && !this.openrouterProvider) {
+      throw new Error('No hay providers LLM configurados. Configura GROQ_API_KEY, MISTRAL_API_KEY o OPENROUTER_API_KEY');
     }
     
-    // Intentar con provider primario
-    if (this.primaryProvider) {
+    // Cascade: Groq > Mistral > OpenRouter
+    const providers = [
+      { name: 'Groq', instance: this.groqProvider },
+      { name: 'Mistral', instance: this.mistralProvider },
+      { name: 'OpenRouter', instance: this.openrouterProvider }
+    ].filter(p => p.instance !== null);
+
+    let lastError: Error | null = null;
+
+    for (const provider of providers) {
       try {
-        console.log('[LLM FACTORY] Usando Mistral AI');
-        return await this.primaryProvider.createCompletion(messages, options);
+        console.log(`[LLM FACTORY] 🔄 Intentando con ${provider.name}`);
+        const result = await provider.instance!.createCompletion(messages, options);
+        console.log(`[LLM FACTORY] ✅ ${provider.name} respondió exitosamente`);
+        return result;
       } catch (error: any) {
-        console.error('[LLM FACTORY] Mistral falló:', error.message);
-        
-        // Intentar fallback
-        if (this.fallbackProvider) {
-          console.log('[LLM FACTORY] Fallback a OpenRouter');
-          try {
-            return await this.fallbackProvider.createCompletion(messages, options);
-          } catch (fallbackError: any) {
-            console.error('[LLM FACTORY] OpenRouter también falló:', fallbackError.message);
-            throw new Error('Todos los providers LLM fallaron');
-          }
-        }
-        
-        throw error;
+        console.error(`[LLM FACTORY] ❌ ${provider.name} falló: ${error.message}`);
+        lastError = error;
       }
     }
 
-    // Si no hay primario, usar fallback directamente
-    if (this.fallbackProvider) {
-      console.log('[LLM FACTORY] Usando OpenRouter (sin primario)');
-      return await this.fallbackProvider.createCompletion(messages, options);
-    }
-
-    throw new Error('No hay providers LLM disponibles');
+    throw lastError || new Error('Todos los providers LLM fallaron');
   }
 
   /**
    * Obtener provider específico
    */
-  getProvider(name: 'mistral' | 'openrouter'): LLMProvider | null {
-    if (name === 'mistral') return this.primaryProvider;
-    if (name === 'openrouter') return this.fallbackProvider;
+  getProvider(name: 'groq' | 'mistral' | 'openrouter'): LLMProvider | null {
+    if (name === 'groq') return this.groqProvider;
+    if (name === 'mistral') return this.mistralProvider;
+    if (name === 'openrouter') return this.openrouterProvider;
     return null;
   }
 
   /**
    * Cambiar provider actual (para testing)
    */
-  switchProvider(provider: 'mistral' | 'openrouter'): void {
+  switchProvider(provider: 'groq' | 'mistral' | 'openrouter'): void {
     this.currentProvider = provider;
     console.log(`[LLM FACTORY] Provider cambiado a: ${provider}`);
   }

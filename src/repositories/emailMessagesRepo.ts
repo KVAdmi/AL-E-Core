@@ -65,52 +65,64 @@ export interface CreateEmailMessageData {
 }
 
 /**
- * Crear mensaje (con deduplicación por message_uid + message_id)
+ * Crear mensaje (IDEMPOTENTE con UPSERT - elimina race conditions)
  */
 export async function createEmailMessage(data: CreateEmailMessageData): Promise<EmailMessage | null> {
   console.log(`[REPO:createEmailMessage] 🔵 Iniciando - account_id: ${data.account_id}, message_uid: ${data.message_uid}, message_id: ${data.message_id}`);
   
-  // Verificar si ya existe por UID (constraint único DB)
-  if (data.message_uid) {
-    console.log(`[REPO:createEmailMessage] 🔍 Verificando UID: ${data.message_uid}`);
-    const existingByUid = await getEmailMessageByUid(data.account_id, data.message_uid);
-    if (existingByUid) {
-      console.log(`[REPO:createEmailMessage] ⏭️ Mensaje ya existe (UID): ${data.message_uid}, id: ${existingByUid.id}`);
-      return existingByUid;
-    }
-  }
+  // UPSERT idempotente - ON CONFLICT DO NOTHING
+  console.log(`[REPO:createEmailMessage] 💾 UPSERT con ON CONFLICT - subject: "${data.subject}", from: ${data.from_address}`);
   
-  // Verificar si ya existe por message_id (backup)
-  console.log(`[REPO:createEmailMessage] 🔍 Verificando message_id: ${data.message_id}`);
-  const existing = await getEmailMessageByMessageId(data.account_id, data.message_id);
-  if (existing) {
-    console.log(`[REPO:createEmailMessage] ⏭️ Mensaje ya existe (message_id): ${data.message_id}, id: ${existing.id}`);
-    return existing;
-  }
+  const insertData = {
+    ...data,
+    date: data.date ? data.date.toISOString() : null,
+    is_read: false,
+    is_starred: false,
+    is_important: false,
+    has_attachments: data.has_attachments || false,
+    attachment_count: data.attachment_count || 0,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
   
-  console.log(`[REPO:createEmailMessage] 💾 Insertando nuevo mensaje - subject: "${data.subject}", from: ${data.from_address}`);
+  // Intentar INSERT normal primero
   const { data: message, error } = await supabase
     .from('email_messages')
-    .insert({
-      ...data,
-      date: data.date ? data.date.toISOString() : null,
-      is_read: false,
-      is_starred: false,
-      is_important: false,
-      has_attachments: data.has_attachments || false,
-      attachment_count: data.attachment_count || 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    })
+    .insert(insertData)
     .select()
     .single();
   
   if (error) {
+    // Si es duplicate key (23505), buscar el existente y retornarlo
+    if (error.code === '23505') {
+      console.log(`[REPO:createEmailMessage] ⏭️ Duplicate key detectado - buscando mensaje existente`);
+      
+      // Buscar por UID (constraint único real)
+      if (data.message_uid) {
+        const existing = await getEmailMessageByUid(data.account_id, data.message_uid);
+        if (existing) {
+          console.log(`[REPO:createEmailMessage] ✅ Skipped duplicate (UID) - id: ${existing.id}`);
+          return existing;
+        }
+      }
+      
+      // Fallback: buscar por message_id
+      const existing = await getEmailMessageByMessageId(data.account_id, data.message_id);
+      if (existing) {
+        console.log(`[REPO:createEmailMessage] ✅ Skipped duplicate (message_id) - id: ${existing.id}`);
+        return existing;
+      }
+      
+      console.error(`[REPO:createEmailMessage] ❌ Duplicate key pero no se encontró mensaje existente - posible inconsistencia`);
+      return null;
+    }
+    
+    // Otro tipo de error
     console.error(`[REPO:createEmailMessage] ❌ Error al crear mensaje: ${error.message}`, error);
     return null;
   }
   
-  console.log(`[REPO:createEmailMessage] ✅ Mensaje creado exitosamente - id: ${message.id}`);
+  console.log(`[REPO:createEmailMessage] ✅ Mensaje insertado exitosamente - id: ${message.id}`);
   return message;
 }
 
