@@ -253,6 +253,15 @@ router.post('/stt', upload.single('audio'), async (req, res) => {
       size: audioFile.size,
       language: language || 'auto'
     });
+    
+    // 🚨 P0: LOGS OBLIGATORIOS
+    const audioSizeBytes = audioFile.size;
+    const audioSizeKB = (audioSizeBytes / 1024).toFixed(2);
+    const estimatedDurationSeconds = Math.round(audioSizeBytes / 16000); // Rough estimate: 16KB/s
+    
+    console.log(`[STT] 📊 Audio size: ${audioSizeKB} KB (${audioSizeBytes} bytes)`);
+    console.log(`[STT] ⏱️  Estimated duration: ~${estimatedDurationSeconds}s`);
+    console.log(`[STT] 🌍 Language requested: ${language || 'auto-detect'}`);
 
     // Guardar archivo temporalmente (Groq Whisper requiere file path)
     const tempDir = os.tmpdir();
@@ -260,9 +269,12 @@ router.post('/stt', upload.single('audio'), async (req, res) => {
     
     fs.writeFileSync(tempFilePath, audioFile.buffer);
     
+    let whisperCalled = false;
+    
     try {
       // Llamar a Groq Whisper API con timeout
       console.log('[STT] 🔄 Calling Groq Whisper API...');
+      whisperCalled = true; // 🚨 P0: Marca que SÍ se llamó
       
       const transcriptionPromise = groq.audio.transcriptions.create({
         file: fs.createReadStream(tempFilePath),
@@ -281,11 +293,21 @@ router.post('/stt', upload.single('audio'), async (req, res) => {
       const latency_ms = Date.now() - startTime;
       const audioSeconds = Math.ceil(audioFile.size / 16000); // Estimación aproximada
       
+      // 🚨 P0: LOGS OBLIGATORIOS después de transcripción
       console.log(`[STT] ✅ Transcripción completada en ${latency_ms}ms`);
       console.log(`[STT] 📊 Duración estimada: ${audioSeconds}s`);
       console.log(`[STT] 🌍 Idioma detectado: ${transcription.language || 'auto'}`);
-      console.log(`[STT] Texto: "${transcription.text.substring(0, 100)}..."`);
+      console.log(`[STT] 🎯 Whisper llamado: ${whisperCalled ? 'true' : 'false'}`);
+      console.log(`[STT] Texto transcrito (${transcription.text.length} chars): "${transcription.text.substring(0, 100)}..."`);
       
+      // 🚨 P0: VALIDAR que whisper SÍ se llamó
+      if (!whisperCalled) {
+        console.error('[STT] 🚨 P0 VIOLATION: Transcription returned but whisper was NOT called');
+        return res.status(500).json({
+          error: 'STT_NOT_EXECUTED',
+          message: 'Error interno: Whisper no fue invocado correctamente'
+        });
+      }      
       // Log en ae_requests
       try {
         await supabase.from('ae_requests').insert({

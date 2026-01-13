@@ -282,16 +282,28 @@ router.post('/chat', optionalAuth, async (req, res) => {
     // ============================================
     
     if (requestSessionId && isUuid(requestSessionId)) {
-      // Verificar que existe
+      // P0 FIX: Verificar que la sesión pertenece al usuario
       const { data: existingSession } = await supabase
         .from('ae_sessions')
-        .select('id')
+        .select('id, user_id_old, user_id_uuid')
         .eq('id', requestSessionId)
         .single();
       
       if (existingSession) {
+        // Validar ownership: session debe pertenecer al usuario
+        const sessionOwner = existingSession.user_id_uuid || existingSession.user_id_old;
+        
+        if (sessionOwner !== userId) {
+          console.error(`[CHAT] 🚨 P0 VIOLATION: Usuario ${userId} intentó acceder sesión de ${sessionOwner}`);
+          return res.status(403).json({
+            error: 'FORBIDDEN_SESSION',
+            message: 'Esta sesión pertenece a otro usuario',
+            session_id: null
+          });
+        }
+        
         sessionId = requestSessionId;
-        console.log(`[CHAT] Usando sesión existente: ${sessionId}`);
+        console.log(`[CHAT] Usando sesión existente: ${sessionId} (owner: ${userId})`);
       }
     }
     
@@ -337,9 +349,10 @@ router.post('/chat', optionalAuth, async (req, res) => {
     
     console.log('[CHAT] 📚 Reconstructing conversation history from Supabase...');
     
+    // P0 FIX: Filtrar historial SOLO del usuario actual
     const { data: historyData, error: historyError } = await supabase
       .from('ae_messages')
-      .select('role, content, created_at')
+      .select('role, content, created_at, session_id')
       .eq('session_id', sessionId)
       .order('created_at', { ascending: true })
       .limit(50); // Últimos 50 mensajes
@@ -347,6 +360,9 @@ router.post('/chat', optionalAuth, async (req, res) => {
     if (historyError) {
       console.error('[CHAT] Error loading history:', historyError);
     }
+    
+    // P0: Validar que todos los mensajes son del mismo session_id (ya validado arriba)
+    // No deberían existir mensajes cross-session aquí porque session_id ya fue validado
     
     const storedHistory = historyData || [];
     console.log(`[CHAT] ✓ Loaded ${storedHistory.length} messages from database`);
