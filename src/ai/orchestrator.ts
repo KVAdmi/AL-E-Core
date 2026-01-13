@@ -266,6 +266,53 @@ export class Orchestrator {
   }> {
     
     // ═══════════════════════════════════════════════════════════════
+    // 🚨 P0 CRÍTICO - TOOL OR FAIL (DETECTOR DE INTENCIÓN FORZADA)
+    // ═══════════════════════════════════════════════════════════════
+    
+    const messageLower = userMessage.toLowerCase();
+    
+    // Detectar palabras clave que SIEMPRE requieren tools
+    const FORCE_EMAIL_TOOLS = [
+      'revisa mis correos', 'lee mis emails', 'qué correos tengo', 'cuáles correos',
+      'último correo', 'correo más reciente', 'emails nuevos', 'correos sin leer',
+      'lee ese correo', 'abre el correo', 'qué dice el correo', 'léeme el correo',
+      'responde ese correo', 'envía correo', 'manda email', 'envia un correo'
+    ];
+    
+    const FORCE_WEB_SEARCH = [
+      'qué hace', 'a qué se dedica', 'historia de', 'quién fundó',
+      'cuánto cuesta', 'precio de', 'información sobre empresa',
+      'dime sobre', 'busca información', 'investiga'
+    ];
+    
+    const FORCE_CALENDAR_TOOLS = [
+      'qué tengo hoy', 'mi agenda', 'eventos de', 'citas de',
+      'agenda reunión', 'pon cita', 'agendar', 'agéndame',
+      'recordatorio para', 'anota que tengo'
+    ];
+    
+    const needsEmailTool = FORCE_EMAIL_TOOLS.some(phrase => messageLower.includes(phrase));
+    const needsWebSearch = FORCE_WEB_SEARCH.some(phrase => messageLower.includes(phrase));
+    const needsCalendarTool = FORCE_CALENDAR_TOOLS.some(phrase => messageLower.includes(phrase));
+    
+    if (needsEmailTool) {
+      console.log('[ORCH] 🚨 P0 TOOL FORCING: Email intent detected - overriding mode');
+      intent.tools_required = ['list_emails'];
+      modeClassification.mode = 'CRITICAL_DATA_OR_ACTION';
+      modeClassification.toolsRequired = ['list_emails'];
+    } else if (needsWebSearch) {
+      console.log('[ORCH] 🚨 P0 TOOL FORCING: Web search intent detected - overriding mode');
+      intent.tools_required = ['web_search'];
+      modeClassification.mode = 'RESEARCH_RECENT';
+      modeClassification.toolsRequired = ['web_search'];
+    } else if (needsCalendarTool) {
+      console.log('[ORCH] 🚨 P0 TOOL FORCING: Calendar intent detected - overriding mode');
+      intent.tools_required = ['calendar'];
+      modeClassification.mode = 'CRITICAL_DATA_OR_ACTION';
+      modeClassification.toolsRequired = ['calendar'];
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
     // P0 CORE: MODE SELECTOR (Prioridad sobre intent)
     // ═══════════════════════════════════════════════════════════════
     
