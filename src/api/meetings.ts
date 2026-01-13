@@ -7,7 +7,11 @@
  * - GET /api/meetings/live/:id/status - Status en tiempo real (transcript parcial + notas)
  * - POST /api/meetings/live/:id/stop - Finalizar grabación
  * 
- * - POST /api/meetings/upload - Subir archivo completo (mp3/mp4/wav)
+ * - POST /api/meetings/ingest - Subir archivo para transcripción (ENDPOINT UNIFICADO)
+ * - GET /api/meetings/:id/status - Status del procesamiento
+ * - GET /api/meetings/:id/result - Resultado final (contrato completo)
+ * 
+ * - POST /api/meetings/upload - Subir archivo completo (mp3/mp4/wav) [LEGACY]
  * - GET /api/meetings/:id - Obtener meeting completo
  * - GET /api/meetings/:id/transcript - Obtener transcript
  * - GET /api/meetings/:id/minutes - Obtener minuta
@@ -16,6 +20,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
 import { createClient } from '@supabase/supabase-js';
 import { uploadMeetingChunk, uploadMeetingFile } from '../services/s3MeetingsService';
@@ -586,7 +591,272 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/meetings/:id/ingest
+ * POST /api/meetings/ingest (ENDPOINT UNIFICADO - CONTRATO)
+ * Subir audio para transcripción + minuta
+ */
+router.post('/ingest', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    const request_id = req.headers['x-request-id'] as string || uuidv4();
+    console.log(`[MEETINGS] 📥 /ingest - request_id: ${request_id}`);
+
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ error: 'No file provided', request_id });
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'No authorization header', request_id });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Unauthorized', request_id });
+    }
+
+    const { title, description, participants = [] } = req.body;
+
+    // 1. Crear meeting
+    const { data: meeting, error: dbError } = await supabase
+      .from('meetings')
+      .insert({
+        owner_user_id: user.id,
+        title: title || file.originalname,
+        description,
+        mode: 'upload',
+        status: 'processing',
+        happened_at: new Date().toISOString(),
+        participants: typeof participants === 'string' ? JSON.parse(participants) : participants,
+      })
+      .select()
+      .single();
+
+    if (dbError) {
+      console.error('[MEETINGS] ❌ Error creating meeting:', dbError);
+      return res.status(500).json({ error: 'Failed to create meeting', request_id });
+    }
+
+    console.log(`[MEETINGS] ✓ Meeting created: ${meeting.id}`);
+
+    // 2. Upload a S3
+    const s3Result = await uploadMeetingFile({
+      userId: user.id,
+      meetingId: meeting.id,
+      buffer: file.buffer,
+      filename: file.originalname,
+      mimeType: file.mimetype,
+    });
+
+    console.log(`[MEETINGS] ✓ S3 upload: ${s3Result.s3Key}`);
+
+    // 3. Guardar asset
+    const { data: asset, error: assetError } = await supabase
+      .from('meeting_assets')
+      .insert({
+        meeting_id: meeting.id,
+        s3_key: s3Result.s3Key,
+        s3_bucket: s3Result.s3Bucket,
+        s3_url: s3Result.s3Url,
+        filename: file.originalname,
+        mime_type: file.mimetype,
+        size_bytes: s3Result.sizeBytes,
+        asset_type: 'full',
+      })
+      .select()
+      .single();
+
+    if (assetError) {
+      console.error('[MEETINGS] ❌ Error saving asset:', assetError);
+      return res.status(500).json({ error: 'Failed to save file', request_id });
+    }
+
+    console.log(`[MEETINGS] ✓ Asset saved: ${asset.id}`);
+
+    // 4. Encolar transcripción
+    await enqueueJob('TRANSCRIBE_FILE', {
+      meetingId: meeting.id,
+      assetId: asset.id,
+      s3Key: s3Result.s3Key,
+      userId: user.id,
+      request_id,
+    });
+
+    console.log(`[MEETINGS] ✓ Job queued - meeting_id: ${meeting.id}, request_id: ${request_id}`);
+
+    // Respuesta según contrato
+    return res.json({
+      meeting_id: meeting.id,
+      status: 'queued',
+      request_id,
+    });
+
+  } catch (error: any) {
+    console.error('[MEETINGS] ❌ Error in /ingest:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: error.message,
+      request_id: req.headers['x-request-id'] || uuidv4()
+    });
+  }
+});
+
+/**
+ * GET /api/meetings/:id/status (CONTRATO)
+ * Obtener status del procesamiento
+ */
+router.get('/:id/status', async (req: Request, res: Response) => {
+  try {
+    const { id: meetingId } = req.params;
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'No authorization header' });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { data: meeting } = await supabase
+      .from('meetings')
+      .select('id, status, title, created_at, updated_at')
+      .eq('id', meetingId)
+      .eq('owner_user_id', user.id)
+      .single();
+
+    if (!meeting) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    // Calcular progress
+    let progress = 0;
+    if (meeting.status === 'recording') progress = 25;
+    if (meeting.status === 'processing') progress = 50;
+    if (meeting.status === 'completed') progress = 100;
+
+    return res.json({
+      status: meeting.status,
+      progress,
+      last_error: null,
+    });
+
+  } catch (error) {
+    console.error('[MEETINGS] Error in /:id/status:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/meetings/:id/result (CONTRATO COMPLETO)
+ * Obtener resultado final de meeting procesado
+ */
+router.get('/:id/result', async (req: Request, res: Response) => {
+  try {
+    const { id: meetingId } = req.params;
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'No authorization header' });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // 1. Obtener meeting
+    const { data: meeting } = await supabase
+      .from('meetings')
+      .select('*')
+      .eq('id', meetingId)
+      .eq('owner_user_id', user.id)
+      .single();
+
+    if (!meeting) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    // 2. Verificar que está completado
+    if (meeting.status !== 'completed') {
+      return res.status(400).json({
+        error: 'Meeting not completed',
+        status: meeting.status,
+        message: 'Use /api/meetings/:id/status to check progress'
+      });
+    }
+
+    // 3. Obtener transcript
+    const { data: transcripts } = await supabase
+      .from('meeting_transcripts')
+      .select('*')
+      .eq('meeting_id', meetingId)
+      .order('created_at', { ascending: true });
+
+    const transcript_full = transcripts?.map(t => t.text).join(' ') || '';
+
+    // 4. Obtener minuta
+    const { data: minute } = await supabase
+      .from('meeting_minutes')
+      .select('*')
+      .eq('meeting_id', meetingId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!minute) {
+      return res.status(404).json({
+        error: 'Meeting minutes not found',
+        message: 'Transcription completed but minutes not generated'
+      });
+    }
+
+    // 5. Parsear action_items y agreements
+    const tasks = Array.isArray(minute.action_items)
+      ? minute.action_items.map((item: any) => ({
+          text: item.text || item,
+          owner: item.owner || null,
+          due_date: item.due_date || null
+        }))
+      : [];
+
+    const agreements = Array.isArray(minute.detected_agreements)
+      ? minute.detected_agreements.map((item: any) => ({
+          text: item.text || item,
+          participants: item.participants || []
+        }))
+      : [];
+
+    // 6. Respuesta según contrato
+    return res.json({
+      transcript_full,
+      minutes: minute.content_markdown,
+      summary: minute.summary || '',
+      agreements,
+      tasks,
+      calendar_suggestions: [],
+      status: 'done',
+      evidence_ids: {
+        meeting_id: meeting.id,
+        transcript_ids: transcripts?.map(t => t.id) || [],
+        minute_id: minute.id,
+      },
+    });
+
+  } catch (error) {
+    console.error('[MEETINGS] Error in /:id/result:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/meetings/:id/ingest (LEGACY - RAG)
  * Ingestar transcript + minuta a RAG
  */
 router.post('/:id/ingest', async (req: Request, res: Response) => {
