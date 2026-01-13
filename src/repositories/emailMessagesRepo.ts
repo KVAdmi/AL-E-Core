@@ -65,13 +65,22 @@ export interface CreateEmailMessageData {
 }
 
 /**
- * Crear mensaje (con deduplicación por message_id)
+ * Crear mensaje (con deduplicación por message_uid + message_id)
  */
 export async function createEmailMessage(data: CreateEmailMessageData): Promise<EmailMessage | null> {
-  // Verificar si ya existe (deduplicación)
+  // Verificar si ya existe por UID (constraint único DB)
+  if (data.message_uid) {
+    const existingByUid = await getEmailMessageByUid(data.account_id, data.message_uid);
+    if (existingByUid) {
+      console.log('[REPO] ℹ️ Mensaje ya existe (UID):', data.message_uid);
+      return existingByUid;
+    }
+  }
+  
+  // Verificar si ya existe por message_id (backup)
   const existing = await getEmailMessageByMessageId(data.account_id, data.message_id);
   if (existing) {
-    console.log('[REPO] ℹ️ Mensaje ya existe:', data.message_id);
+    console.log('[REPO] ℹ️ Mensaje ya existe (message_id):', data.message_id);
     return existing;
   }
   
@@ -97,6 +106,28 @@ export async function createEmailMessage(data: CreateEmailMessageData): Promise<
   }
   
   return message;
+}
+
+/**
+ * Buscar mensaje por message_uid (constraint único con account_id)
+ */
+export async function getEmailMessageByUid(
+  accountId: string,
+  messageUid: string
+): Promise<EmailMessage | null> {
+  const { data, error } = await supabase
+    .from('email_messages')
+    .select('*')
+    .eq('account_id', accountId)
+    .eq('message_uid', messageUid)
+    .maybeSingle();
+  
+  if (error) {
+    console.error('[REPO] ❌ Error al buscar mensaje por UID:', error);
+    return null;
+  }
+  
+  return data;
 }
 
 /**
