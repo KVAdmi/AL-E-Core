@@ -58,20 +58,29 @@ router.post('/chat', optionalAuth, async (req, res) => {
   let sessionId: string | null = null;
   
   try {
-    console.log('\n[CHAT] ==================== NUEVA SOLICITUD ====================');
+    console.log('\n[CHAT] ========================================');
+    console.log('[CHAT] 🔵 NUEVA SOLICITUD /chat');
+    console.log('[CHAT] ========================================');
+    console.log(`[CHAT] 📋 Body keys: ${Object.keys(req.body).join(', ')}`);
+    console.log(`[CHAT] 👤 User authenticated: ${req.user ? 'YES' : 'NO'}`);
+    if (req.user) {
+      console.log(`[CHAT] 👤 User ID: ${req.user.id}`);
+    }
     
     // CRITICAL: Verificar que OpenAI está bloqueado
     const openaiCheck = verifyOpenAIBlocked();
-    console.log(`[CHAT] OpenAI Status: ${openaiCheck.message}`);
+    console.log(`[CHAT] 🔒 OpenAI Status: ${openaiCheck.message}`);
     
     // Anti-duplicado: request_id
     const request_id = req.body.request_id || uuidv4();
+    console.log(`[CHAT] 🆔 Request ID: ${request_id}`);
+    
     const now = Date.now();
     
     if (recentRequests.has(request_id)) {
       const timestamp = recentRequests.get(request_id)!;
       if (now - timestamp < 30000) { // 30s
-        console.warn(`[CHAT] ⚠️ Duplicate request detected: ${request_id}`);
+        console.warn(`[CHAT] ⚠️ DUPLICATE REQUEST detectado - request_id: ${request_id}, age: ${now - timestamp}ms`);
         return res.status(409).json({
           error: 'DUPLICATE_REQUEST',
           message: 'Request already processed recently',

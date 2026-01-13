@@ -595,30 +595,42 @@ router.post('/:id/send', async (req: Request, res: Response) => {
  * Subir audio para transcripción + minuta
  */
 router.post('/ingest', upload.single('file'), async (req: Request, res: Response) => {
+  const request_id = req.headers['x-request-id'] as string || uuidv4();
+  
   try {
-    const request_id = req.headers['x-request-id'] as string || uuidv4();
-    console.log(`[MEETINGS] 📥 /ingest - request_id: ${request_id}`);
+    console.log(`[MEETINGS:ingest] 🔵 INICIO - request_id: ${request_id}`);
+    console.log(`[MEETINGS:ingest] 📋 Headers:`, { authorization: req.headers.authorization ? 'presente' : 'ausente', contentType: req.headers['content-type'] });
 
     const file = req.file;
     if (!file) {
+      console.log(`[MEETINGS:ingest] ❌ No file provided - request_id: ${request_id}`);
       return res.status(400).json({ error: 'No file provided', request_id });
     }
 
+    console.log(`[MEETINGS:ingest] 📁 File recibido - name: ${file.originalname}, size: ${file.size} bytes, mimetype: ${file.mimetype}`);
+
     const authHeader = req.headers.authorization;
     if (!authHeader) {
+      console.log(`[MEETINGS:ingest] ❌ No authorization header - request_id: ${request_id}`);
       return res.status(401).json({ error: 'No authorization header', request_id });
     }
 
     const token = authHeader.replace('Bearer ', '');
+    console.log(`[MEETINGS:ingest] 🔐 Verificando auth token...`);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 
     if (authError || !user) {
+      console.log(`[MEETINGS:ingest] ❌ Unauthorized - error: ${authError?.message || 'No user'}`);
       return res.status(401).json({ error: 'Unauthorized', request_id });
     }
 
+    console.log(`[MEETINGS:ingest] ✅ Usuario autenticado - user_id: ${user.id}`);
+
     const { title, description, participants = [] } = req.body;
+    console.log(`[MEETINGS:ingest] 📝 Metadata - title: "${title || file.originalname}", participants: ${Array.isArray(participants) ? participants.length : 0}`);
 
     // 1. Crear meeting
+    console.log(`[MEETINGS:ingest] 💾 Creando registro de meeting...`);
     const { data: meeting, error: dbError } = await supabase
       .from('meetings')
       .insert({
@@ -634,13 +646,14 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
       .single();
 
     if (dbError) {
-      console.error('[MEETINGS] ❌ Error creating meeting:', dbError);
+      console.error(`[MEETINGS:ingest] ❌ Error creating meeting: ${dbError.message}`, dbError);
       return res.status(500).json({ error: 'Failed to create meeting', request_id });
     }
 
-    console.log(`[MEETINGS] ✓ Meeting created: ${meeting.id}`);
+    console.log(`[MEETINGS:ingest] ✅ Meeting created - meeting_id: ${meeting.id}, status: ${meeting.status}`);
 
     // 2. Upload a S3
+    console.log(`[MEETINGS:ingest] ☁️ Subiendo archivo a S3...`);
     const s3Result = await uploadMeetingFile({
       userId: user.id,
       meetingId: meeting.id,
@@ -649,9 +662,10 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
       mimeType: file.mimetype,
     });
 
-    console.log(`[MEETINGS] ✓ S3 upload: ${s3Result.s3Key}`);
+    console.log(`[MEETINGS:ingest] ✅ S3 upload exitoso - s3_key: ${s3Result.s3Key}, bucket: ${s3Result.s3Bucket}, url: ${s3Result.s3Url}`);
 
     // 3. Guardar asset
+    console.log(`[MEETINGS:ingest] 💾 Guardando asset en DB...`);
     const { data: asset, error: assetError } = await supabase
       .from('meeting_assets')
       .insert({
@@ -668,13 +682,14 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
       .single();
 
     if (assetError) {
-      console.error('[MEETINGS] ❌ Error saving asset:', assetError);
+      console.error(`[MEETINGS:ingest] ❌ Error saving asset: ${assetError.message}`, assetError);
       return res.status(500).json({ error: 'Failed to save file', request_id });
     }
 
-    console.log(`[MEETINGS] ✓ Asset saved: ${asset.id}`);
+    console.log(`[MEETINGS:ingest] ✅ Asset guardado - asset_id: ${asset.id}, s3_key: ${asset.s3_key}`);
 
     // 4. Encolar transcripción
+    console.log(`[MEETINGS:ingest] 📤 Encolando job de transcripción...`);
     await enqueueJob('TRANSCRIBE_FILE', {
       meetingId: meeting.id,
       assetId: asset.id,
@@ -683,7 +698,8 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
       request_id,
     });
 
-    console.log(`[MEETINGS] ✓ Job queued - meeting_id: ${meeting.id}, request_id: ${request_id}`);
+    console.log(`[MEETINGS:ingest] ✅ Job encolado exitosamente`);
+    console.log(`[MEETINGS:ingest] 🎉 COMPLETADO - meeting_id: ${meeting.id}, request_id: ${request_id}, status: queued`);
 
     // Respuesta según contrato
     return res.json({
@@ -693,11 +709,12 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
     });
 
   } catch (error: any) {
-    console.error('[MEETINGS] ❌ Error in /ingest:', error);
+    console.error(`[MEETINGS:ingest] 💥 EXCEPCIÓN - request_id: ${request_id}`, error);
+    console.error(`[MEETINGS:ingest] Stack:`, error.stack);
     return res.status(500).json({
       error: 'Internal server error',
       message: error.message,
-      request_id: req.headers['x-request-id'] || uuidv4()
+      request_id
     });
   }
 });
@@ -709,18 +726,25 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
 router.get('/:id/status', async (req: Request, res: Response) => {
   try {
     const { id: meetingId } = req.params;
+    console.log(`[MEETINGS:status] 🔵 INICIO - meeting_id: ${meetingId}`);
 
     const authHeader = req.headers.authorization;
     if (!authHeader) {
+      console.log(`[MEETINGS:status] ❌ No authorization header`);
       return res.status(401).json({ error: 'No authorization header' });
     }
 
     const token = authHeader.replace('Bearer ', '');
+    console.log(`[MEETINGS:status] 🔐 Verificando auth...`);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 
     if (authError || !user) {
+      console.log(`[MEETINGS:status] ❌ Unauthorized - error: ${authError?.message || 'No user'}`);
       return res.status(401).json({ error: 'Unauthorized' });
     }
+
+    console.log(`[MEETINGS:status] ✅ Usuario autenticado - user_id: ${user.id}`);
+    console.log(`[MEETINGS:status] 🔍 Consultando meeting en DB...`);
 
     const { data: meeting } = await supabase
       .from('meetings')
@@ -730,8 +754,11 @@ router.get('/:id/status', async (req: Request, res: Response) => {
       .single();
 
     if (!meeting) {
+      console.log(`[MEETINGS:status] ❌ Meeting no encontrado - meeting_id: ${meetingId}, user_id: ${user.id}`);
       return res.status(404).json({ error: 'Meeting not found' });
     }
+
+    console.log(`[MEETINGS:status] ✅ Meeting encontrado - status: ${meeting.status}, title: "${meeting.title}"`);
 
     // Calcular progress
     let progress = 0;
@@ -739,14 +766,18 @@ router.get('/:id/status', async (req: Request, res: Response) => {
     if (meeting.status === 'processing') progress = 50;
     if (meeting.status === 'completed') progress = 100;
 
+    console.log(`[MEETINGS:status] 📊 Progress calculado: ${progress}%`);
+    console.log(`[MEETINGS:status] 🎉 COMPLETADO - status: ${meeting.status}, progress: ${progress}`);
+
     return res.json({
       status: meeting.status,
       progress,
       last_error: null,
     });
 
-  } catch (error) {
-    console.error('[MEETINGS] Error in /:id/status:', error);
+  } catch (error: any) {
+    console.error(`[MEETINGS:status] 💥 EXCEPCIÓN:`, error);
+    console.error(`[MEETINGS:status] Stack:`, error.stack);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -758,20 +789,27 @@ router.get('/:id/status', async (req: Request, res: Response) => {
 router.get('/:id/result', async (req: Request, res: Response) => {
   try {
     const { id: meetingId } = req.params;
+    console.log(`[MEETINGS:result] 🔵 INICIO - meeting_id: ${meetingId}`);
 
     const authHeader = req.headers.authorization;
     if (!authHeader) {
+      console.log(`[MEETINGS:result] ❌ No authorization header`);
       return res.status(401).json({ error: 'No authorization header' });
     }
 
     const token = authHeader.replace('Bearer ', '');
+    console.log(`[MEETINGS:result] 🔐 Verificando auth...`);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 
     if (authError || !user) {
+      console.log(`[MEETINGS:result] ❌ Unauthorized - error: ${authError?.message || 'No user'}`);
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
+    console.log(`[MEETINGS:result] ✅ Usuario autenticado - user_id: ${user.id}`);
+
     // 1. Obtener meeting
+    console.log(`[MEETINGS:result] 🔍 Consultando meeting...`);
     const { data: meeting } = await supabase
       .from('meetings')
       .select('*')
@@ -780,11 +818,15 @@ router.get('/:id/result', async (req: Request, res: Response) => {
       .single();
 
     if (!meeting) {
+      console.log(`[MEETINGS:result] ❌ Meeting no encontrado - meeting_id: ${meetingId}`);
       return res.status(404).json({ error: 'Meeting not found' });
     }
 
+    console.log(`[MEETINGS:result] ✅ Meeting encontrado - status: ${meeting.status}, title: "${meeting.title}"`);
+
     // 2. Verificar que está completado
     if (meeting.status !== 'completed') {
+      console.log(`[MEETINGS:result] ⚠️ Meeting no completado - status actual: ${meeting.status}`);
       return res.status(400).json({
         error: 'Meeting not completed',
         status: meeting.status,
@@ -793,15 +835,19 @@ router.get('/:id/result', async (req: Request, res: Response) => {
     }
 
     // 3. Obtener transcript
+    console.log(`[MEETINGS:result] 📝 Consultando transcripts...`);
     const { data: transcripts } = await supabase
       .from('meeting_transcripts')
       .select('*')
       .eq('meeting_id', meetingId)
       .order('created_at', { ascending: true });
 
+    console.log(`[MEETINGS:result] ✅ Transcripts obtenidos - count: ${transcripts?.length || 0}`);
     const transcript_full = transcripts?.map(t => t.text).join(' ') || '';
+    console.log(`[MEETINGS:result] 📏 Transcript length: ${transcript_full.length} chars`);
 
     // 4. Obtener minuta
+    console.log(`[MEETINGS:result] 📋 Consultando meeting minutes...`);
     const { data: minute } = await supabase
       .from('meeting_minutes')
       .select('*')
@@ -811,11 +857,15 @@ router.get('/:id/result', async (req: Request, res: Response) => {
       .single();
 
     if (!minute) {
+      console.log(`[MEETINGS:result] ❌ Meeting minutes no encontradas`);
       return res.status(404).json({
         error: 'Meeting minutes not found',
         message: 'Transcription completed but minutes not generated'
       });
     }
+
+    console.log(`[MEETINGS:result] ✅ Minutes encontradas - minute_id: ${minute.id}`);
+    console.log(`[MEETINGS:result] 📊 Minutes data - summary: ${minute.summary?.length || 0} chars, action_items: ${Array.isArray(minute.action_items) ? minute.action_items.length : 0}, agreements: ${Array.isArray(minute.detected_agreements) ? minute.detected_agreements.length : 0}`);
 
     // 5. Parsear action_items y agreements
     const tasks = Array.isArray(minute.action_items)
@@ -833,8 +883,10 @@ router.get('/:id/result', async (req: Request, res: Response) => {
         }))
       : [];
 
+    console.log(`[MEETINGS:result] ✅ Datos parseados - tasks: ${tasks.length}, agreements: ${agreements.length}`);
+
     // 6. Respuesta según contrato
-    return res.json({
+    const response = {
       transcript_full,
       minutes: minute.content_markdown,
       summary: minute.summary || '',
@@ -843,14 +895,20 @@ router.get('/:id/result', async (req: Request, res: Response) => {
       calendar_suggestions: [],
       status: 'done',
       evidence_ids: {
-        meeting_id: meeting.id,
+        meeting_id: meetingId,
         transcript_ids: transcripts?.map(t => t.id) || [],
-        minute_id: minute.id,
-      },
-    });
+        minute_id: minute.id
+      }
+    };
 
-  } catch (error) {
-    console.error('[MEETINGS] Error in /:id/result:', error);
+    console.log(`[MEETINGS:result] 🎉 COMPLETADO - Enviando respuesta completa`);
+    console.log(`[MEETINGS:result] 📦 Response summary - transcript: ${response.transcript_full.length} chars, minutes: ${response.minutes.length} chars, tasks: ${tasks.length}, agreements: ${agreements.length}`);
+
+    return res.json(response);
+
+  } catch (error: any) {
+    console.error(`[MEETINGS:result] 💥 EXCEPCIÓN:`, error);
+    console.error(`[MEETINGS:result] Stack:`, error.stack);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

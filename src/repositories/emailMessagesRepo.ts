@@ -68,22 +68,27 @@ export interface CreateEmailMessageData {
  * Crear mensaje (con deduplicación por message_uid + message_id)
  */
 export async function createEmailMessage(data: CreateEmailMessageData): Promise<EmailMessage | null> {
+  console.log(`[REPO:createEmailMessage] 🔵 Iniciando - account_id: ${data.account_id}, message_uid: ${data.message_uid}, message_id: ${data.message_id}`);
+  
   // Verificar si ya existe por UID (constraint único DB)
   if (data.message_uid) {
+    console.log(`[REPO:createEmailMessage] 🔍 Verificando UID: ${data.message_uid}`);
     const existingByUid = await getEmailMessageByUid(data.account_id, data.message_uid);
     if (existingByUid) {
-      console.log('[REPO] ℹ️ Mensaje ya existe (UID):', data.message_uid);
+      console.log(`[REPO:createEmailMessage] ⏭️ Mensaje ya existe (UID): ${data.message_uid}, id: ${existingByUid.id}`);
       return existingByUid;
     }
   }
   
   // Verificar si ya existe por message_id (backup)
+  console.log(`[REPO:createEmailMessage] 🔍 Verificando message_id: ${data.message_id}`);
   const existing = await getEmailMessageByMessageId(data.account_id, data.message_id);
   if (existing) {
-    console.log('[REPO] ℹ️ Mensaje ya existe (message_id):', data.message_id);
+    console.log(`[REPO:createEmailMessage] ⏭️ Mensaje ya existe (message_id): ${data.message_id}, id: ${existing.id}`);
     return existing;
   }
   
+  console.log(`[REPO:createEmailMessage] 💾 Insertando nuevo mensaje - subject: "${data.subject}", from: ${data.from_address}`);
   const { data: message, error } = await supabase
     .from('email_messages')
     .insert({
@@ -101,10 +106,11 @@ export async function createEmailMessage(data: CreateEmailMessageData): Promise<
     .single();
   
   if (error) {
-    console.error('[REPO] ❌ Error al crear mensaje:', error);
+    console.error(`[REPO:createEmailMessage] ❌ Error al crear mensaje: ${error.message}`, error);
     return null;
   }
   
+  console.log(`[REPO:createEmailMessage] ✅ Mensaje creado exitosamente - id: ${message.id}`);
   return message;
 }
 
@@ -115,6 +121,8 @@ export async function getEmailMessageByUid(
   accountId: string,
   messageUid: string
 ): Promise<EmailMessage | null> {
+  console.log(`[REPO:getEmailMessageByUid] 🔍 Buscando - account_id: ${accountId}, message_uid: ${messageUid}`);
+  
   const { data, error } = await supabase
     .from('email_messages')
     .select('*')
@@ -123,8 +131,14 @@ export async function getEmailMessageByUid(
     .maybeSingle();
   
   if (error) {
-    console.error('[REPO] ❌ Error al buscar mensaje por UID:', error);
+    console.error(`[REPO:getEmailMessageByUid] ❌ Error al buscar mensaje por UID: ${error.message}`, error);
     return null;
+  }
+  
+  if (data) {
+    console.log(`[REPO:getEmailMessageByUid] ✅ Mensaje encontrado - id: ${data.id}`);
+  } else {
+    console.log(`[REPO:getEmailMessageByUid] ⚪ No encontrado`);
   }
   
   return data;
@@ -137,6 +151,8 @@ export async function getEmailMessageByMessageId(
   accountId: string,
   messageId: string
 ): Promise<EmailMessage | null> {
+  console.log(`[REPO:getEmailMessageByMessageId] 🔍 Buscando - account_id: ${accountId}, message_id: ${messageId}`);
+  
   const { data, error } = await supabase
     .from('email_messages')
     .select('*')
@@ -145,8 +161,14 @@ export async function getEmailMessageByMessageId(
     .maybeSingle();
   
   if (error) {
-    console.error('[REPO] ❌ Error al buscar mensaje:', error);
+    console.error(`[REPO:getEmailMessageByMessageId] ❌ Error al buscar mensaje: ${error.message}`, error);
     return null;
+  }
+  
+  if (data) {
+    console.log(`[REPO:getEmailMessageByMessageId] ✅ Mensaje encontrado - id: ${data.id}`);
+  } else {
+    console.log(`[REPO:getEmailMessageByMessageId] ⚪ No encontrado`);
   }
   
   return data;
