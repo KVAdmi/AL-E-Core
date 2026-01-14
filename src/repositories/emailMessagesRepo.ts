@@ -99,7 +99,7 @@ export async function createEmailMessage(data: CreateEmailMessageData): Promise<
     .single();
   
   if (error) {
-    // Si es duplicate key (23505), buscar el existente y retornarlo
+    // Si es duplicate key (23505), buscar el existente y retornarlo (NO es error real)
     if (error.code === '23505') {
       console.log(`[REPO:createEmailMessage] ⏭️ Duplicate key detectado - buscando mensaje existente`);
       
@@ -119,12 +119,13 @@ export async function createEmailMessage(data: CreateEmailMessageData): Promise<
         return { message: existing, wasInserted: false };
       }
       
-      console.error(`[REPO:createEmailMessage] ❌ Duplicate key pero no se encontró mensaje existente - posible inconsistencia`);
+      // Si llegamos aquí, hay inconsistencia en DB (constraint sin dato)
+      console.error(`[REPO:createEmailMessage] ❌ INCONSISTENCIA: Duplicate key pero mensaje no existe - account: ${data.account_id}, uid: ${data.message_uid}`);
       return { message: null, wasInserted: false };
     }
     
-    // Otro tipo de error
-    console.error(`[REPO:createEmailMessage] ❌ Error al crear mensaje: ${error.message}`, error);
+    // Error real (NO duplicate) - este SÍ debe loggearse completo
+    console.error(`[REPO:createEmailMessage] ❌ Error REAL al crear mensaje (code: ${error.code}): ${error.message}`);
     return { message: null, wasInserted: false };
   }
   

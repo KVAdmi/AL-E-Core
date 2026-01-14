@@ -241,8 +241,18 @@ export async function syncIMAPMessages(
     
     await client.connect();
     
-    // Abrir folder en modo readonly
-    const lock = await client.getMailboxLock(folderPath);
+    // Abrir folder en modo readonly - puede fallar si folder no existe
+    let lock;
+    try {
+      lock = await client.getMailboxLock(folderPath);
+    } catch (lockError: any) {
+      // Folder no existe en este proveedor (ej: "Spam" en Hostinger)
+      if (lockError.message?.includes('does not exist') || lockError.message?.includes('Mailbox doesn\'t exist') || lockError.message?.includes('Command failed')) {
+        console.warn(`[IMAP] ⚠️ Folder "${folderPath}" no existe en ${config.host} - skipping`);
+        return []; // Retornar vacío, NO es error
+      }
+      throw lockError; // Otro error sí debe propagarse
+    }
     
     try {
       // Si lastUid > 0, traer solo mensajes nuevos
