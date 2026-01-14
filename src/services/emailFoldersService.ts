@@ -50,7 +50,7 @@ export async function discoverAndSaveFolders(account: EmailAccount): Promise<voi
     
     console.log('[FOLDERS SERVICE] 📁 Descubiertos', discovered.length, 'folders');
     
-    // Insertar en base de datos
+    // Insertar en base de datos (solo si no existen)
     const foldersToInsert = discovered.map(folder => ({
       account_id: account.id,
       owner_user_id: account.owner_user_id,
@@ -62,12 +62,26 @@ export async function discoverAndSaveFolders(account: EmailAccount): Promise<voi
       sort_order: getSortOrder(folder.folderType)
     }));
     
+    // Verificar folders existentes para evitar duplicados
+    const { data: existingFolders } = await supabase
+      .from('email_folders')
+      .select('imap_path')
+      .eq('account_id', account.id);
+    
+    const existingPaths = new Set(existingFolders?.map(f => f.imap_path) || []);
+    
+    const newFolders = foldersToInsert.filter(f => !existingPaths.has(f.imap_path));
+    
+    if (newFolders.length === 0) {
+      console.log('[FOLDERS SERVICE] ✅ Todos los folders ya existen en DB');
+      return;
+    }
+    
+    console.log(`[FOLDERS SERVICE] 💾 Insertando ${newFolders.length} folders nuevos`);
+    
     const { data, error } = await supabase
       .from('email_folders')
-      .upsert(foldersToInsert, {
-        onConflict: 'account_id,imap_path',
-        ignoreDuplicates: false
-      })
+      .insert(newFolders)
       .select();
     
     if (error) {
