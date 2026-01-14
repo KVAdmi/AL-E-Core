@@ -28,13 +28,18 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
   try {
     console.log('[TRUTH CHAT] ===============================================');
     console.log('[TRUTH CHAT] Nueva solicitud con Truth Layer');
+    console.log('[TRUTH CHAT] Body keys:', Object.keys(req.body).join(', '));
+    console.log('[TRUTH CHAT] Body:', JSON.stringify(req.body, null, 2).substring(0, 500));
     
     // Obtener userId
     const authenticatedUserId = getUserId(req);
-    const bodyUserId = req.body.userId;
+    const bodyUserId = req.body.userId || req.body.user_id;
     const userId = authenticatedUserId || bodyUserId;
     
+    console.log('[TRUTH CHAT] User ID resolved:', userId);
+    
     if (!userId) {
+      console.log('[TRUTH CHAT] ERROR: No userId found');
       return res.status(400).json({
         error: 'userId is required',
         wasBlocked: true,
@@ -44,7 +49,12 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
     // Validar messages
     const { messages, userConfirmed } = req.body;
     
+    console.log('[TRUTH CHAT] Messages type:', typeof messages);
+    console.log('[TRUTH CHAT] Messages is array:', Array.isArray(messages));
+    console.log('[TRUTH CHAT] Messages length:', messages?.length);
+    
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      console.log('[TRUTH CHAT] ERROR: Invalid messages array');
       return res.status(400).json({
         error: 'messages must be a non-empty array',
         wasBlocked: true,

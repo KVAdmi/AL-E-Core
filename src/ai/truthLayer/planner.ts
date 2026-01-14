@@ -140,26 +140,53 @@ export class Planner {
     const lowerMsg = userMessage.toLowerCase();
     const tools: string[] = [];
     
-    // EMAIL
-    if (lowerMsg.includes('envía') && (lowerMsg.includes('correo') || lowerMsg.includes('email'))) {
+    // ═══ EMAIL TOOLS ═══
+    // Enviar email
+    if ((lowerMsg.includes('envía') || lowerMsg.includes('envia') || lowerMsg.includes('manda') || lowerMsg.includes('escribe')) && 
+        (lowerMsg.includes('correo') || lowerMsg.includes('email') || lowerMsg.includes('mail'))) {
       tools.push('send_email');
-    } else if (lowerMsg.includes('lee') || lowerMsg.includes('revisa') || lowerMsg.includes('muestra')) {
-      if (lowerMsg.includes('correo') || lowerMsg.includes('email')) {
+    }
+    // Listar emails (inbox)
+    else if ((lowerMsg.includes('revisa') || lowerMsg.includes('muestra') || lowerMsg.includes('lista') || lowerMsg.includes('cuál') || lowerMsg.includes('últim')) && 
+             (lowerMsg.includes('correo') || lowerMsg.includes('email') || lowerMsg.includes('inbox') || lowerMsg.includes('bandeja'))) {
+      tools.push('list_emails');
+    }
+    // Leer email específico (cuando menciona "lee" o pide contenido)
+    else if ((lowerMsg.includes('lee') || lowerMsg.includes('abre') || lowerMsg.includes('contenido') || lowerMsg.includes('dice')) && 
+             (lowerMsg.includes('correo') || lowerMsg.includes('email') || lowerMsg.includes('mensaje'))) {
+      // Si pide leer, primero necesita listar para obtener emailId
+      if (!tools.includes('list_emails')) {
         tools.push('list_emails');
       }
     }
     
-    // CALENDAR
-    if ((lowerMsg.includes('agenda') || lowerMsg.includes('cita')) && 
-        (lowerMsg.includes('crea') || lowerMsg.includes('agendar'))) {
+    // ═══ CALENDAR TOOLS ═══
+    // Crear evento
+    if ((lowerMsg.includes('crea') || lowerMsg.includes('agendar') || lowerMsg.includes('programa') || lowerMsg.includes('agregar')) && 
+        (lowerMsg.includes('evento') || lowerMsg.includes('cita') || lowerMsg.includes('reunión') || lowerMsg.includes('junta') || lowerMsg.includes('agenda'))) {
       tools.push('create_event');
-    } else if (lowerMsg.includes('eventos') || lowerMsg.includes('calendario')) {
+    }
+    // Listar eventos
+    else if ((lowerMsg.includes('qué') || lowerMsg.includes('cuál') || lowerMsg.includes('muestra') || lowerMsg.includes('lista') || lowerMsg.includes('tengo') || lowerMsg.includes('agenda')) && 
+             (lowerMsg.includes('evento') || lowerMsg.includes('cita') || lowerMsg.includes('reunión') || lowerMsg.includes('calendario') || lowerMsg.includes('agenda') || lowerMsg.includes('programado') || lowerMsg.includes('agendado'))) {
       tools.push('list_events');
     }
     
-    // WEB SEARCH (si clasificación lo sugiere)
-    if (classification.tools_required.includes('web_search')) {
-      tools.push('web_search');
+    // ═══ WEB SEARCH ═══
+    // Si clasificación sugiere web_search O si pide buscar/investigar
+    if (classification.tools_required.includes('web_search') || 
+        lowerMsg.includes('busca') || lowerMsg.includes('investiga') || 
+        lowerMsg.includes('encuentra') || lowerMsg.includes('información sobre') ||
+        lowerMsg.includes('qué es') || lowerMsg.includes('cómo funciona')) {
+      // Solo si NO es algo interno (email, calendario)
+      if (!lowerMsg.includes('correo') && !lowerMsg.includes('email') && !lowerMsg.includes('agenda')) {
+        tools.push('web_search');
+      }
+    }
+    
+    // ═══ MEETING TOOLS ═══
+    if (lowerMsg.includes('grabación') || lowerMsg.includes('transcripción') || lowerMsg.includes('minuta') || lowerMsg.includes('reunión grabada')) {
+      tools.push('meeting_query');
     }
     
     return tools;
