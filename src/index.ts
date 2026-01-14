@@ -227,6 +227,7 @@ app.use("/api/ai", aiEmailRouter); // AI Email endpoints (analyze-email, draft-r
 app.use("/api/mail", aiEmailRouter); // AI Email endpoints TAMBIÉN en /api/mail (compatibilidad)
 app.use("/api/contacts", contactsRouter); // Contacts API
 app.use("/api/calendar", calendarRouter); // Calendario interno
+app.use("/api/admin/folders", require("./api/admin/folders").default); // Admin: poblar folders
 app.use("/api/telegram", telegramRouter); // Telegram bot por usuario
 app.use("/api/runtime-capabilities", runtimeCapabilitiesRouter); // Runtime capabilities
 app.use("/api/p0", p0Router); // P0 internal testing (service role only)

@@ -212,6 +212,7 @@ app.use("/api/ai", aiEmail_1.default); // AI Email endpoints (analyze-email, dra
 app.use("/api/mail", aiEmail_1.default); // AI Email endpoints TAMBIÉN en /api/mail (compatibilidad)
 app.use("/api/contacts", contacts_1.default); // Contacts API
 app.use("/api/calendar", calendar_1.default); // Calendario interno
+app.use("/api/admin/folders", require("./api/admin/folders").default); // Admin: poblar folders
 app.use("/api/telegram", telegram_1.default); // Telegram bot por usuario
 app.use("/api/runtime-capabilities", runtime_capabilities_1.default); // Runtime capabilities
 app.use("/api/p0", p0_1.default); // P0 internal testing (service role only)

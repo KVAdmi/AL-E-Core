@@ -18,6 +18,8 @@ import * as accountsRepo from '../repositories/emailAccountsRepo';
 import * as messagesRepo from '../repositories/emailMessagesRepo';
 import * as foldersRepo from '../repositories/emailFoldersRepo';
 import * as syncLogRepo from '../repositories/emailSyncLogRepo';
+import { accountHasFolders, discoverAndSaveFolders } from '../services/emailFoldersService';
+import type { EmailAccount } from '../services/emailFoldersService';
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutos
 const MAX_MESSAGES_PER_SYNC = 50; // Límite para evitar sobrecarga
@@ -36,6 +38,26 @@ async function syncAccount(account: any): Promise<void> {
   });
   
   try {
+    // 🔥 AUTO-DISCOVERY: Si la cuenta no tiene folders, descubrirlos via IMAP
+    const hasFolders = await accountHasFolders(account.id);
+    
+    if (!hasFolders) {
+      console.log('[SYNC WORKER] 🔍 Cuenta sin folders → ejecutando auto-discovery');
+      try {
+        await discoverAndSaveFolders(account as EmailAccount);
+      } catch (discoveryError: any) {
+        console.error('[SYNC WORKER] ❌ Error en auto-discovery:', discoveryError.message);
+        await syncLogRepo.completeSyncLog(logId, {
+          status: 'failed',
+          messages_fetched: 0,
+          messages_new: 0,
+          messages_updated: 0,
+          errors: `Folder discovery failed: ${discoveryError.message}`
+        });
+        return;
+      }
+    }
+    
     // Obtener folders de la cuenta
     const folders = await foldersRepo.listEmailFolders(account.id, account.owner_user_id);
     

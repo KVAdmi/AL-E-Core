@@ -525,3 +525,187 @@ export async function moveIMAPMessage(
     }
   }
 }
+
+/**
+ * =====================================================
+ * FOLDER DISCOVERY - IMAP
+ * =====================================================
+ * Descubre todos los folders disponibles en un servidor IMAP
+ * y los normaliza a tipos estándar (inbox, sent, drafts, etc.)
+ */
+
+export interface DiscoveredFolder {
+  path: string;
+  delimiter: string;
+  flags: string[];
+  specialUse?: string;
+  folderType: 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam' | 'archive' | 'other';
+  displayName: string;
+}
+
+/**
+ * Descubre todos los folders/mailboxes en el servidor IMAP
+ */
+export async function discoverIMAPFolders(config: IMAPConfig): Promise<DiscoveredFolder[]> {
+  let client: ImapFlow | null = null;
+  
+  try {
+    console.log('[IMAP DISCOVERY] 🔍 Descubriendo folders en', config.host);
+    
+    const password = decryptCredential(config.pass_enc);
+    
+    client = new ImapFlow({
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+      auth: { user: config.user, pass: password },
+      logger: false
+    });
+    
+    await client.connect();
+    
+    // Listar todos los mailboxes
+    const list = await client.list();
+    
+    console.log('[IMAP DISCOVERY] 📁 Encontrados', list.length, 'folders');
+    
+    const discovered: DiscoveredFolder[] = list.map(mailbox => {
+      // Convertir flags a string[] si es Set<string>
+      const flagsArray = mailbox.flags 
+        ? (Array.isArray(mailbox.flags) ? mailbox.flags : Array.from(mailbox.flags))
+        : [];
+      
+      const folderType = normalizeFolderType(mailbox.path, mailbox.specialUse, flagsArray);
+      const displayName = generateDisplayName(mailbox.path, folderType);
+      
+      return {
+        path: mailbox.path,
+        delimiter: mailbox.delimiter || '/',
+        flags: flagsArray,
+        specialUse: mailbox.specialUse,
+        folderType,
+        displayName
+      };
+    });
+    
+    // Log resumen
+    discovered.forEach(f => {
+      console.log(`[IMAP DISCOVERY]   - ${f.displayName} (${f.folderType}) → ${f.path}`);
+    });
+    
+    return discovered;
+    
+  } catch (error: any) {
+    console.error('[IMAP DISCOVERY] ❌ Error:', error.message);
+    throw error;
+  } finally {
+    if (client) {
+      try {
+        await client.logout();
+      } catch {}
+    }
+  }
+}
+
+/**
+ * Normaliza el path IMAP a un folder_type estándar
+ */
+function normalizeFolderType(
+  path: string,
+  specialUse?: string,
+  flags?: string[]
+): 'inbox' | 'sent' | 'drafts' | 'trash' | 'spam' | 'archive' | 'other' {
+  const lowerPath = path.toLowerCase();
+  const lowerSpecialUse = specialUse?.toLowerCase() || '';
+  const lowerFlags = flags?.map(f => f.toLowerCase()) || [];
+  
+  // Prioridad 1: Special-Use flags (RFC 6154)
+  if (lowerSpecialUse.includes('sent') || lowerFlags.includes('\\sent')) {
+    return 'sent';
+  }
+  if (lowerSpecialUse.includes('drafts') || lowerFlags.includes('\\drafts')) {
+    return 'drafts';
+  }
+  if (lowerSpecialUse.includes('trash') || lowerFlags.includes('\\trash')) {
+    return 'trash';
+  }
+  if (lowerSpecialUse.includes('junk') || lowerFlags.includes('\\junk')) {
+    return 'spam';
+  }
+  if (lowerSpecialUse.includes('archive') || lowerFlags.includes('\\archive')) {
+    return 'archive';
+  }
+  if (lowerSpecialUse.includes('inbox') || lowerFlags.includes('\\inbox')) {
+    return 'inbox';
+  }
+  
+  // Prioridad 2: Nombre del path (case insensitive)
+  if (lowerPath === 'inbox') return 'inbox';
+  
+  // Gmail patterns
+  if (lowerPath.includes('[gmail]/sent') || lowerPath.includes('[gmail]/mensajes enviados')) {
+    return 'sent';
+  }
+  if (lowerPath.includes('[gmail]/drafts') || lowerPath.includes('[gmail]/borradores')) {
+    return 'drafts';
+  }
+  if (lowerPath.includes('[gmail]/trash') || lowerPath.includes('[gmail]/papelera')) {
+    return 'trash';
+  }
+  if (lowerPath.includes('[gmail]/spam')) {
+    return 'spam';
+  }
+  if (lowerPath.includes('[gmail]/all') || lowerPath.includes('[gmail]/todos')) {
+    return 'archive';
+  }
+  
+  // Outlook patterns
+  if (lowerPath.includes('sent items')) return 'sent';
+  if (lowerPath.includes('deleted items')) return 'trash';
+  if (lowerPath.includes('junk email')) return 'spam';
+  
+  // Generic patterns
+  if (lowerPath.includes('sent')) return 'sent';
+  if (lowerPath.includes('enviado')) return 'sent';
+  if (lowerPath.includes('draft')) return 'drafts';
+  if (lowerPath.includes('borrador')) return 'drafts';
+  if (lowerPath.includes('trash') || lowerPath.includes('papelera') || lowerPath.includes('deleted')) {
+    return 'trash';
+  }
+  if (lowerPath.includes('spam') || lowerPath.includes('junk') || lowerPath.includes('correo no deseado')) {
+    return 'spam';
+  }
+  if (lowerPath.includes('archive') || lowerPath.includes('archivo')) {
+    return 'archive';
+  }
+  
+  return 'other';
+}
+
+/**
+ * Genera un nombre de display legible para el folder
+ */
+function generateDisplayName(path: string, folderType: string): string {
+  // Si ya tenemos un tipo conocido, usar nombre estandarizado
+  const standardNames: Record<string, string> = {
+    inbox: 'Inbox',
+    sent: 'Sent',
+    drafts: 'Drafts',
+    trash: 'Trash',
+    spam: 'Spam',
+    archive: 'Archive'
+  };
+  
+  if (folderType !== 'other' && standardNames[folderType]) {
+    return standardNames[folderType];
+  }
+  
+  // Para folders custom, limpiar el path
+  let name = path
+    .replace(/^\[Gmail\]\//i, '')
+    .replace(/^\[Outlook\]\//i, '')
+    .replace(/^INBOX\./i, '');
+  
+  // Capitalizar primera letra
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
