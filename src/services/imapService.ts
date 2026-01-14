@@ -619,7 +619,13 @@ function normalizeFolderType(
   const lowerSpecialUse = specialUse?.toLowerCase() || '';
   const lowerFlags = flags?.map(f => f.toLowerCase()) || [];
   
+  // ⚡ PRIORIDAD MÁXIMA: INBOX siempre es inbox
+  if (lowerPath === 'inbox') return 'inbox';
+  
   // Prioridad 1: Special-Use flags (RFC 6154)
+  if (lowerSpecialUse.includes('inbox') || lowerFlags.includes('\\inbox')) {
+    return 'inbox';
+  }
   if (lowerSpecialUse.includes('sent') || lowerFlags.includes('\\sent')) {
     return 'sent';
   }

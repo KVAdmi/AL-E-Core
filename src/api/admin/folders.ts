@@ -64,6 +64,45 @@ router.get('/check/:userId', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/admin/folders/repopulate/:userId
+ * Elimina folders existentes y los vuelve a descubrir (útil para fix de normalization bugs)
+ */
+router.post('/repopulate/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    
+    console.log('[ADMIN] Re-poblando folders para usuario:', userId);
+    
+    // Eliminar folders existentes del usuario
+    const { error: deleteError } = await supabase
+      .from('email_folders')
+      .delete()
+      .eq('owner_user_id', userId);
+    
+    if (deleteError) {
+      throw new Error(`Error eliminando folders: ${deleteError.message}`);
+    }
+    
+    console.log('[ADMIN] ✅ Folders antiguos eliminados');
+    
+    // Poblar folders nuevamente
+    await populateFoldersForUser(userId);
+    
+    res.json({
+      success: true,
+      message: `Folders re-poblados exitosamente para usuario ${userId}`
+    });
+    
+  } catch (error: any) {
+    console.error('[ADMIN] Error re-poblando folders:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
  * POST /api/admin/folders/populate/:userId
  * Pobla folders para un usuario específico
  */
