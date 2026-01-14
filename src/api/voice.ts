@@ -206,16 +206,8 @@ router.post('/tts', async (req, res) => {
   }
 });
 
-/**
- * POST /api/voice/stt
- * Convierte voz a texto usando Groq Whisper
- * 
- * P0: STT REAL - Groq Whisper API
- * - Timeout: 20s
- * - Log obligatorio en ae_requests
- * - Soporta: mp3, wav, ogg, webm, m4a
- */
-router.post('/stt', upload.single('audio'), async (req, res) => {
+// Handler compartido para STT
+const handleSTT = async (req: express.Request, res: express.Response) => {
   const startTime = Date.now();
   console.log('[STT] 🎤 Request recibido');
 
@@ -391,7 +383,19 @@ router.post('/stt', upload.single('audio'), async (req, res) => {
       message: 'Error interno al procesar STT'
     });
   }
-});
+};
+
+/**
+ * POST /api/voice/stt
+ * Convierte voz a texto usando Groq Whisper
+ */
+router.post('/stt', upload.single('audio'), handleSTT);
+
+/**
+ * POST /api/voice/transcribe
+ * Alias de /stt para compatibilidad con frontend
+ */
+router.post('/transcribe', upload.single('audio'), handleSTT);
 
 /**
  * GET /api/voice/capabilities
