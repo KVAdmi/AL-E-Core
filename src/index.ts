@@ -34,6 +34,7 @@ import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
 import { startNotificationWorker } from "./workers/notificationWorker";
 import { startEmailSyncWorker } from "./workers/emailSyncWorker";
 import { startMeetingTimeoutWorker } from "./workers/meetingTimeoutWorker";
+import { llmFactory } from "./llm/providerFactory"; // LLM Factory init (P0-CRÍTICO para tool calling)
 
 const app = express();
 
