@@ -120,7 +120,7 @@ export class TruthOrchestrator {
     console.log('[TRUTH ORCH] STEP 2: AUTHORITY ENGINE');
     
     const authorityContext: AuthorityContext = {
-      currentLevel: 'A0', // SIEMPRE arranca en A0
+      currentLevel: 'A2', // Usuario normal (puede leer/escribir datos propios)
       userId: request.userId,
     };
     
