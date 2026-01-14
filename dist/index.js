@@ -191,8 +191,9 @@ app.get("/health", async (req, res) => {
 });
 // app.use("/lia", liaRouter);
 app.use("/_health", health_1.default); // Health checks protegidos
-app.use("/api/ai", chat_1.default); // Nuevo endpoint con guardado garantizado en Supabase
-app.use("/api/ai", require("./api/truthChat").default); // Truth Chat (Truth Layer + Authority Matrix)
+// CRÍTICO: Truth Orchestrator PRIMERO (reemplaza /chat con truth layer)
+app.use("/api/ai", require("./api/truthChat").default); // Truth Chat (Truth Layer + Authority Matrix + LOGS)
+app.use("/api/ai/legacy", chat_1.default); // Old endpoint (sin Truth Layer) - DEPRECATED
 app.use("/api/files", files_1.default); // Endpoint de ingesta estructural de documentos
 app.use("/api/voice", voice_1.voiceRouter);
 app.use("/api/sessions", sessions_1.sessionsRouter);

@@ -13,15 +13,16 @@ const router = express.Router();
 
 /**
  * POST /api/ai/truth-chat
+ * POST /api/ai/chat (NUEVO - reemplaza el viejo con Truth Layer)
  * 
- * Endpoint de testing para Truth Orchestrator
+ * Endpoint con Truth Orchestrator + Authority Matrix + Logs estructurados
  * 
  * Body:
  * - messages: Array<{role, content}>
  * - userId: string
  * - userConfirmed: boolean (opcional)
  */
-router.post('/truth-chat', optionalAuth, async (req, res) => {
+const handleTruthChat = async (req: express.Request, res: express.Response) => {
   const startTime = Date.now();
   
   try {
@@ -112,6 +113,10 @@ router.post('/truth-chat', optionalAuth, async (req, res) => {
       wasBlocked: true,
     });
   }
-});
+};
+
+// Montar en ambos endpoints
+router.post('/truth-chat', optionalAuth, handleTruthChat);
+router.post('/chat', optionalAuth, handleTruthChat); // NUEVO - reemplaza /chat con Truth Layer
 
 export default router;
