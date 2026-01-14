@@ -129,6 +129,64 @@ router.post('/populate/:userId', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/admin/folders/repopulate-all
+ * Re-pobla folders para todas las cuentas del sistema (útil después de fix de bugs)
+ */
+router.post('/repopulate-all', async (req: Request, res: Response) => {
+  try {
+    console.log('[ADMIN] Re-poblando folders para TODAS las cuentas...');
+    
+    // Obtener todos los user IDs únicos
+    const { data: accounts } = await supabase
+      .from('email_accounts')
+      .select('owner_user_id')
+      .eq('is_active', true);
+    
+    const uniqueUserIds = [...new Set(accounts?.map(a => a.owner_user_id) || [])];
+    
+    console.log(`[ADMIN] Encontrados ${uniqueUserIds.length} usuarios con cuentas activas`);
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
+    for (const userId of uniqueUserIds) {
+      try {
+        // Eliminar folders existentes
+        await supabase
+          .from('email_folders')
+          .delete()
+          .eq('owner_user_id', userId);
+        
+        // Repoblar
+        await populateFoldersForUser(userId);
+        successCount++;
+        console.log(`[ADMIN] ✅ Usuario ${userId} completado`);
+      } catch (error: any) {
+        errorCount++;
+        console.error(`[ADMIN] ❌ Error con usuario ${userId}:`, error.message);
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Re-población completada: ${successCount} exitosos, ${errorCount} errores`,
+      stats: {
+        total: uniqueUserIds.length,
+        success: successCount,
+        errors: errorCount
+      }
+    });
+    
+  } catch (error: any) {
+    console.error('[ADMIN] Error re-poblando folders:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
  * POST /api/admin/folders/populate-all
  * Pobla folders para todas las cuentas activas
  */
