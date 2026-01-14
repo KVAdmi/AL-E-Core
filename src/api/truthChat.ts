@@ -115,8 +115,9 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
   }
 };
 
-// Montar en ambos endpoints
+// Montar en TODOS los endpoints que el frontend puede usar
 router.post('/truth-chat', optionalAuth, handleTruthChat);
 router.post('/chat', optionalAuth, handleTruthChat); // NUEVO - reemplaza /chat con Truth Layer
+router.post('/chat/v2', optionalAuth, handleTruthChat); // También /chat/v2 (frontend usa esta)
 
 export default router;
