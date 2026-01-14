@@ -17,17 +17,21 @@ import { supabase } from '../../db/supabase';
 
 export interface CalendarEvent {
   id?: string;
-  owner_user_id: string;  // Corregido: era user_id
+  owner_user_id: string;
   title: string;
   description?: string;
-  start_date: string;  // ISO 8601
-  end_date?: string;
+  start_at: string;  // ISO 8601 - CORREGIDO: era start_date
+  end_at?: string;   // CORREGIDO: era end_date
+  timezone?: string;
   location?: string;
-  attendees?: string[];
-  reminder_minutes?: number;
+  attendees_json?: any;  // CORREGIDO: era attendees (array)
+  notification_minutes?: number;  // CORREGIDO: era reminder_minutes
+  status?: string;
   source?: 'manual' | 'email' | 'chat';
-  source_id?: string;  // email_id si viene de correo
+  source_id?: string;
+  reminder_sent?: boolean;
   created_at?: string;
+  updated_at?: string;
 }
 
 /**
@@ -35,19 +39,19 @@ export interface CalendarEvent {
  */
 export async function createCalendarEvent(
   userId: string,
-  event: Omit<CalendarEvent, 'id' | 'owner_user_id' | 'created_at'>
+  event: Omit<CalendarEvent, 'id' | 'owner_user_id' | 'created_at' | 'updated_at' | 'reminder_sent'>
 ): Promise<{ success: boolean; event?: CalendarEvent; error?: string }> {
   try {
     console.log('[CALENDAR TOOLS] 📅 Creando evento:', event.title);
     
     // Validar fecha
-    const startDate = new Date(event.start_date);
+    const startDate = new Date(event.start_at);
     if (isNaN(startDate.getTime())) {
       throw new Error('Fecha inválida');
     }
     
     // Verificar conflictos
-    const hasConflict = await checkConflicts(userId, event.start_date, event.end_date);
+    const hasConflict = await checkConflicts(userId, event.start_at, event.end_at);
     if (hasConflict) {
       console.warn('[CALENDAR TOOLS] ⚠️  Conflicto de horario detectado');
     }
@@ -56,9 +60,12 @@ export async function createCalendarEvent(
     const { data, error } = await supabase
       .from('calendar_events')
       .insert([{
-        owner_user_id: userId,  // Corregido: era user_id
+        owner_user_id: userId,
         ...event,
-        created_at: new Date().toISOString()
+        status: event.status || 'confirmed',
+        reminder_sent: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       }])
       .select()
       .single();
@@ -97,15 +104,15 @@ export async function listEvents(
     let query = supabase
       .from('calendar_events')
       .select('*')
-      .eq('owner_user_id', userId)  // Corregido: era user_id
-      .order('start_date', { ascending: true });
+      .eq('owner_user_id', userId)
+      .order('start_at', { ascending: true });
     
     if (startDate) {
-      query = query.gte('start_date', startDate);
+      query = query.gte('start_at', startDate);
     }
     
     if (endDate) {
-      query = query.lte('start_date', endDate);
+      query = query.lte('start_at', endDate);
     }
     
     const { data, error } = await query;
@@ -142,8 +149,8 @@ async function checkConflicts(
     const { data, error } = await supabase
       .from('calendar_events')
       .select('id')
-      .eq('owner_user_id', userId)  // Corregido: era user_id
-      .or(`start_date.lte.${end},end_date.gte.${startDate}`);
+      .eq('owner_user_id', userId)
+      .or(`start_at.lte.${end},end_at.gte.${startDate}`);
     
     if (error) return false;
     
@@ -181,14 +188,14 @@ export async function extractAndSchedule(
     const createdEvents: CalendarEvent[] = [];
     
     for (const detected of detectedDates) {
-      const eventData: Omit<CalendarEvent, 'id' | 'owner_user_id' | 'created_at'> = {
+      const eventData: Omit<CalendarEvent, 'id' | 'owner_user_id' | 'created_at' | 'updated_at' | 'reminder_sent'> = {
         title: detected.title || context?.default_title || 'Evento detectado',
         description: detected.context,
-        start_date: detected.date,
-        end_date: detected.endDate,
+        start_at: detected.date,
+        end_at: detected.endDate,
         source: context?.source || 'chat',
         source_id: context?.source_id,
-        reminder_minutes: 30 // recordatorio 30 min antes
+        notification_minutes: 30 // recordatorio 30 min antes
       };
       
       const result = await createCalendarEvent(userId, eventData);
@@ -349,29 +356,32 @@ export const CALENDAR_TOOLS_DEFINITIONS = [
           type: 'string',
           description: 'Descripción del evento (opcional)'
         },
-        start_date: {
+        start_at: {
           type: 'string',
           description: 'Fecha y hora de inicio en formato ISO 8601 (ej: 2026-01-15T14:00:00Z)'
         },
-        end_date: {
+        end_at: {
           type: 'string',
           description: 'Fecha y hora de fin (opcional)'
+        },
+        timezone: {
+          type: 'string',
+          description: 'Zona horaria (opcional, ej: America/Mexico_City)'
         },
         location: {
           type: 'string',
           description: 'Ubicación del evento (opcional)'
         },
-        attendees: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Lista de asistentes (emails)'
+        attendees_json: {
+          type: 'object',
+          description: 'JSON con lista de asistentes (opcional)'
         },
-        reminder_minutes: {
+        notification_minutes: {
           type: 'number',
           description: 'Minutos antes para recordatorio (default: 30)'
         }
       },
-      required: ['title', 'start_date']
+      required: ['title', 'start_at']
     }
   },
   {
@@ -380,11 +390,11 @@ export const CALENDAR_TOOLS_DEFINITIONS = [
     parameters: {
       type: 'object',
       properties: {
-        start_date: {
+        start_at: {
           type: 'string',
           description: 'Fecha de inicio del rango (ISO 8601)'
         },
-        end_date: {
+        end_at: {
           type: 'string',
           description: 'Fecha de fin del rango (ISO 8601)'
         }

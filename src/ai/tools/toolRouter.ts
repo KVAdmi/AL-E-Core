@@ -240,17 +240,18 @@ export async function executeTool(
 
       // Calendar Tools
       case 'create_calendar_event':
-        if (!parameters.title || !parameters.start_date) {
-          throw new Error('title y start_date son requeridos');
+        if (!parameters.title || !parameters.start_at) {
+          throw new Error('title y start_at son requeridos');
         }
         const eventResult = await createCalendarEvent(userId, {
           title: parameters.title,
           description: parameters.description,
-          start_date: parameters.start_date,
-          end_date: parameters.end_date,
+          start_at: parameters.start_at,
+          end_at: parameters.end_at,
+          timezone: parameters.timezone,
           location: parameters.location,
-          attendees: parameters.attendees,
-          reminder_minutes: parameters.reminder_minutes
+          attendees_json: parameters.attendees_json || parameters.attendees,
+          notification_minutes: parameters.notification_minutes || parameters.reminder_minutes
         });
         return {
           success: eventResult.success,
@@ -261,8 +262,8 @@ export async function executeTool(
       case 'list_calendar_events':
         const listResult = await listEvents(
           userId,
-          parameters.start_date,
-          parameters.end_date
+          parameters.start_at || parameters.start_date,
+          parameters.end_at || parameters.end_date
         );
         return {
           success: listResult.success,
