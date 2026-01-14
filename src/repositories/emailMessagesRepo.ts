@@ -64,10 +64,16 @@ export interface CreateEmailMessageData {
   size_bytes?: number;
 }
 
+export interface CreateEmailMessageResult {
+  message: EmailMessage | null;
+  wasInserted: boolean;  // true = INSERT nuevo, false = duplicate skip
+}
+
 /**
  * Crear mensaje (IDEMPOTENTE con UPSERT - elimina race conditions)
+ * Retorna { message, wasInserted } para distinguir entre INSERT real y duplicate skip
  */
-export async function createEmailMessage(data: CreateEmailMessageData): Promise<EmailMessage | null> {
+export async function createEmailMessage(data: CreateEmailMessageData): Promise<CreateEmailMessageResult> {
   console.log(`[REPO:createEmailMessage] 🔵 Iniciando - account_id: ${data.account_id}, message_uid: ${data.message_uid}, message_id: ${data.message_id}`);
   
   // UPSERT idempotente - ON CONFLICT DO NOTHING
@@ -102,7 +108,7 @@ export async function createEmailMessage(data: CreateEmailMessageData): Promise<
         const existing = await getEmailMessageByUid(data.account_id, data.message_uid);
         if (existing) {
           console.log(`[REPO:createEmailMessage] ✅ Skipped duplicate (UID) - id: ${existing.id}`);
-          return existing;
+          return { message: existing, wasInserted: false };
         }
       }
       
@@ -110,20 +116,20 @@ export async function createEmailMessage(data: CreateEmailMessageData): Promise<
       const existing = await getEmailMessageByMessageId(data.account_id, data.message_id);
       if (existing) {
         console.log(`[REPO:createEmailMessage] ✅ Skipped duplicate (message_id) - id: ${existing.id}`);
-        return existing;
+        return { message: existing, wasInserted: false };
       }
       
       console.error(`[REPO:createEmailMessage] ❌ Duplicate key pero no se encontró mensaje existente - posible inconsistencia`);
-      return null;
+      return { message: null, wasInserted: false };
     }
     
     // Otro tipo de error
     console.error(`[REPO:createEmailMessage] ❌ Error al crear mensaje: ${error.message}`, error);
-    return null;
+    return { message: null, wasInserted: false };
   }
   
   console.log(`[REPO:createEmailMessage] ✅ Mensaje insertado exitosamente - id: ${message.id}`);
-  return message;
+  return { message, wasInserted: true };
 }
 
 /**

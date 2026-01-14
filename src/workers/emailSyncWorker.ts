@@ -53,6 +53,7 @@ async function syncAccount(account: any): Promise<void> {
     
     let totalFetched = 0;
     let totalNew = 0;
+    let totalSkipped = 0; // Contador de duplicates skipped
     const errors: string[] = [];
     
     // 🔥 SINCRONIZAR TODOS LOS FOLDERS (INBOX, SENT, DRAFTS, SPAM, ETC)
@@ -98,9 +99,12 @@ async function syncAccount(account: any): Promise<void> {
         totalFetched += imapMessages.length;
         
         // Guardar en DB
+        let folderInserted = 0;
+        let folderSkipped = 0;
+        
         for (const msg of imapMessages) {
           try {
-            const created = await messagesRepo.createEmailMessage({
+            const result = await messagesRepo.createEmailMessage({
               account_id: account.id,
               owner_user_id: account.owner_user_id,
               folder_id: folder.id, // ✅ ASIGNAR AL FOLDER CORRECTO
@@ -121,14 +125,20 @@ async function syncAccount(account: any): Promise<void> {
               size_bytes: msg.size
             });
             
-            if (created) totalNew++;
+            if (result.wasInserted) {
+              totalNew++;
+              folderInserted++;
+            } else {
+              totalSkipped++;
+              folderSkipped++;
+            }
           } catch (error: any) {
             console.error(`[SYNC WORKER] ⚠️ Error guardando mensaje en ${folder.imap_path}:`, error.message);
             errors.push(`${folder.imap_path}/${msg.messageId}: ${error.message}`);
           }
         }
         
-        console.log(`[SYNC WORKER] ✅ ${folder.imap_path}: ${imapMessages.length} fetched, ${totalNew} nuevos`);
+        console.log(`[SYNC WORKER] ✅ ${folder.imap_path}: ${imapMessages.length} fetched, ${folderInserted} inserted, ${folderSkipped} skipped`);
       } catch (error: any) {
         console.error(`[SYNC WORKER] ❌ Error sincronizando ${folder.imap_path}:`, error.message);
         errors.push(`${folder.imap_path}: ${error.message}`);
@@ -149,8 +159,9 @@ async function syncAccount(account: any): Promise<void> {
     console.log('[SYNC WORKER] ✅ Sync completado:', {
       account: account.from_email,
       fetched: totalFetched,
-      new: totalNew,
-      status
+      inserted: totalNew,
+      skipped: totalSkipped,
+      errors: errors.length
     });
   } catch (error: any) {
     console.error('[SYNC WORKER] ❌ Error general en sync:', error.message);

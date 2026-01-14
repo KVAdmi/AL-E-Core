@@ -326,7 +326,7 @@ router.post('/accounts/:id/sync', requireAuth, async (req, res) => {
       // Guardar en DB
       let newCount = 0;
       for (const msg of imapMessages) {
-        const created = await messagesRepo.createEmailMessage({
+        const result = await messagesRepo.createEmailMessage({
           account_id: account.id,
           owner_user_id: userId,
           folder_id: folder.id,
@@ -347,7 +347,7 @@ router.post('/accounts/:id/sync', requireAuth, async (req, res) => {
           size_bytes: msg.size
         });
         
-        if (created) newCount++;
+        if (result.wasInserted) newCount++;
       }
       
       // Completar sync log
@@ -589,7 +589,7 @@ router.post('/send', requireAuth, async (req, res) => {
       if (sentFolder) {
         console.log('[EMAIL HUB] 💾 Guardando correo enviado en folder Sent:', sentFolder.id);
         
-        // Guardar mensaje enviado
+        // Guardar mensaje enviado (wasInserted no importa aquí - es una copia local)
         await messagesRepo.createEmailMessage({
           account_id: account.id,
           owner_user_id: userId,

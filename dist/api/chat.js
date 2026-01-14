@@ -41,6 +41,7 @@ const uuid_1 = require("uuid");
 const supabase_1 = require("../db/supabase");
 const env_1 = require("../config/env");
 const helpers_1 = require("../utils/helpers");
+const textCleaners_1 = require("../utils/textCleaners");
 const chunkRetrieval_1 = require("../services/chunkRetrieval");
 const auth_1 = require("../middleware/auth");
 const attachmentDownload_1 = require("../services/attachmentDownload");
@@ -79,17 +80,25 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
     const startTime = Date.now();
     let sessionId = null;
     try {
-        console.log('\n[CHAT] ==================== NUEVA SOLICITUD ====================');
+        console.log('\n[CHAT] ========================================');
+        console.log('[CHAT] 🔵 NUEVA SOLICITUD /chat');
+        console.log('[CHAT] ========================================');
+        console.log(`[CHAT] 📋 Body keys: ${Object.keys(req.body).join(', ')}`);
+        console.log(`[CHAT] 👤 User authenticated: ${req.user ? 'YES' : 'NO'}`);
+        if (req.user) {
+            console.log(`[CHAT] 👤 User ID: ${req.user.id}`);
+        }
         // CRITICAL: Verificar que OpenAI está bloqueado
         const openaiCheck = (0, router_1.verifyOpenAIBlocked)();
-        console.log(`[CHAT] OpenAI Status: ${openaiCheck.message}`);
+        console.log(`[CHAT] 🔒 OpenAI Status: ${openaiCheck.message}`);
         // Anti-duplicado: request_id
         const request_id = req.body.request_id || (0, uuid_1.v4)();
+        console.log(`[CHAT] 🆔 Request ID: ${request_id}`);
         const now = Date.now();
         if (recentRequests.has(request_id)) {
             const timestamp = recentRequests.get(request_id);
             if (now - timestamp < 30000) { // 30s
-                console.warn(`[CHAT] ⚠️ Duplicate request detected: ${request_id}`);
+                console.warn(`[CHAT] ⚠️ DUPLICATE REQUEST detectado - request_id: ${request_id}, age: ${now - timestamp}ms`);
                 return res.status(409).json({
                     error: 'DUPLICATE_REQUEST',
                     message: 'Request already processed recently',
@@ -261,15 +270,25 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
         // A3) RESOLVER SESSION_ID
         // ============================================
         if (requestSessionId && (0, helpers_1.isUuid)(requestSessionId)) {
-            // Verificar que existe
+            // P0 FIX: Verificar que la sesión pertenece al usuario
             const { data: existingSession } = await supabase_1.supabase
                 .from('ae_sessions')
-                .select('id')
+                .select('id, user_id_old, user_id_uuid')
                 .eq('id', requestSessionId)
                 .single();
             if (existingSession) {
+                // Validar ownership: session debe pertenecer al usuario
+                const sessionOwner = existingSession.user_id_uuid || existingSession.user_id_old;
+                if (sessionOwner !== userId) {
+                    console.error(`[CHAT] 🚨 P0 VIOLATION: Usuario ${userId} intentó acceder sesión de ${sessionOwner}`);
+                    return res.status(403).json({
+                        error: 'FORBIDDEN_SESSION',
+                        message: 'Esta sesión pertenece a otro usuario',
+                        session_id: null
+                    });
+                }
                 sessionId = requestSessionId;
-                console.log(`[CHAT] Usando sesión existente: ${sessionId}`);
+                console.log(`[CHAT] Usando sesión existente: ${sessionId} (owner: ${userId})`);
             }
         }
         if (!sessionId) {
@@ -310,15 +329,18 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
         // A4) RECONSTRUIR HISTORIAL DESDE SUPABASE
         // ============================================
         console.log('[CHAT] 📚 Reconstructing conversation history from Supabase...');
+        // P0 FIX: Filtrar historial SOLO del usuario actual
         const { data: historyData, error: historyError } = await supabase_1.supabase
             .from('ae_messages')
-            .select('role, content, created_at')
+            .select('role, content, created_at, session_id')
             .eq('session_id', sessionId)
             .order('created_at', { ascending: true })
             .limit(50); // Últimos 50 mensajes
         if (historyError) {
             console.error('[CHAT] Error loading history:', historyError);
         }
+        // P0: Validar que todos los mensajes son del mismo session_id (ya validado arriba)
+        // No deberían existir mensajes cross-session aquí porque session_id ya fue validado
         const storedHistory = historyData || [];
         console.log(`[CHAT] ✓ Loaded ${storedHistory.length} messages from database`);
         // Reconstruir messages array desde historial + nuevo mensaje del usuario
@@ -812,6 +834,8 @@ Ejemplo malo: "Visita https://... para ver el precio."` },
         console.log('[CHAT] ==================== FIN SOLICITUD ====================\n');
         res.json({
             answer: answer,
+            speak_text: (0, textCleaners_1.markdownToSpeakable)(answer),
+            should_speak: (0, textCleaners_1.shouldSpeak)(answer),
             session_id: sessionId,
             memories_to_add: []
         });
@@ -820,6 +844,8 @@ Ejemplo malo: "Visita https://... para ver el precio."` },
         console.error('[CHAT] ERROR CRÍTICO:', error);
         res.status(500).json({
             answer: 'Error interno del servidor',
+            speak_text: 'Ocurrió un error al procesar tu solicitud.',
+            should_speak: true,
             session_id: sessionId,
             memories_to_add: []
         });
@@ -1180,6 +1206,8 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
                 });
                 return res.json({
                     answer: fallbackMessage,
+                    speak_text: (0, textCleaners_1.markdownToSpeakable)(fallbackMessage),
+                    should_speak: true,
                     session_id: sessionId,
                     memories_to_add: [],
                     metadata: {
@@ -1235,6 +1263,8 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
             });
             return res.json({
                 answer,
+                speak_text: (0, textCleaners_1.markdownToSpeakable)(answer),
+                should_speak: (0, textCleaners_1.shouldSpeak)(answer),
                 session_id: sessionId,
                 memories_to_add: [],
                 metadata: {
@@ -1387,6 +1417,8 @@ Ejemplo malo: "Visita https://... para ver el precio."`
         // ============================================
         return res.json({
             answer: finalAnswer,
+            speak_text: (0, textCleaners_1.markdownToSpeakable)(finalAnswer),
+            should_speak: (0, textCleaners_1.shouldSpeak)(finalAnswer),
             session_id: sessionId,
             memories_to_add: [], // TODO: Implementar extracción de memories
             sources: knowledgeSources.length > 0 ? knowledgeSources : undefined, // Agregar sources si hay
@@ -1433,6 +1465,8 @@ Ejemplo malo: "Visita https://... para ver el precio."`
         return res.status(500).json({
             error: 'INTERNAL_ERROR',
             message: error.message,
+            speak_text: 'Ocurrió un error al procesar tu solicitud.',
+            should_speak: true,
             session_id: sessionId,
             memories_to_add: []
         });

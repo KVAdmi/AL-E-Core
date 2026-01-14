@@ -66,9 +66,10 @@ const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     console.log('[CORS] Verificando origin:', origin);
     
-    // Permitir requests sin origin (mobile apps, Postman, etc.)
+    // Permitir requests sin origin (mobile apps, Postman, server-to-server)
+    // SEGURO: todos los endpoints sensibles verifican JWT con requireAuth
     if (!origin) {
-      console.log('[CORS] Origin sin definir - PERMITIDO');
+      console.log('[CORS] Origin sin definir (mobile/postman/server) - PERMITIDO (auth requerida por endpoint)');
       return callback(null, true);
     }
     
