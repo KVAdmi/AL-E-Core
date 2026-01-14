@@ -152,7 +152,40 @@ export const CalendarListEventsSchema = z.object({
   limit: z.number().optional().default(50)
 });
 
-// Email
+// Email Tools (Universal IMAP/SMTP)
+export const EmailListSchema = z.object({
+  userId: z.string().uuid(),
+  accountId: z.string().uuid().optional(),
+  folder: z.string().optional().default('INBOX'),
+  limit: z.number().optional().default(20),
+  unreadOnly: z.boolean().optional().default(false)
+});
+
+export const EmailReadSchema = z.object({
+  userId: z.string().uuid(),
+  messageId: z.string().uuid(),
+  markAsRead: z.boolean().optional().default(true)
+});
+
+export const EmailSendSchema = z.object({
+  userId: z.string().uuid(),
+  accountId: z.string().uuid().optional(),
+  to: z.union([z.string(), z.array(z.string())]),
+  cc: z.union([z.string(), z.array(z.string())]).optional(),
+  bcc: z.union([z.string(), z.array(z.string())]).optional(),
+  subject: z.string().min(1).max(500),
+  body: z.string().min(1),
+  inReplyTo: z.string().optional()
+});
+
+export const EmailReplySchema = z.object({
+  userId: z.string().uuid(),
+  messageId: z.string().uuid(),
+  body: z.string().min(1),
+  replyAll: z.boolean().optional().default(false)
+});
+
+// DEPRECATED - Legacy schemas (mantener por compatibilidad)
 export const EmailReadInboxSchema = z.object({
   userId: z.string().uuid(),
   accountId: z.string().uuid().optional(),
@@ -179,7 +212,7 @@ export const EmailDraftReplySchema = z.object({
   instructions: z.string().optional()
 });
 
-export const EmailSendSchema = z.object({
+export const EmailSendLegacySchema = z.object({
   userId: z.string().uuid(),
   accountId: z.string().uuid(),
   to: z.union([z.string(), z.array(z.string())]),
@@ -357,11 +390,44 @@ export const TOOL_REGISTRY: Record<string, Omit<ToolDefinition, 'handler'>> = {
   },
 
   // ─────────────────────────────────────────────────────────────
-  // EMAIL
+  // EMAIL (Universal IMAP/SMTP)
   // ─────────────────────────────────────────────────────────────
+  email_list: {
+    name: 'email_list',
+    description: 'Lista correos del inbox (o folder específico). Muestra from, subject, preview, attachments. Soporta filtro unreadOnly.',
+    category: 'internal',
+    schema: EmailListSchema,
+    timeout: 15000
+  },
+
+  email_read: {
+    name: 'email_read',
+    description: 'Lee contenido completo de un correo (body, attachments, metadata). Marca como leído opcionalmente.',
+    category: 'internal',
+    schema: EmailReadSchema,
+    timeout: 10000
+  },
+
+  email_send: {
+    name: 'email_send',
+    description: 'Envía correo nuevo vía SMTP. Soporta to/cc/bcc, HTML/text body, threading (inReplyTo).',
+    category: 'internal',
+    schema: EmailSendSchema,
+    timeout: 20000
+  },
+
+  email_reply: {
+    name: 'email_reply',
+    description: 'Responde a un correo existente. Mantiene threading automáticamente. Soporta Reply All.',
+    category: 'internal',
+    schema: EmailReplySchema,
+    timeout: 20000
+  },
+
+  // DEPRECATED - Legacy email tools (mantener por compatibilidad)
   email_read_inbox: {
     name: 'email_read_inbox',
-    description: 'Lee mensajes del inbox con filtros (unread, urgent, important). Requiere email_accounts configurada.',
+    description: '[DEPRECATED] Usa email_list en su lugar.',
     category: 'internal',
     schema: EmailReadInboxSchema,
     timeout: 15000
@@ -389,15 +455,6 @@ export const TOOL_REGISTRY: Record<string, Omit<ToolDefinition, 'handler'>> = {
     category: 'internal',
     schema: EmailDraftReplySchema,
     timeout: 20000
-  },
-
-  email_send: {
-    name: 'email_send',
-    description: 'Envía un correo electrónico. Valida auto_send_enabled: si false → retorna borrador, si true → envía real.',
-    category: 'internal',
-    schema: EmailSendSchema,
-    timeout: 30000,
-    rateLimit: { maxCalls: 10, windowMs: 60000 }
   },
 
   email_search_contact: {

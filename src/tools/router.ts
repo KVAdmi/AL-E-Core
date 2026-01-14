@@ -56,16 +56,12 @@ import {
   calendarListEventsHandler
 } from './handlers/calendarTools';
 
-// TODO: Fix email tools types before enabling
-// import {
-//   emailReadInboxHandler,
-//   emailAnalyzeMessageHandler,
-//   emailClassifyHandler,
-//   emailDraftReplyHandler,
-//   emailSendHandler,
-//   emailSearchContactHandler,
-//   emailCreateContactHandler
-// } from './handlers/emailTools';
+import {
+  emailListHandler,
+  emailReadHandler,
+  emailSendHandler,
+  emailReplyHandler
+} from './handlers/emailTools';
 
 // ═══════════════════════════════════════════════════════════════
 // TYPES
@@ -228,15 +224,24 @@ async function executeHandler(name: string, args: any): Promise<ToolResult> {
     case 'calendar_list_events':
       return calendarListEventsHandler(args);
 
-    // Email (TODO: Fix types before enabling)
+    // Email (Universal IMAP/SMTP)
+    case 'email_list':
+      return emailListHandler(args);
+    case 'email_read':
+      return emailReadHandler(args);
+    case 'email_send':
+      return emailSendHandler(args);
+    case 'email_reply':
+      return emailReplyHandler(args);
+
+    // Legacy email tools (deprecated)
     case 'email_read_inbox':
     case 'email_analyze_message':
     case 'email_classify':
     case 'email_draft_reply':
-    case 'email_send':
     case 'email_search_contact':
     case 'email_create_contact':
-      throw new Error(`Email tool ${name} temporalmente deshabilitado (tipos en fix). Usa /api/ai o /api/contacts.`);
+      throw new Error(`Email tool ${name} DEPRECATED. Usa: email_list, email_read, email_send, email_reply`);
 
     default:
       throw new Error(`Handler no implementado para: ${name}`);

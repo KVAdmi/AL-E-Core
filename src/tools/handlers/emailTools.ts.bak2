@@ -1,0 +1,432 @@
+/**
+ * =====================================================
+ * EMAIL TOOLS - Handlers para Tool Router
+ * =====================================================
+ * 
+ * Tools:
+ * - email_list: Listar correos del inbox
+ * - email_read: Leer contenido completo de un correo
+ * - email_send: Enviar correo nuevo
+ * - email_reply: Responder a un correo
+ * 
+ * INTEGRACIÓN CON EMAIL HUB:
+ * - Usa email_accounts + email_messages (Supabase)
+ * - Soporta IMAP/SMTP universal (Gmail, Outlook, Hostinger, etc)
+ * - Attachments incluidos en respuestas
+ * =====================================================
+ */
+
+export interface ToolResult {
+  success: boolean;
+  data?: any;
+  error?: string;
+  source?: string;
+  timestamp: string;
+  provider: string;
+  cached?: boolean;
+}
+
+// Helper para crear ToolResult
+function createToolResult(result: Omit<ToolResult, 'timestamp' | 'provider'>): ToolResult {
+  return {
+    ...result,
+    timestamp: new Date().toISOString(),
+    provider: 'email_tools'
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMAIL LIST (listar inbox)
+// ═══════════════════════════════════════════════════════════════
+
+export interface EmailListArgs {
+  userId: string;
+  accountId?: string; // Opcional, usa cuenta por defecto
+  folder?: string; // Default: INBOX
+  limit?: number;
+  unreadOnly?: boolean;
+}
+
+export async function emailListHandler(args: EmailListArgs): Promise<ToolResult> {
+  try {
+    const { userId, accountId, folder = 'INBOX', limit = 20, unreadOnly = false } = args;
+
+    console.log(`[EMAIL TOOL] 📬 Listando correos - userId: ${userId}, folder: ${folder}`);
+
+    // 1. Obtener cuenta de email
+    let accountQuery = supabase
+      .from('email_accounts')
+      .select('*')
+      .eq('owner_user_id', userId)
+      .eq('is_active', true);
+
+    if (accountId) {
+      accountQuery = accountQuery.eq('id', accountId);
+    }
+
+    const { data: accounts, error: accountError } = await accountQuery.limit(1);
+
+    if (accountError || !accounts || accounts.length === 0) {
+      return {
+        success: false,
+        data: null,
+        error: 'No tienes cuentas de correo configuradas',
+        metadata: { reason: 'NO_EMAIL_ACCOUNT' }
+      };
+    }
+
+    const account = accounts[0];
+
+    // 2. Obtener folder ID
+    const { data: folders } = await supabase
+      .from('email_folders')
+      .select('*')
+      .eq('account_id', account.id)
+      .or(`imap_path.eq.${folder},folder_type.eq.inbox`)
+      .limit(1);
+
+    if (!folders || folders.length === 0) {
+      return {
+        success: false,
+        data: null,
+        error: `Folder "${folder}" no encontrado`,
+        metadata: { reason: 'FOLDER_NOT_FOUND' }
+      };
+    }
+
+    const targetFolder = folders[0];
+
+    // 3. Listar mensajes
+    let messagesQuery = supabase
+      .from('email_messages')
+      .select('id, from_address, from_name, subject, body_preview, date, is_read, has_attachments, attachment_count')
+      .eq('account_id', account.id)
+      .eq('folder_id', targetFolder.id)
+      .order('date', { ascending: false })
+      .limit(limit);
+
+    if (unreadOnly) {
+      messagesQuery = messagesQuery.eq('is_read', false);
+    }
+
+    const { data: messages, error: messagesError } = await messagesQuery;
+
+    if (messagesError) {
+      return {
+        success: false,
+        data: null,
+        error: `Error al listar mensajes: ${messagesError.message}`,
+        metadata: { code: messagesError.code }
+      };
+    }
+
+    console.log(`[EMAIL TOOL] ✅ ${messages.length} correos encontrados`);
+
+    return {
+      success: true,
+      data: {
+        account: account.from_email,
+        folder: folder,
+        messages: messages.map(msg => ({
+          id: msg.id,
+          from: msg.from_name ? `${msg.from_name} <${msg.from_address}>` : msg.from_address,
+          subject: msg.subject,
+          preview: msg.body_preview,
+          date: msg.date,
+          isRead: msg.is_read,
+          hasAttachments: msg.has_attachments,
+          attachmentCount: msg.attachment_count || 0
+        })),
+        count: messages.length
+      },
+      error: null,
+      metadata: {
+        accountId: account.id,
+        folderId: targetFolder.id
+      }
+    };
+  } catch (error: any) {
+    console.error('[EMAIL TOOL] ❌ Error en emailListHandler:', error);
+    return {
+      success: false,
+      data: null,
+      error: error.message || 'Error desconocido',
+      metadata: { stack: error.stack }
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMAIL READ (leer contenido completo)
+// ═══════════════════════════════════════════════════════════════
+
+export interface EmailReadArgs {
+  userId: string;
+  messageId: string; // UUID del mensaje en DB
+  markAsRead?: boolean;
+}
+
+export async function emailReadHandler(args: EmailReadArgs): Promise<ToolResult> {
+  try {
+    const { userId, messageId, markAsRead = true } = args;
+
+    console.log(`[EMAIL TOOL] 📖 Leyendo correo - messageId: ${messageId}`);
+
+    // 1. Verificar ownership
+    const { data: message, error: messageError } = await supabase
+      .from('email_messages')
+      .select(`
+        *,
+        email_accounts!inner (
+          owner_user_id,
+          from_email
+        )
+      `)
+      .eq('id', messageId)
+      .single();
+
+    if (messageError || !message) {
+      return {
+        success: false,
+        data: null,
+        error: 'Mensaje no encontrado',
+        metadata: { messageId }
+      };
+    }
+
+    if (message.email_accounts.owner_user_id !== userId) {
+      return {
+        success: false,
+        data: null,
+        error: 'No tienes permiso para leer este correo',
+        metadata: { reason: 'UNAUTHORIZED' }
+      };
+    }
+
+    // 2. Marcar como leído si se solicita
+    if (markAsRead && !message.is_read) {
+      await supabase
+        .from('email_messages')
+        .update({ is_read: true })
+        .eq('id', messageId);
+    }
+
+    // 3. Retornar contenido completo
+    console.log(`[EMAIL TOOL] ✅ Correo leído - subject: "${message.subject}"`);
+
+    return {
+      success: true,
+      data: {
+        id: message.id,
+        from: message.from_name ? `${message.from_name} <${message.from_address}>` : message.from_address,
+        to: message.to_addresses,
+        cc: message.cc_addresses || [],
+        subject: message.subject,
+        bodyText: message.body_text,
+        bodyHtml: message.body_html,
+        date: message.date,
+        hasAttachments: message.has_attachments,
+        attachmentCount: message.attachment_count || 0,
+        inReplyTo: message.in_reply_to
+      },
+      error: null,
+      metadata: {
+        account: message.email_accounts.from_email,
+        markedAsRead: markAsRead && !message.is_read
+      }
+    };
+  } catch (error: any) {
+    console.error('[EMAIL TOOL] ❌ Error en emailReadHandler:', error);
+    return {
+      success: false,
+      data: null,
+      error: error.message || 'Error desconocido',
+      metadata: { stack: error.stack }
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMAIL SEND (enviar correo nuevo)
+// ═══════════════════════════════════════════════════════════════
+
+export interface EmailSendArgs {
+  userId: string;
+  accountId?: string; // Opcional, usa cuenta por defecto
+  to: string | string[];
+  cc?: string | string[];
+  bcc?: string | string[];
+  subject: string;
+  body: string; // HTML o plain text
+  inReplyTo?: string; // message_id para threading
+}
+
+export async function emailSendHandler(args: EmailSendArgs): Promise<ToolResult> {
+  try {
+    const { userId, accountId, to, cc, bcc, subject, body, inReplyTo } = args;
+
+    console.log(`[EMAIL TOOL] 📤 Enviando correo - to: ${to}, subject: "${subject}"`);
+
+    // 1. Obtener cuenta de email
+    let accountQuery = supabase
+      .from('email_accounts')
+      .select('*')
+      .eq('owner_user_id', userId)
+      .eq('is_active', true);
+
+    if (accountId) {
+      accountQuery = accountQuery.eq('id', accountId);
+    }
+
+    const { data: accounts, error: accountError } = await accountQuery.limit(1);
+
+    if (accountError || !accounts || accounts.length === 0) {
+      return {
+        success: false,
+        data: null,
+        error: 'No tienes cuentas de correo configuradas',
+        metadata: { reason: 'NO_EMAIL_ACCOUNT' }
+      };
+    }
+
+    const account = accounts[0];
+
+    // 2. Enviar via API /api/email/send (usa SMTP universal)
+    const sendPayload = {
+      accountId: account.id,
+      to: Array.isArray(to) ? to : [to],
+      cc: cc ? (Array.isArray(cc) ? cc : [cc]) : undefined,
+      bcc: bcc ? (Array.isArray(bcc) ? bcc : [bcc]) : undefined,
+      subject,
+      body_html: body.includes('<') ? body : undefined,
+      body_text: !body.includes('<') ? body : undefined,
+      in_reply_to: inReplyTo
+    };
+
+    const apiUrl = process.env.API_BASE_URL || 'http://localhost:3000';
+    const response = await fetch(`${apiUrl}/api/email/send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` // Service role para internal calls
+      },
+      body: JSON.stringify(sendPayload)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return {
+        success: false,
+        data: null,
+        error: `Error al enviar correo: ${errorData.error || response.statusText}`,
+        metadata: { statusCode: response.status }
+      };
+    }
+
+    const result = await response.json();
+
+    console.log(`[EMAIL TOOL] ✅ Correo enviado - messageId: ${result.messageId}`);
+
+    return {
+      success: true,
+      data: {
+        messageId: result.messageId,
+        from: account.from_email,
+        to: Array.isArray(to) ? to : [to],
+        subject,
+        sentAt: new Date().toISOString()
+      },
+      error: null,
+      metadata: {
+        accountId: account.id,
+        provider: 'smtp'
+      }
+    };
+  } catch (error: any) {
+    console.error('[EMAIL TOOL] ❌ Error en emailSendHandler:', error);
+    return {
+      success: false,
+      data: null,
+      error: error.message || 'Error desconocido',
+      metadata: { stack: error.stack }
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EMAIL REPLY (responder a un correo)
+// ═══════════════════════════════════════════════════════════════
+
+export interface EmailReplyArgs {
+  userId: string;
+  messageId: string; // UUID del mensaje original
+  body: string;
+  replyAll?: boolean; // Incluir CC del original
+}
+
+export async function emailReplyHandler(args: EmailReplyArgs): Promise<ToolResult> {
+  try {
+    const { userId, messageId, body, replyAll = false } = args;
+
+    console.log(`[EMAIL TOOL] 💬 Respondiendo correo - messageId: ${messageId}`);
+
+    // 1. Obtener mensaje original
+    const { data: originalMessage, error: messageError } = await supabase
+      .from('email_messages')
+      .select(`
+        *,
+        email_accounts!inner (
+          id,
+          owner_user_id,
+          from_email
+        )
+      `)
+      .eq('id', messageId)
+      .single();
+
+    if (messageError || !originalMessage) {
+      return {
+        success: false,
+        data: null,
+        error: 'Mensaje original no encontrado',
+        metadata: { messageId }
+      };
+    }
+
+    if (originalMessage.email_accounts.owner_user_id !== userId) {
+      return {
+        success: false,
+        data: null,
+        error: 'No tienes permiso para responder este correo',
+        metadata: { reason: 'UNAUTHORIZED' }
+      };
+    }
+
+    // 2. Preparar respuesta
+    const replySubject = originalMessage.subject.startsWith('Re: ')
+      ? originalMessage.subject
+      : `Re: ${originalMessage.subject}`;
+
+    const replyTo = originalMessage.from_address;
+    const replyCc = replyAll ? originalMessage.cc_addresses : undefined;
+
+    // 3. Enviar via emailSendHandler
+    return await emailSendHandler({
+      userId,
+      accountId: originalMessage.email_accounts.id,
+      to: replyTo,
+      cc: replyCc,
+      subject: replySubject,
+      body,
+      inReplyTo: originalMessage.message_id
+    });
+  } catch (error: any) {
+    console.error('[EMAIL TOOL] ❌ Error en emailReplyHandler:', error);
+    return {
+      success: false,
+      data: null,
+      error: error.message || 'Error desconocido',
+      metadata: { stack: error.stack }
+    };
+  }
+}
