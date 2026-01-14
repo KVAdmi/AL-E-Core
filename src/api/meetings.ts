@@ -25,6 +25,7 @@ import multer from 'multer';
 import { createClient } from '@supabase/supabase-js';
 import { uploadMeetingChunk, uploadMeetingFile } from '../services/s3MeetingsService';
 import { enqueueJob } from '../jobs/meetingQueue';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -70,6 +71,8 @@ router.post('/live/start', async (req: Request, res: Response) => {
       auto_send_enabled = false,
       send_email = false,
       send_telegram = false,
+      happened_at,     // ← NUEVO: Timestamp del evento (opcional)
+      scheduled_at,    // ← NUEVO: Timestamp programado (opcional)
     } = req.body;
 
     // Crear meeting en DB
@@ -81,7 +84,8 @@ router.post('/live/start', async (req: Request, res: Response) => {
         description,
         mode: 'live',
         status: 'recording',
-        happened_at: new Date().toISOString(),
+        happened_at: happened_at || new Date().toISOString(),  // Usar del body o generar
+        scheduled_at: scheduled_at || new Date().toISOString(), // Usar del body o generar
         participants,
         auto_send_enabled,
         send_email,
@@ -100,6 +104,13 @@ router.post('/live/start', async (req: Request, res: Response) => {
     }
 
     console.log(`[MEETINGS] 🎙️ Live meeting started: ${meeting.id}`);
+
+    // LOG: meetings.live.start
+    logger.meetingsLiveStart({
+      meeting_id: meeting.id,
+      title: meeting.title,
+      user_id: user.id,
+    });
 
     return res.json({
       success: true,
@@ -393,6 +404,8 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
       auto_send_enabled = false,
       send_email = false,
       send_telegram = false,
+      happened_at,     // ← NUEVO: Timestamp del evento (opcional)
+      scheduled_at,    // ← NUEVO: Timestamp programado (opcional)
     } = req.body;
 
     // Validar y parsear participants si es string
@@ -418,7 +431,8 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
         description,
         mode: 'upload',
         status: 'processing',
-        happened_at: new Date().toISOString(),
+        happened_at: happened_at || new Date().toISOString(),  // Usar del body o generar
+        scheduled_at: scheduled_at || new Date().toISOString(), // Usar del body o generar
         participants: parsedParticipants,
         auto_send_enabled: auto_send_enabled === 'true' || auto_send_enabled === true,
         send_email: send_email === 'true' || send_email === true,
@@ -854,13 +868,29 @@ router.get('/:id/result', async (req: Request, res: Response) => {
 
     console.log(`[MEETINGS:result] ✅ Meeting encontrado - status: ${meeting.status}, title: "${meeting.title}"`);
 
-    // 2. Verificar que está completado
-    if (meeting.status !== 'completed') {
+    // 2. Verificar que está completado O en procesamiento
+    // HONESTIDAD: Si no está listo, retornar estado pending con evidencia
+    if (meeting.status !== 'completed' && meeting.status !== 'done') {
       console.log(`[MEETINGS:result] ⚠️ Meeting no completado - status actual: ${meeting.status}`);
-      return res.status(400).json({
-        error: 'Meeting not completed',
-        status: meeting.status,
-        message: 'Use /api/meetings/:id/status to check progress'
+      
+      // Obtener audio object key si existe
+      const { data: assets } = await supabase
+        .from('meeting_assets')
+        .select('s3_key, s3_url')
+        .eq('meeting_id', meetingId)
+        .eq('asset_type', 'file') // Audio completo
+        .limit(1)
+        .single();
+      
+      return res.json({
+        status: 'blocked',
+        reason: 'transcript_pending',
+        transcript_state: meeting.status, // 'recording', 'processing', 'transcribing', etc.
+        evidence_ids: {
+          meeting_id: meetingId,
+          audio_object_key: assets?.s3_key || null,
+        },
+        message: `La transcripción está en proceso (estado: ${meeting.status}). Intenta nuevamente en unos minutos.`,
       });
     }
 
@@ -875,6 +905,29 @@ router.get('/:id/result', async (req: Request, res: Response) => {
     console.log(`[MEETINGS:result] ✅ Transcripts obtenidos - count: ${transcripts?.length || 0}`);
     const transcript_full = transcripts?.map(t => t.text).join(' ') || '';
     console.log(`[MEETINGS:result] 📏 Transcript length: ${transcript_full.length} chars`);
+    
+    // HONESTIDAD: Si no hay transcript, retornar pending
+    if (!transcript_full || transcript_full.trim().length === 0) {
+      console.log(`[MEETINGS:result] ⚠️ No hay transcript disponible aún`);
+      
+      const { data: assets } = await supabase
+        .from('meeting_assets')
+        .select('s3_key')
+        .eq('meeting_id', meetingId)
+        .limit(1)
+        .single();
+      
+      return res.json({
+        status: 'blocked',
+        reason: 'transcript_empty',
+        transcript_state: 'pending',
+        evidence_ids: {
+          meeting_id: meetingId,
+          audio_object_key: assets?.s3_key || null,
+        },
+        message: 'El audio se grabó correctamente pero la transcripción aún no está disponible. Worker de transcripción pendiente.',
+      });
+    }
 
     // 4. Obtener minuta
     console.log(`[MEETINGS:result] 📋 Consultando meeting minutes...`);
@@ -887,10 +940,19 @@ router.get('/:id/result', async (req: Request, res: Response) => {
       .single();
 
     if (!minute) {
-      console.log(`[MEETINGS:result] ❌ Meeting minutes no encontradas`);
-      return res.status(404).json({
-        error: 'Meeting minutes not found',
-        message: 'Transcription completed but minutes not generated'
+      console.log(`[MEETINGS:result] ⚠️ Meeting minutes no encontradas`);
+      
+      // HONESTIDAD: Hay transcript pero no minuta - retornar pending
+      return res.json({
+        status: 'blocked',
+        reason: 'minutes_pending',
+        transcript_state: 'ready',
+        minutes_state: 'pending',
+        evidence_ids: {
+          meeting_id: meetingId,
+          transcript_ids: transcripts?.map(t => t.id) || [],
+        },
+        message: 'La transcripción está lista pero la minuta aún no se ha generado. Worker de minuta pendiente.',
       });
     }
 

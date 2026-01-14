@@ -207,6 +207,7 @@ app.get("/health", async (req, res) => {
 // app.use("/lia", liaRouter);
 app.use("/_health", healthRouter); // Health checks protegidos
 app.use("/api/ai", chatRouter); // Nuevo endpoint con guardado garantizado en Supabase
+app.use("/api/ai", require("./api/truthChat").default); // Truth Chat (Truth Layer + Authority Matrix)
 app.use("/api/files", filesRouter); // Endpoint de ingesta estructural de documentos
 app.use("/api/voice", voiceRouter);
 app.use("/api/sessions", sessionsRouter);
