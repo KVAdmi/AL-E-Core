@@ -14,6 +14,12 @@ export interface ToolResult {
 export async function emailListHandler(args: any): Promise<ToolResult> {
   const { userId, folder, folderType, limit = 20, unreadOnly = false, accountEmail } = args;
   
+  console.log('[EMAIL TOOL - list_emails] 🔵 INICIO');
+  console.log('[EMAIL TOOL] userId:', userId);
+  console.log('[EMAIL TOOL] folder:', folder);
+  console.log('[EMAIL TOOL] folderType:', folderType);
+  console.log('[EMAIL TOOL] accountEmail:', accountEmail);
+  
   try {
     // Compatibilidad: folderType (viejo) → folder (nuevo)
     let targetFolderPath = folder || 'INBOX';
@@ -28,7 +34,12 @@ export async function emailListHandler(args: any): Promise<ToolResult> {
       targetFolderPath = folderMap[folderType.toLowerCase()] || 'INBOX';
     }
     
+    console.log('[EMAIL TOOL] Resolved folder:', targetFolderPath);
+    
     // Query para cuentas
+    console.log('[EMAIL TOOL] 🔍 Consultando email_accounts...');
+    console.log('[EMAIL TOOL] Filter: owner_user_id =', userId, ', is_active = true');
+    
     let accountsQuery = supabase
       .from('email_accounts')
       .select('*')
@@ -36,15 +47,40 @@ export async function emailListHandler(args: any): Promise<ToolResult> {
       .eq('is_active', true);
     
     if (accountEmail) {
+      console.log('[EMAIL TOOL] Filter adicional: from_email =', accountEmail);
       accountsQuery = accountsQuery.eq('from_email', accountEmail);
     }
     
-    const { data: accounts } = await accountsQuery.limit(1);
+    const { data: accounts, error: accountsError } = await accountsQuery.limit(1);
+    
+    console.log('[EMAIL TOOL] 📊 Query result:');
+    console.log('[EMAIL TOOL]   - accounts found:', accounts?.length || 0);
+    console.log('[EMAIL TOOL]   - error:', accountsError);
+    if (accounts && accounts.length > 0) {
+      console.log('[EMAIL TOOL]   - account[0].id:', accounts[0].id);
+      console.log('[EMAIL TOOL]   - account[0].from_email:', accounts[0].from_email);
+      console.log('[EMAIL TOOL]   - account[0].owner_user_id:', accounts[0].owner_user_id);
+    }
     
     if (!accounts || accounts.length === 0) {
+      console.log('[EMAIL TOOL] ❌ NO SE ENCONTRARON CUENTAS');
+      console.log('[EMAIL TOOL] Posibles causas:');
+      console.log('[EMAIL TOOL]   1. userId no tiene cuentas en email_accounts');
+      console.log('[EMAIL TOOL]   2. Todas las cuentas tienen is_active = false');
+      console.log('[EMAIL TOOL]   3. RLS bloqueando la query');
+      console.log('[EMAIL TOOL]   4. Error en accountsError:', accountsError);
+      
       return { 
         success: false, 
-        data: null, 
+        data: { 
+          debug: {
+            userId,
+            accountEmail,
+            accountsError,
+            table: 'email_accounts',
+            filter: `owner_user_id = ${userId}, is_active = true`
+          }
+        }, 
         error: accountEmail 
           ? `No se encontró cuenta activa: ${accountEmail}` 
           : 'No hay cuentas de correo configuradas. Configura tu email en Configuración > Cuentas.', 
@@ -54,19 +90,31 @@ export async function emailListHandler(args: any): Promise<ToolResult> {
     }
     
     const account = accounts[0];
+    console.log('[EMAIL TOOL] ✅ Cuenta encontrada:', account.from_email);
     
     // Buscar folder por imap_path o folder_type
-    const { data: folders } = await supabase
+    console.log('[EMAIL TOOL] 🔍 Buscando folder:', targetFolderPath);
+    const { data: folders, error: foldersError } = await supabase
       .from('email_folders')
       .select('*')
       .eq('account_id', account.id)
       .or(`imap_path.ilike.${targetFolderPath},folder_type.eq.${folderType || 'inbox'}`)
       .limit(1);
     
+    console.log('[EMAIL TOOL] Folders found:', folders?.length || 0);
+    if (foldersError) console.log('[EMAIL TOOL] Folders error:', foldersError);
+    
     if (!folders || folders.length === 0) {
+      console.log('[EMAIL TOOL] ❌ Folder no encontrado:', targetFolderPath);
       return { 
         success: false, 
-        data: null, 
+        data: { 
+          debug: {
+            account_id: account.id,
+            targetFolderPath,
+            foldersError
+          }
+        }, 
         error: `Folder "${targetFolderPath}" no encontrado. Folders disponibles: INBOX, Sent, Drafts, Trash.`, 
         timestamp: new Date().toISOString(), 
         provider: 'email' 
@@ -74,8 +122,10 @@ export async function emailListHandler(args: any): Promise<ToolResult> {
     }
     
     const targetFolder = folders[0];
+    console.log('[EMAIL TOOL] ✅ Folder encontrado:', targetFolder.imap_path);
     
     // Query de mensajes
+    console.log('[EMAIL TOOL] 🔍 Consultando email_messages...');
     let query = supabase
       .from('email_messages')
       .select('id, from_address, from_name, subject, body_preview, date, is_read, has_attachments')
@@ -88,7 +138,12 @@ export async function emailListHandler(args: any): Promise<ToolResult> {
       query = query.eq('is_read', false);
     }
     
-    const { data: messages } = await query;
+    const { data: messages, error: messagesError } = await query;
+    
+    console.log('[EMAIL TOOL] 📊 Messages found:', messages?.length || 0);
+    if (messagesError) console.log('[EMAIL TOOL] Messages error:', messagesError);
+    
+    console.log('[EMAIL TOOL] ✅ ÉXITO - Retornando', messages?.length || 0, 'mensajes');
     
     return {
       success: true,
@@ -102,10 +157,17 @@ export async function emailListHandler(args: any): Promise<ToolResult> {
       provider: 'email'
     };
   } catch (error: any) {
-    console.error('[EMAIL TOOL] Error en emailListHandler:', error);
+    console.error('[EMAIL TOOL] ❌ EXCEPTION en emailListHandler:', error);
+    console.error('[EMAIL TOOL] Stack:', error.stack);
     return { 
       success: false, 
-      data: null, 
+      data: { 
+        debug: {
+          error: error.message,
+          stack: error.stack,
+          userId: args.userId
+        }
+      }, 
       error: `Error al listar correos: ${error.message}`, 
       timestamp: new Date().toISOString(), 
       provider: 'email' 
