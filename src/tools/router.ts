@@ -226,10 +226,13 @@ async function executeHandler(name: string, args: any): Promise<ToolResult> {
 
     // Email (Universal IMAP/SMTP)
     case 'email_list':
+    case 'list_emails': // Alias para compatibilidad con toolDefinitions.ts
       return emailListHandler(args);
     case 'email_read':
+    case 'read_email': // Alias para compatibilidad con toolDefinitions.ts
       return emailReadHandler(args);
     case 'email_send':
+    case 'send_email': // Alias para compatibilidad con toolDefinitions.ts
       return emailSendHandler(args);
     case 'email_reply':
       return emailReplyHandler(args);
