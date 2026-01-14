@@ -17,7 +17,7 @@ import { supabase } from '../../db/supabase';
 
 export interface CalendarEvent {
   id?: string;
-  user_id: string;
+  owner_user_id: string;  // Corregido: era user_id
   title: string;
   description?: string;
   start_date: string;  // ISO 8601
@@ -35,7 +35,7 @@ export interface CalendarEvent {
  */
 export async function createCalendarEvent(
   userId: string,
-  event: Omit<CalendarEvent, 'id' | 'user_id' | 'created_at'>
+  event: Omit<CalendarEvent, 'id' | 'owner_user_id' | 'created_at'>
 ): Promise<{ success: boolean; event?: CalendarEvent; error?: string }> {
   try {
     console.log('[CALENDAR TOOLS] 📅 Creando evento:', event.title);
@@ -56,7 +56,7 @@ export async function createCalendarEvent(
     const { data, error } = await supabase
       .from('calendar_events')
       .insert([{
-        user_id: userId,
+        owner_user_id: userId,  // Corregido: era user_id
         ...event,
         created_at: new Date().toISOString()
       }])
@@ -97,7 +97,7 @@ export async function listEvents(
     let query = supabase
       .from('calendar_events')
       .select('*')
-      .eq('user_id', userId)
+      .eq('owner_user_id', userId)  // Corregido: era user_id
       .order('start_date', { ascending: true });
     
     if (startDate) {
@@ -142,7 +142,7 @@ async function checkConflicts(
     const { data, error } = await supabase
       .from('calendar_events')
       .select('id')
-      .eq('user_id', userId)
+      .eq('owner_user_id', userId)  // Corregido: era user_id
       .or(`start_date.lte.${end},end_date.gte.${startDate}`);
     
     if (error) return false;
@@ -181,7 +181,7 @@ export async function extractAndSchedule(
     const createdEvents: CalendarEvent[] = [];
     
     for (const detected of detectedDates) {
-      const eventData: Omit<CalendarEvent, 'id' | 'user_id' | 'created_at'> = {
+      const eventData: Omit<CalendarEvent, 'id' | 'owner_user_id' | 'created_at'> = {
         title: detected.title || context?.default_title || 'Evento detectado',
         description: detected.context,
         start_date: detected.date,
