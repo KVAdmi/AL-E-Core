@@ -395,6 +395,20 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
       send_telegram = false,
     } = req.body;
 
+    // Validar y parsear participants si es string
+    let parsedParticipants = participants;
+    if (typeof participants === 'string') {
+      try {
+        parsedParticipants = JSON.parse(participants);
+      } catch (jsonError) {
+        console.error('[MEETINGS] Invalid JSON in participants:', participants);
+        return res.status(400).json({ 
+          error: 'Invalid participants format', 
+          details: 'participants must be valid JSON array' 
+        });
+      }
+    }
+
     // Crear meeting
     const { data: meeting, error: dbError } = await supabase
       .from('meetings')
@@ -405,7 +419,7 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
         mode: 'upload',
         status: 'processing',
         happened_at: new Date().toISOString(),
-        participants: typeof participants === 'string' ? JSON.parse(participants) : participants,
+        participants: parsedParticipants,
         auto_send_enabled: auto_send_enabled === 'true' || auto_send_enabled === true,
         send_email: send_email === 'true' || send_email === true,
         send_telegram: send_telegram === 'true' || send_telegram === true,
@@ -627,7 +641,23 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
     console.log(`[MEETINGS:ingest] ✅ Usuario autenticado - user_id: ${user.id}`);
 
     const { title, description, participants = [] } = req.body;
-    console.log(`[MEETINGS:ingest] 📝 Metadata - title: "${title || file.originalname}", participants: ${Array.isArray(participants) ? participants.length : 0}`);
+    
+    // Validar y parsear participants si es string
+    let parsedParticipants = participants;
+    if (typeof participants === 'string') {
+      try {
+        parsedParticipants = JSON.parse(participants);
+      } catch (jsonError) {
+        console.error(`[MEETINGS:ingest] ❌ Invalid JSON in participants: ${participants.substring(0, 100)}`, { request_id });
+        return res.status(400).json({ 
+          error: 'Invalid participants format', 
+          details: 'participants must be valid JSON array',
+          request_id 
+        });
+      }
+    }
+    
+    console.log(`[MEETINGS:ingest] 📝 Metadata - title: "${title || file.originalname}", participants: ${Array.isArray(parsedParticipants) ? parsedParticipants.length : 0}`);
 
     // 1. Crear meeting
     console.log(`[MEETINGS:ingest] 💾 Creando registro de meeting...`);
@@ -640,7 +670,7 @@ router.post('/ingest', upload.single('file'), async (req: Request, res: Response
         mode: 'upload',
         status: 'processing',
         happened_at: new Date().toISOString(),
-        participants: typeof participants === 'string' ? JSON.parse(participants) : participants,
+        participants: parsedParticipants,
       })
       .select()
       .single();
