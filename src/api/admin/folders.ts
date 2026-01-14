@@ -10,8 +10,58 @@
 
 import { Router, Request, Response } from 'express';
 import { populateFoldersForUser, populateFoldersForAllAccounts } from '../../services/emailFoldersService';
+import { supabase } from '../../db/supabase';
 
 const router = Router();
+
+/**
+ * GET /api/admin/folders/check/:userId
+ * Verifica folders en DB para un usuario
+ */
+router.get('/check/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    
+    console.log('[ADMIN] Verificando folders para usuario:', userId);
+    
+    // Obtener folders
+    const { data: folders, error: foldersError } = await supabase
+      .from('email_folders')
+      .select('id, account_id, folder_name, folder_type, imap_path')
+      .eq('owner_user_id', userId)
+      .order('created_at', { ascending: false });
+    
+    // Obtener cuentas
+    const { data: accounts, error: accountsError } = await supabase
+      .from('email_accounts')
+      .select('id, from_email, is_active')
+      .eq('owner_user_id', userId);
+    
+    res.json({
+      success: true,
+      userId,
+      folders: {
+        count: folders?.length || 0,
+        items: folders || []
+      },
+      accounts: {
+        count: accounts?.length || 0,
+        items: accounts || []
+      },
+      errors: {
+        folders: foldersError,
+        accounts: accountsError
+      }
+    });
+    
+  } catch (error: any) {
+    console.error('[ADMIN] Error verificando folders:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 /**
  * POST /api/admin/folders/populate/:userId
