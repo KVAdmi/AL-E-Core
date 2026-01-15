@@ -144,9 +144,9 @@ export class Narrator {
         }
         
         // Narrar resumen de correos
-        const messages = exec.output?.data?.messages || [];
+        const messages = exec.output?.data?.messages || exec.output?.data?.emails || [];
         const summary = messages.slice(0, 5).map((m: any, idx: number) => {
-          const from = m.from_name || m.from_address || m.from_email;
+          const from = m.from_name || m.from_address || m.from_email || m.from;
           const subject = m.subject || '(Sin asunto)';
           return `${idx + 1}. **De:** ${from}\n   **Asunto:** ${subject}`;
         }).join('\n\n');

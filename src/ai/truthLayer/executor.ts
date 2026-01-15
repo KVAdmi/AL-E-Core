@@ -148,9 +148,14 @@ export class Executor {
     if (toolName.includes('email') || toolName.includes('mail')) {
       if (data.messageId) evidence.messageId = data.messageId;
       if (data.threadId) evidence.threadId = data.threadId;
+      if (data.count !== undefined) evidence.count = data.count; // 🔥 AGREGAR: count directo
       if (data.messages && Array.isArray(data.messages)) {
         evidence.messageIds = data.messages.map((m: any) => m.id);
-        evidence.count = data.messages.length;
+        if (!evidence.count) evidence.count = data.messages.length; // Fallback
+      }
+      if (data.emails && Array.isArray(data.emails)) { // 🔥 AGREGAR: también emails
+        evidence.messageIds = data.emails.map((m: any) => m.emailId || m.id);
+        if (!evidence.count) evidence.count = data.emails.length; // Fallback
       }
     }
     
