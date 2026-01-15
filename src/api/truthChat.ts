@@ -7,7 +7,7 @@
 
 import express from 'express';
 import { optionalAuth, getUserId, getUserEmail } from '../middleware/auth';
-import { getTruthOrchestrator } from '../ai/truthOrchestrator';
+import { getSimpleOrchestrator } from '../ai/simpleOrchestrator';
 
 const router = express.Router();
 
@@ -75,64 +75,51 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
     
     const userMessage = lastMessage.content;
     
-    console.log('[TRUTH CHAT] User ID:', userId);
-    console.log('[TRUTH CHAT] Message:', userMessage.substring(0, 100));
-    console.log('[TRUTH CHAT] User confirmed:', userConfirmed || false);
+    console.log('[CHAT] User ID:', userId);
+    console.log('[CHAT] User Email:', userEmail || 'N/A');
+    console.log('[CHAT] Message:', userMessage.substring(0, 100));
     
-    // Obtener Truth Orchestrator
-    const truthOrchestrator = await getTruthOrchestrator();
+    // 🔥 SIMPLE ORCHESTRATOR - Como GitHub Copilot
+    const orchestrator = await getSimpleOrchestrator();
     
-    // Ejecutar pipeline
-    const result = await truthOrchestrator.orchestrate({
+    // Ejecutar
+    const result = await orchestrator.orchestrate({
       userMessage,
       userId,
       userEmail,
       conversationHistory: messages.slice(0, -1), // Excluir último mensaje
-      userConfirmed,
+      requestId: `req-${Date.now()}`,
+      route: '/api/ai/chat',
     });
     
     const elapsedTime = Date.now() - startTime;
     
-    console.log('[TRUTH CHAT] Result:');
-    console.log('[TRUTH CHAT]  - Was blocked:', result.wasBlocked);
-    console.log('[TRUTH CHAT]  - Block reason:', result.blockReason || 'N/A');
-    console.log('[TRUTH CHAT]  - Authority level:', result.authorityLevel);
-    console.log('[TRUTH CHAT]  - Execution time:', result.executionTime, 'ms');
-    console.log('[TRUTH CHAT]  - Total time:', elapsedTime, 'ms');
-    console.log('[TRUTH CHAT] ===============================================');
+    console.log('[CHAT] Result:');
+    console.log('[CHAT]  - Tools used:', result.toolsUsed);
+    console.log('[CHAT]  - Execution time:', result.executionTime, 'ms');
+    console.log('[CHAT]  - Total time:', elapsedTime, 'ms');
+    console.log('[CHAT] ===============================================');
     
-    // Respuesta
+    // Respuesta simple
     return res.json({
-      answer: result.content,
-      wasBlocked: result.wasBlocked,
-      blockReason: result.blockReason,
-      evidence: result.evidence,
-      metadata: {
-        intent: result.plan.intent,
-        authorityLevel: result.authorityLevel,
-        authorityRequired: result.plan.authorityRequired,
-        requiresConfirmation: result.plan.requiresConfirmation,
-        executedTools: result.plan.requiredTools,
-        governorStatus: result.governorDecision.status,
-        executionTime: result.executionTime,
-        totalTime: elapsedTime,
-      },
+      answer: result.answer,
+      toolsUsed: result.toolsUsed,
+      executionTime: result.executionTime,
     });
     
   } catch (error: any) {
-    console.error('[TRUTH CHAT] Error:', error);
+    console.error('[CHAT] Error:', error);
     
     return res.status(500).json({
       error: 'Internal server error',
       message: error.message,
-      wasBlocked: true,
     });
   }
 };
 
 // Montar en TODOS los endpoints que el frontend puede usar
 router.post('/truth-chat', optionalAuth, handleTruthChat);
-router.post('/chat', optionalAuth, handleTruthChat); // NUEVO - reemplaza /chat con Truth Layer
-router.post('/chat/v2', optionalAuth, handleTruthChat); // También /chat/v2 (frontend usa esta)
+router.post('/chat', optionalAuth, handleTruthChat);
+router.post('/chat/v2', optionalAuth, handleTruthChat);
 
 export default router;
