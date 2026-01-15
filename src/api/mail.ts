@@ -28,7 +28,7 @@ import { requireAuth } from '../middleware/auth';
 const router = express.Router();
 
 // ═══════════════════════════════════════════════════════════════
-// POST /api/mail/send - AWS SES (P0 VALIDACIÓN REAL)
+// POST /api/mail/send - SMTP/IMAP DIRECTO (Nodemailer)
 // ═══════════════════════════════════════════════════════════════
 /**
  * REGLAS OBLIGATORIAS (NO NEGOCIABLES):
@@ -37,6 +37,9 @@ const router = express.Router();
  * 3. NO confirmar envío sin evidencia SMTP
  * 4. NO simular messageId
  * 5. NO success=true sin registro en DB
+ * 
+ * NOTA: Usa cuentas SMTP configuradas en email_accounts (Gmail, Hostinger, etc.)
+ * NO usa AWS SES (servicio cancelado)
  */
 
 router.post('/send', requireAuth, async (req, res) => {
