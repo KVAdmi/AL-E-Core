@@ -76,22 +76,22 @@ export class Narrator {
     
     // BLOQUEO: Falta autoridad
     if (reason === 'authority_insufficient') {
-      return `Esta operación requiere nivel de autoridad ${details.requiredLevel}, pero actualmente tienes ${details.currentLevel}.`;
+      return `Necesito tu autorización para hacer esto. Esta operación requiere nivel ${details.requiredLevel}, pero tu nivel actual es ${details.currentLevel}. ¿Quieres que lo intente de todas formas?`;
     }
     
     // BLOQUEO: Falta confirmación
     if (reason === 'confirmation_required') {
-      return `${details.message}\n\n${details.confirmationPrompt}`;
+      return `${details.message}\n\nPor favor confírmame si quieres que proceda.`;
     }
     
     // BLOQUEO: Capability deshabilitada
     if (reason === 'capability_disabled') {
-      return details.message || 'Esta función no está disponible actualmente.';
+      return 'Esta función no está disponible en este momento. Estoy trabajando para habilitarla pronto.';
     }
     
     // BLOQUEO: No hay cuentas configuradas
     if (reason === 'no_accounts_configured') {
-      return details.message || 'No hay cuentas configuradas.';
+      return 'Aún no tienes cuentas de correo configuradas. Para que pueda ayudarte con tus emails, necesitas conectar al menos una cuenta desde la configuración.';
     }
     
     // BLOQUEO: Tools faltantes
@@ -129,7 +129,7 @@ export class Narrator {
     if (intent === 'send_email') {
       const exec = executions.find(e => e.tool === 'send_email' || e.tool === 'create_and_send_email');
       if (exec && exec.evidenceIds.messageId) {
-        return `Correo enviado. ID de mensaje: ${exec.evidenceIds.messageId}`;
+        return `✅ Listo, tu correo fue enviado. (ID: ${exec.evidenceIds.messageId})`;
       }
     }
     
@@ -140,7 +140,7 @@ export class Narrator {
         const count = exec.evidenceIds.count;
         
         if (count === 0) {
-          return 'No tienes correos nuevos sin leer.';
+          return 'Revisé tu correo y no tienes mensajes nuevos sin leer. 📭';
         }
         
         // Narrar resumen de correos
@@ -148,10 +148,10 @@ export class Narrator {
         const summary = messages.slice(0, 5).map((m: any, idx: number) => {
           const from = m.from_name || m.from_address || m.from_email;
           const subject = m.subject || '(Sin asunto)';
-          return `${idx + 1}. De: ${from}\n   Asunto: ${subject}`;
+          return `${idx + 1}. **De:** ${from}\n   **Asunto:** ${subject}`;
         }).join('\n\n');
         
-        return `Tienes ${count} correo${count > 1 ? 's' : ''} sin leer:\n\n${summary}`;
+        return `Tienes ${count} correo${count > 1 ? 's' : ''} sin leer:\n\n${summary}\n\n¿Quieres que abra alguno?`;
       }
     }
     
@@ -164,9 +164,10 @@ export class Narrator {
         const date = event.start ? new Date(event.start).toLocaleString('es-MX') : '';
         const link = exec.evidenceIds.link || '';
         
-        let response = `Listo. Agendé "${title}"`;
+        let response = `✅ Listo, agendé "${title}"`;
         if (date) response += ` para el ${date}`;
-        if (link) response += `\n\nLink de la reunión: ${link}`;
+        if (link) response += `.\n\n🔗 Link de la reunión: ${link}`;
+        else response += '.';
         
         return response;
       }
@@ -179,14 +180,14 @@ export class Narrator {
         const count = exec.evidenceIds.count;
         
         if (count === 0) {
-          return 'No tienes eventos próximos en tu calendario.';
+          return 'No tienes eventos próximos en tu calendario. 📅';
         }
         
         const events = exec.output?.data?.events || [];
         const summary = events.slice(0, 5).map((e: any, idx: number) => {
           const title = e.title || e.summary || '(Sin título)';
           const start = e.start ? new Date(e.start).toLocaleString('es-MX') : '';
-          return `${idx + 1}. ${title}\n   ${start}`;
+          return `${idx + 1}. **${title}**\n   📅 ${start}`;
         }).join('\n\n');
         
         return `Tienes ${count} evento${count > 1 ? 's' : ''} próximo${count > 1 ? 's' : ''}:\n\n${summary}`;
@@ -224,13 +225,25 @@ export class Narrator {
       }
     }
     
-    // GENERAL QUERY (sin tools ejecutados)
+    // 🚨 SIN EXECUTIONS = SIN EVIDENCIA = SER HONESTA
     if (executions.length === 0) {
-      return 'Información procesada basada en conocimiento disponible.';
+      // Si fue bloqueado por Authority, ya se manejó arriba
+      // Si llegamos aquí sin tools ejecutados, es porque no pude hacer nada
+      return 'No pude ejecutar ninguna acción para responder a tu solicitud. ¿Podrías darme más detalles sobre lo que necesitas?';
     }
     
-    // Fallback genérico
-    return 'Acción completada exitosamente.';
+    // 🚨 SI LLEGAMOS AQUÍ: Hay executions pero no matcheó ningún intent específico
+    // Ser honesta: no inventar éxito
+    console.warn('[NARRATOR] ⚠️ Executions sin intent específico:', intent);
+    console.warn('[NARRATOR] Executions:', executions.map(e => ({ tool: e.tool, success: e.success })));
+    
+    // Listar qué tools SÍ se ejecutaron
+    const executedTools = executions.filter(e => e.success).map(e => e.tool).join(', ');
+    if (executedTools) {
+      return `Ejecuté: ${executedTools}. Sin embargo, no tengo suficiente información para darte una respuesta completa. ¿Qué específicamente necesitas saber?`;
+    }
+    
+    return 'Intenté procesar tu solicitud pero no obtuve resultados concretos. ¿Puedes reformular lo que necesitas?';
   }
   
   /**

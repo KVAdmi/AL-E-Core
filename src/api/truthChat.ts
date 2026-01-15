@@ -6,7 +6,7 @@
  */
 
 import express from 'express';
-import { optionalAuth, getUserId } from '../middleware/auth';
+import { optionalAuth, getUserId, getUserEmail } from '../middleware/auth';
 import { getTruthOrchestrator } from '../ai/truthOrchestrator';
 
 const router = express.Router();
@@ -36,7 +36,11 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
     const bodyUserId = req.body.userId || req.body.user_id;
     const userId = authenticatedUserId || bodyUserId;
     
+    // Obtener userEmail
+    const userEmail = getUserEmail(req);
+    
     console.log('[TRUTH CHAT] User ID resolved:', userId);
+    console.log('[TRUTH CHAT] User Email resolved:', userEmail || 'N/A');
     
     if (!userId) {
       console.log('[TRUTH CHAT] ERROR: No userId found');
@@ -82,6 +86,7 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
     const result = await truthOrchestrator.orchestrate({
       userMessage,
       userId,
+      userEmail,
       conversationHistory: messages.slice(0, -1), // Excluir último mensaje
       userConfirmed,
     });

@@ -22,6 +22,7 @@ import { logger, generateRequestId } from '../utils/logger';
 export interface TruthOrchestratorRequest {
   userMessage: string;
   userId: string;
+  userEmail?: string; // Para determinar authority level
   conversationHistory?: Array<{ role: string; content: string }>;
   userConfirmed?: boolean; // ¿El usuario dio confirmación explícita?
   requestId?: string; // Opcional: correlación externa
@@ -50,7 +51,39 @@ export class TruthOrchestrator {
   private executor: Executor;
   private governor: Governor;
   private narrator: Narrator;
-  private authorityEngine?: AuthorityEngine;
+  private authorityEngine: AuthorityEngine | null = null;
+  
+  /**
+   * OWNER/ADMIN ALLOWLIST
+   * Estos usuarios siempre inician en A2 (máximo nivel de operación)
+   */
+  private ADMIN_EMAILS = [
+    'pg@kunna.io',
+    'p.garibay@kunna.io',
+    'patricia@kunna.io',
+    'admin@kunna.io',
+  ];
+  
+  /**
+   * Determinar Authority Level basado en usuario
+   */
+  private determineAuthorityLevel(userId: string, userEmail?: string): AuthorityLevel {
+    // Si está en la allowlist de admins → A2
+    if (userEmail && this.ADMIN_EMAILS.includes(userEmail.toLowerCase())) {
+      console.log(`[TRUTH ORCH] 👑 Admin detected: ${userEmail} → A2`);
+      return 'A2';
+    }
+    
+    // Usuarios autenticados → A2 (pueden leer/escribir sus datos)
+    if (userId && userId !== 'anonymous' && userId !== 'unknown') {
+      console.log(`[TRUTH ORCH] ✅ Authenticated user: ${userId} → A2`);
+      return 'A2';
+    }
+    
+    // Usuarios anónimos/no verificados → A0 (solo lectura pública)
+    console.log(`[TRUTH ORCH] 👤 Anonymous/unverified user → A0`);
+    return 'A0';
+  }
   
   constructor() {
     this.planner = new Planner();
@@ -119,10 +152,15 @@ export class TruthOrchestrator {
     // STEP 2: AUTHORITY ENGINE - Verificar permisos ANTES de ejecutar
     console.log('[TRUTH ORCH] STEP 2: AUTHORITY ENGINE');
     
+    // Determinar authority level dinámicamente
+    const currentLevel = this.determineAuthorityLevel(request.userId, request.userEmail);
+    
     const authorityContext: AuthorityContext = {
-      currentLevel: 'A2', // Usuario normal (puede leer/escribir datos propios)
+      currentLevel,
       userId: request.userId,
     };
+    
+    console.log('[TRUTH ORCH] Authority context:', authorityContext);
     
     // Detectar confirmación del usuario
     const userConfirmed = request.userConfirmed || 

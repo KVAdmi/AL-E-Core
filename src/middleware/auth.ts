@@ -149,3 +149,16 @@ export function getUserId(req: Request): string | undefined {
   
   return req.body.userId || req.body.user_id || undefined;
 }
+
+/**
+ * Helper: Obtener userEmail del request (autenticado o del body)
+ * 
+ * Prioridad: req.user.email > body.userEmail > body.user_email
+ */
+export function getUserEmail(req: Request): string | undefined {
+  if (req.user?.email) {
+    return req.user.email;
+  }
+  
+  return req.body.userEmail || req.body.user_email || undefined;
+}
