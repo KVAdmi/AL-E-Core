@@ -173,6 +173,56 @@ export async function executeTool(
           error: createResult.error
         };
 
+      // Calendar Tools
+      case 'list_events':
+        const startDate = parameters.startDate || new Date().toISOString();
+        const endDate = parameters.endDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        
+        const eventsResult = await listEvents(userId, startDate, endDate);
+        
+        if (!eventsResult.success || !eventsResult.events) {
+          throw new Error(eventsResult.error || 'Error listando eventos');
+        }
+        
+        return {
+          success: true,
+          data: {
+            events: eventsResult.events.map(e => ({
+              id: e.id,
+              title: e.title,
+              start: e.start_at,
+              end: e.end_at,
+              description: e.description
+            }))
+          }
+        };
+
+      case 'create_event':
+        if (!parameters.title || !parameters.startTime) {
+          throw new Error('title y startTime son requeridos');
+        }
+        
+        const eventResult = await createCalendarEvent(userId, {
+          title: parameters.title,
+          start_at: parameters.startTime,
+          end_at: parameters.endTime || new Date(new Date(parameters.startTime).getTime() + 60 * 60 * 1000).toISOString(), // +1 hora por defecto
+          description: parameters.description || ''
+        });
+        
+        if (!eventResult.success || !eventResult.event) {
+          throw new Error(eventResult.error || 'Error creando evento');
+        }
+        
+        return {
+          success: true,
+          data: {
+            eventId: eventResult.event.id,
+            title: eventResult.event.title,
+            start: eventResult.event.start_at,
+            end: eventResult.event.end_at
+          }
+        };
+
       // Document Analysis Tools
       case 'analyze_document':
         if (!parameters.fileUrl) {
@@ -238,12 +288,12 @@ export async function executeTool(
           data: costResult
         };
 
-      // Calendar Tools
+      // Calendar Tools (LEGACY - eliminar después de migrar frontend)
       case 'create_calendar_event':
         if (!parameters.title || !parameters.start_at) {
           throw new Error('title y start_at son requeridos');
         }
-        const eventResult = await createCalendarEvent(userId, {
+        const legacyEventResult = await createCalendarEvent(userId, {
           title: parameters.title,
           description: parameters.description,
           start_at: parameters.start_at,
@@ -254,9 +304,9 @@ export async function executeTool(
           notification_minutes: parameters.notification_minutes || parameters.reminder_minutes
         });
         return {
-          success: eventResult.success,
-          data: eventResult.event,
-          error: eventResult.error
+          success: legacyEventResult.success,
+          data: legacyEventResult.event,
+          error: legacyEventResult.error
         };
 
       case 'list_calendar_events':

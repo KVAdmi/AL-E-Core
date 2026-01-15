@@ -342,6 +342,7 @@ export async function sendEmail(
     const response = await axios.post(
       `${API_BASE}/api/mail/send`,
       {
+        accountId: account.id, // ✅ REQUERIDO por el API
         from: account.from_email,
         to: draft.to,
         subject: draft.subject,

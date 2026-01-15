@@ -253,7 +253,7 @@ IMPORTANTE: Después de ejecutar un tool, SIEMPRE menciona lo que encontraste co
       messages.push({ role: 'user', content: request.userMessage });
       
       let response = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: 'llama-3.1-70b-versatile', // 3.1 soporta tool calling, 3.3 no
         max_tokens: 4096,
         messages,
         tools: AVAILABLE_TOOLS,
