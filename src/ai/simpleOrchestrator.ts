@@ -13,6 +13,7 @@ import Groq from 'groq-sdk';
 import { executeTool } from './tools/toolRouter';
 import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
+import { supabase } from '../db/supabase';
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -144,11 +145,12 @@ export class SimpleOrchestrator {
   async orchestrate(request: SimpleOrchestratorRequest): Promise<SimpleOrchestratorResponse> {
     const startTime = Date.now();
     const requestId = request.requestId || uuidv4();
+    const workspaceId = request.workspaceId || 'default';
     
     logger.aiRequestReceived({
       request_id: requestId,
       user_id: request.userId,
-      workspace_id: request.workspaceId || 'default',
+      workspace_id: workspaceId,
       route: request.route || '/api/ai/chat',
       message_length: request.userMessage.length,
       channel: 'api',
@@ -160,25 +162,83 @@ export class SimpleOrchestrator {
     console.log('[SIMPLE ORCH] User:', request.userId);
     
     try {
+      // 🧠 1. CARGAR MEMORIA DEL USUARIO desde Supabase
+      console.log('[SIMPLE ORCH] 🧠 Cargando memoria del usuario...');
+      const { data: memories, error: memError } = await supabase
+        .from('assistant_memories')
+        .select('memory, importance, created_at')
+        .eq('user_id', request.userId)
+        .eq('workspace_id', workspaceId)
+        .order('importance', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      if (memError) {
+        console.error('[SIMPLE ORCH] ⚠️ Error cargando memorias:', memError);
+      }
+      
+      const userMemories = memories && memories.length > 0 
+        ? memories.map(m => m.memory).join('\n- ')
+        : 'No hay memorias previas';
+      
+      console.log('[SIMPLE ORCH] 🧠 Memorias cargadas:', memories?.length || 0);
+      
+      // 👤 2. CARGAR CONFIGURACIÓN DEL USUARIO
+      console.log('[SIMPLE ORCH] 👤 Cargando configuración del usuario...');
+      const { data: userConfig, error: configError } = await supabase
+        .from('user_settings')
+        .select('assistant_name, user_nickname, preferences')
+        .eq('user_id', request.userId)
+        .single();
+      
+      if (configError && configError.code !== 'PGRST116') {
+        console.error('[SIMPLE ORCH] ⚠️ Error cargando config:', configError);
+      }
+      
+      const assistantName = userConfig?.assistant_name || 'AL-E';
+      const userNickname = userConfig?.user_nickname || 'Usuario';
+      const preferences = userConfig?.preferences || {};
+      
+      console.log('[SIMPLE ORCH] 👤 Nombre asistente:', assistantName);
+      console.log('[SIMPLE ORCH] 👤 Nickname usuario:', userNickname);
+      
       const messages: Array<Groq.Chat.ChatCompletionMessageParam> = [];
       
-      const systemPrompt = `Eres AL-E, asistente AI ejecutiva ultra competente.
+      // 🎭 3. SYSTEM PROMPT PERSONALIZADO CON MEMORIA
+      const systemPrompt = `Eres ${assistantName}, asistente AI ejecutiva ultra competente de ${userNickname}.
 
-Tu personalidad:
-- Clara, eficiente, sin rodeos (como directora de operaciones)
-- Ejecutas acciones sin pedir permiso (como GitHub Copilot)
-- Si algo falla, lo dices honestamente
+TU PERSONALIDAD:
+- Clara, eficiente, sin rodeos (como directora de operaciones de Silicon Valley)
+- Ejecutas acciones SIN pedir permiso (como GitHub Copilot)
+- Si algo falla, lo dices honestamente y propones alternativas
+- Hablas directo, sin ser formal en exceso
+- Usas "flaca" o términos casuales si el usuario lo hace
 
-Reglas:
-1. "revisar correo" → usa list_emails
-2. "qué dice" o "léelo" → usa read_email
-3. "PDF/documento/contrato" → usa analyze_document
-4. "busca/investiga" → usa web_search (Tavily)
-5. NUNCA digas "no tengo info" si puedes usar un tool
-6. NUNCA digas "acción completada" sin ejecutar
+🧠 LO QUE RECUERDAS DE ${userNickname}:
+${userMemories}
 
-Usuario: ${request.userId}
-Email: ${request.userEmail || 'N/A'}`;
+📧 CAPACIDADES (úsalas automáticamente):
+✅ Email: list_emails, read_email, send_email
+✅ Web: web_search (Tavily - búsquedas en tiempo real)
+✅ Documentos: analyze_document (OCR con Google Vision)
+✅ Calendario: list_events, create_event
+✅ Transcripts: get_meeting_transcript
+
+REGLAS DE ORO:
+1. "revisar correo" → usa list_emails INMEDIATAMENTE
+2. "qué dice" o "léelo" → usa read_email con el emailId
+3. "PDF/documento/contrato/imagen" → usa analyze_document (tienes OCR!)
+4. "busca/investiga/qué es" → usa web_search (Tavily)
+5. NUNCA digas "no tengo información" si puedes ejecutar un tool
+6. NUNCA digas "acción completada" sin ejecutar nada
+7. Cuando ejecutes tools, usa los resultados REALES en tu respuesta
+
+CONTEXTO ACTUAL:
+- Usuario: ${userNickname} (${request.userId})
+- Email: ${request.userEmail || 'N/A'}
+- Workspace: ${workspaceId}
+
+IMPORTANTE: Después de ejecutar un tool, SIEMPRE menciona lo que encontraste con los datos reales. No inventes.`;
 
       messages.push({ role: 'system', content: systemPrompt });
       
@@ -266,6 +326,29 @@ Email: ${request.userEmail || 'N/A'}`;
       
       console.log('[SIMPLE ORCH] 🎯 Tools:', toolsUsed);
       console.log('[SIMPLE ORCH] ⏱️', executionTime, 'ms');
+      
+      // 💾 GUARDAR MEMORIA si la conversación fue importante
+      if (toolsUsed.length > 0 || request.userMessage.length > 50) {
+        console.log('[SIMPLE ORCH] 💾 Guardando memoria...');
+        
+        const memoryText = `${userNickname} preguntó: "${request.userMessage.substring(0, 200)}". ${assistantName} usó: ${toolsUsed.join(', ') || 'respuesta directa'}.`;
+        const importance = toolsUsed.length > 0 ? 5 : 3; // Más importante si usó tools
+        
+        await supabase
+          .from('assistant_memories')
+          .insert({
+            workspace_id: workspaceId,
+            user_id: request.userId,
+            mode: 'universal',
+            memory: memoryText,
+            importance,
+          })
+          .then(({ error }) => {
+            if (error) console.error('[SIMPLE ORCH] ⚠️ Error guardando memoria:', error);
+            else console.log('[SIMPLE ORCH] 💾 Memoria guardada');
+          });
+      }
+      
       console.log('[SIMPLE ORCH] ══════════════════════════════════════');
       
       logger.aiResponseSent({
