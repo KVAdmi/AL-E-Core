@@ -14,6 +14,12 @@ import { executeTool } from './tools/toolRouter';
 import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../db/supabase';
+import {
+  detectGroqEvasion,
+  detectEvidenceMismatch,
+  invokeOpenAIReferee,
+  type RefereeReason
+} from '../llm/openaiReferee';
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -253,7 +259,7 @@ IMPORTANTE: Después de ejecutar un tool, SIEMPRE menciona lo que encontraste co
       messages.push({ role: 'user', content: request.userMessage });
       
       let response = await groq.chat.completions.create({
-        model: 'llama-3.1-70b-versatile', // 3.1 soporta tool calling, 3.3 no
+        model: 'llama-3.3-70b-versatile', // Actualizado: 3.3 soporta tool calling
         max_tokens: 4096,
         messages,
         tools: AVAILABLE_TOOLS,
@@ -261,6 +267,9 @@ IMPORTANTE: Después de ejecutar un tool, SIEMPRE menciona lo que encontraste co
       });
       
       console.log('[SIMPLE ORCH] Finish reason:', response.choices[0]?.finish_reason);
+      
+      // Array para guardar resultados de tools (para referee)
+      const toolResults: any[] = [];
       
       const toolsUsed: string[] = [];
       let iterations = 0;
@@ -294,6 +303,9 @@ IMPORTANTE: Después de ejecutar un tool, SIEMPRE menciona lo que encontraste co
             const result = await executeTool(request.userId, { name: toolName, parameters: toolInput });
             console.log(`[SIMPLE ORCH] ✅ ${toolName} success`);
             
+            // Guardar resultado para referee
+            toolResults.push({ tool: toolName, result });
+            
             messages.push({
               role: 'tool',
               tool_call_id: toolCall.id,
@@ -301,6 +313,9 @@ IMPORTANTE: Después de ejecutar un tool, SIEMPRE menciona lo que encontraste co
             });
           } catch (error: any) {
             console.error(`[SIMPLE ORCH] ❌ ${toolName}:`, error.message);
+            
+            // Guardar error para referee
+            toolResults.push({ tool: toolName, error: error.message });
             
             messages.push({
               role: 'tool',
@@ -326,6 +341,52 @@ IMPORTANTE: Después de ejecutar un tool, SIEMPRE menciona lo que encontraste co
       
       console.log('[SIMPLE ORCH] 🎯 Tools:', toolsUsed);
       console.log('[SIMPLE ORCH] ⏱️', executionTime, 'ms');
+      
+      // ====================================================================
+      // OPENAI REFEREE - Detección de evasiones
+      // ====================================================================
+      
+      let correctedAnswer = finalAnswer;
+      
+      if (process.env.OPENAI_ROLE === 'referee') {
+        try {
+          // Detectar si Groq evadió
+          const evasionCheck = detectGroqEvasion(
+            finalAnswer,
+            AVAILABLE_TOOLS.length > 0,
+            toolsUsed.length > 0
+          );
+          
+          // Detectar contradicción con evidencia
+          const evidenceMismatch = toolResults.length > 0
+            ? detectEvidenceMismatch(finalAnswer, { toolResults })
+            : false;
+          
+          const needsReferee = evasionCheck.needsReferee || evidenceMismatch;
+          
+          if (needsReferee) {
+            console.log(`[SIMPLE ORCH] ⚖️ OPENAI REFEREE INVOKED - reason=${evasionCheck.reason || 'evidence_mismatch'}`);
+            
+            const refereeResult = await invokeOpenAIReferee({
+              userPrompt: request.userMessage,
+              groqResponse: finalAnswer,
+              toolResults: toolResults.length > 0 ? { tools: toolResults } : undefined,
+              systemState: {
+                tools_available: AVAILABLE_TOOLS.length,
+                tools_executed: toolsUsed.length,
+                execution_time_ms: executionTime
+              },
+              detectedIssue: evasionCheck.reason || 'evidence_mismatch'
+            });
+            
+            correctedAnswer = refereeResult.text;
+            console.log(`[SIMPLE ORCH] ✅ REFEREE CORRECTED - primary_model=groq fallback_model=openai`);
+          }
+        } catch (refereeError: any) {
+          console.error(`[SIMPLE ORCH] ❌ REFEREE FAILED: ${refereeError.message}`);
+          // Continuar con respuesta de Groq
+        }
+      }
       
       // 💾 GUARDAR MEMORIA si la conversación fue importante
       if (toolsUsed.length > 0 || request.userMessage.length > 50) {
@@ -359,7 +420,7 @@ IMPORTANTE: Después de ejecutar un tool, SIEMPRE menciona lo que encontraste co
         latency_ms_total: executionTime,
       });
       
-      return { answer: finalAnswer, toolsUsed, executionTime };
+      return { answer: correctedAnswer, toolsUsed, executionTime };
       
     } catch (error: any) {
       console.error('[SIMPLE ORCH] 💥 Error:', error);
