@@ -100,11 +100,25 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
     console.log('[CHAT]  - Total time:', elapsedTime, 'ms');
     console.log('[CHAT] ===============================================');
     
-    // Respuesta simple
+    // Respuesta con metadata y debug info
     return res.json({
       answer: result.answer,
       toolsUsed: result.toolsUsed,
       executionTime: result.executionTime,
+      metadata: {
+        request_id: `req-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        model: 'groq/llama-3.3-70b-versatile',
+        tools_executed: result.toolsUsed.length,
+        source: 'SimpleOrchestrator',
+      },
+      debug: {
+        tools_detail: result.toolsUsed.map((tool: string) => ({
+          name: tool,
+          status: 'executed',
+          timestamp: new Date().toISOString(),
+        })),
+      },
     });
     
   } catch (error: any) {

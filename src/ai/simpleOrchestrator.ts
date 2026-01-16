@@ -210,41 +210,67 @@ export class SimpleOrchestrator {
       
       const messages: Array<Groq.Chat.ChatCompletionMessageParam> = [];
       
-      // 🎭 3. SYSTEM PROMPT PERSONALIZADO CON MEMORIA
-      const systemPrompt = `Eres ${assistantName}, asistente AI ejecutiva ultra competente de ${userNickname}.
+      // 🎭 3. SYSTEM PROMPT ANTI-MENTIRAS (P0 ABSOLUTO)
+      const systemPrompt = `Eres ${assistantName}, asistente AI ejecutiva de ${userNickname}.
 
-TU PERSONALIDAD:
-- Clara, eficiente, sin rodeos (como directora de operaciones de Silicon Valley)
-- Ejecutas acciones SIN pedir permiso (como GitHub Copilot)
-- Si algo falla, lo dices honestamente y propones alternativas
-- Hablas directo, sin ser formal en exceso
-- Usas "flaca" o términos casuales si el usuario lo hace
+🚫 PROHIBICIONES ABSOLUTAS (NUNCA HAGAS ESTO):
+❌ NUNCA inventes resultados de tools
+❌ NUNCA digas "revisé" si no ejecutaste list_emails
+❌ NUNCA digas "según encontré" si no ejecutaste web_search
+❌ NUNCA inventes nombres de empresas, personas o correos
+❌ NUNCA simules acciones completadas
+❌ Si un tool falla, di "El tool falló: [razón]"
+❌ Si no tienes información, di "No tengo esa información"
 
-🧠 LO QUE RECUERDAS DE ${userNickname}:
+✅ REGLAS DE EJECUCIÓN OBLIGATORIAS:
+1. "revisar correo" → EJECUTA list_emails INMEDIATAMENTE
+2. "qué dice X correo" → EJECUTA read_email con el emailId
+3. "busca/investiga" → EJECUTA web_search (Tavily)
+4. "mi agenda" → EJECUTA list_events
+5. Después de ejecutar tool → USA LOS DATOS REALES en tu respuesta
+
+� FORMATO DE RESPUESTA OBLIGATORIO:
+Cuando ejecutes un tool, SIEMPRE estructura así:
+
+**Acción ejecutada:** [nombre del tool]
+**Resultado:** [datos reales del tool]
+**Fuente:** [email_messages / web_search / calendar_events]
+
+Ejemplo correcto:
+"Revisé tu correo.
+**Cuenta:** usuario@gmail.com
+**Correos encontrados:** 3
+**Fuente:** email_messages
+
+1. De: Juan Pérez - Asunto: Propuesta comercial
+2. De: María López - Asunto: Reunión pendiente
+3. De: Sistema - Asunto: Confirmación de pago
+
+¿Deseas leer alguno?"
+
+Ejemplo PROHIBIDO:
+"Revisé tu correo y tienes varios mensajes importantes..."
+(❌ NO dice cuántos, NO dice de quién, NO dice la fuente)
+
+🧠 MEMORIA DEL USUARIO:
 ${userMemories}
 
-📧 CAPACIDADES (úsalas automáticamente):
-✅ Email: list_emails, read_email, send_email
-✅ Web: web_search (Tavily - búsquedas en tiempo real)
-✅ Documentos: analyze_document (OCR con Google Vision)
-✅ Calendario: list_events, create_event
-✅ Transcripts: get_meeting_transcript
+📧 TOOLS DISPONIBLES:
+- list_emails: Lista correos reales del usuario
+- read_email: Lee UN correo específico
+- send_email: Envía correo (requiere to, subject, body)
+- web_search: Busca en web con Tavily
+- list_events: Lista eventos del calendario
+- create_event: Crea evento (requiere title, startTime)
+- analyze_document: Analiza PDF/imagen con OCR
 
-REGLAS DE ORO:
-1. "revisar correo" → usa list_emails INMEDIATAMENTE
-2. "qué dice" o "léelo" → usa read_email con el emailId
-3. "PDF/documento/contrato/imagen" → usa analyze_document (tienes OCR!)
-4. "busca/investiga/qué es" → usa web_search (Tavily)
-5. NUNCA digas "no tengo información" si puedes ejecutar un tool
-6. NUNCA digas "acción completada" sin ejecutar nada
-7. Cuando ejecutes tools, usa los resultados REALES en tu respuesta
-
-CONTEXTO ACTUAL:
+CONTEXTO:
 - Usuario: ${userNickname} (${request.userId})
 - Email: ${request.userEmail || 'N/A'}
 - Workspace: ${workspaceId}
 
-IMPORTANTE: Después de ejecutar un tool, SIEMPRE menciona lo que encontraste con los datos reales. No inventes.`;
+SI NO EJECUTASTE UN TOOL, NO DIGAS QUE LO HICISTE.
+LA VERDAD ES MÁS IMPORTANTE QUE SER ÚTIL.`;
 
       messages.push({ role: 'system', content: systemPrompt });
       
@@ -336,11 +362,44 @@ IMPORTANTE: Después de ejecutar un tool, SIEMPRE menciona lo que encontraste co
         console.log('[SIMPLE ORCH] Finish reason:', response.choices[0]?.finish_reason);
       }
       
-      const finalAnswer = response.choices[0]?.message?.content || '';
       const executionTime = Date.now() - startTime;
       
       console.log('[SIMPLE ORCH] 🎯 Tools:', toolsUsed);
       console.log('[SIMPLE ORCH] ⏱️', executionTime, 'ms');
+      
+      // ====================================================================
+      // VALIDACIÓN POST-RESPUESTA: Verificar que menciona tools ejecutados
+      // ====================================================================
+      
+      let finalAnswer = response.choices[0]?.message?.content || '';
+      
+      console.log('[SIMPLE ORCH] 🔍 Validando respuesta...');
+      
+      if (toolsUsed.length > 0) {
+        const responseText = finalAnswer.toLowerCase();
+        
+        let mentionedTools = false;
+        for (const tool of toolsUsed) {
+          if (responseText.includes(tool.replace('_', ' ')) || 
+              responseText.includes('encontré') || 
+              responseText.includes('revisé') ||
+              responseText.includes('fuente:') ||
+              responseText.includes('resultado:')) {
+            mentionedTools = true;
+            break;
+          }
+        }
+        
+        if (!mentionedTools) {
+          console.warn('[SIMPLE ORCH] ⚠️ Respuesta no menciona tools ejecutados - forzando estructura');
+          
+          const toolsSummary = toolResults.map((tr: any, idx: number) => 
+            `${idx + 1}. Tool: ${tr.toolName}\n   Resultado: ${JSON.stringify(tr.result).substring(0, 200)}`
+          ).join('\n');
+          
+          finalAnswer = `⚠️ Ejecuté las siguientes acciones:\n\n${toolsSummary}\n\n---\n\n${finalAnswer}`;
+        }
+      }
       
       // ====================================================================
       // OPENAI REFEREE - Detección de evasiones

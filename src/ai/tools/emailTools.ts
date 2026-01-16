@@ -67,65 +67,69 @@ export async function listEmails(
     accountEmail?: string;
     unreadOnly?: boolean;
     limit?: number;
-    folderType?: 'inbox' | 'sent' | 'drafts' | 'trash' | 'archive'; // 🔥 NUEVO
+    folderType?: 'inbox' | 'sent' | 'drafts' | 'trash' | 'archive';
   }
 ): Promise<EmailMessage[]> {
   try {
-    console.log('[EMAIL TOOLS - LEGACY] 🔵 list_emails INICIO');
-    console.log('[EMAIL TOOLS] Listando correos para usuario:', userId);
+    console.log('[EMAIL TOOLS] 📧 Listando emails para usuario:', userId);
     
     // 🔥 P0 FIX: Por defecto = INBOX (entrantes)
     const folderType = filters?.folderType || 'inbox';
     console.log(`[EMAIL TOOLS] 📁 Leyendo carpeta: ${folderType.toUpperCase()}`);
 
-    // Obtener cuentas del usuario
-    console.log('[EMAIL TOOLS] 🔍 Query: email_accounts where owner_user_id =', userId);
+    // 1. VERIFICAR SI HAY CUENTAS CONFIGURADAS
+    console.log('[EMAIL TOOLS] 🔍 Verificando cuentas configuradas...');
     const { data: accounts, error: accountError } = await supabase
       .from('email_accounts')
-      .select('id, from_email, is_active, owner_user_id')
+      .select('id, email, from_email, is_active, owner_user_id, provider, status')
       .eq('owner_user_id', userId);
 
     console.log('[EMAIL TOOLS] 📊 Cuentas encontradas:', accounts?.length || 0);
-    if (accountError) console.error('[EMAIL TOOLS] Account error:', accountError);
-    if (accounts && accounts.length > 0) {
-      console.log('[EMAIL TOOLS] Primera cuenta:', {
+    if (accountError) {
+      console.error('[EMAIL TOOLS] Account error:', accountError);
+      throw new Error(`ERROR_CHECKING_ACCOUNTS: ${accountError.message}`);
+    }
+    
+    if (!accounts || accounts.length === 0) {
+      console.log('[EMAIL TOOLS] ⚠️ Usuario sin cuentas de email configuradas');
+      throw new Error('NO_EMAIL_ACCOUNTS: No tienes cuentas de correo configuradas.\n\nPara usar esta función, agrega una cuenta en Configuración → Email Hub.');
+    }
+    
+    if (accounts.length > 0) {
+      console.log('[EMAIL TOOLS] ✅ Primera cuenta:', {
         id: accounts[0].id,
-        from_email: accounts[0].from_email,
+        email: accounts[0].email || accounts[0].from_email,
+        status: accounts[0].status,
         is_active: accounts[0].is_active,
         owner_user_id: accounts[0].owner_user_id
       });
     }
 
-    if (accountError || !accounts || accounts.length === 0) {
-      console.log('[EMAIL TOOLS] ❌ No se encontraron cuentas de correo');
-      console.log('[EMAIL TOOLS] accountError:', accountError);
-      console.log('[EMAIL TOOLS] accounts:', accounts);
-      return [];
-    }
-
-    // Filtrar solo cuentas activas
-    const activeAccounts = accounts.filter(a => a.is_active !== false);
+    // 2. FILTRAR SOLO CUENTAS ACTIVAS
+    const activeAccounts = accounts.filter(a => a.is_active !== false && a.status === 'active');
     console.log('[EMAIL TOOLS] Cuentas activas:', activeAccounts.length);
     
     if (activeAccounts.length === 0) {
       console.log('[EMAIL TOOLS] ❌ No hay cuentas activas');
-      return [];
+      throw new Error('NO_ACTIVE_ACCOUNTS: Tienes cuentas configuradas pero ninguna está activa.');
     }
 
-    // Filtrar por cuenta específica si se especifica
+    // 3. FILTRAR POR CUENTA ESPECÍFICA SI SE ESPECIFICA
     let accountIds = activeAccounts.map(a => a.id);
     console.log('[EMAIL TOOLS] Account IDs a buscar:', accountIds);
+    
     if (filters?.accountEmail) {
+      const emailField = activeAccounts[0].from_email ? 'from_email' : 'email';
       const filteredAccount = activeAccounts.find(a => 
-        a.from_email.toLowerCase().includes(filters.accountEmail!.toLowerCase())
+        (a[emailField] || '').toLowerCase().includes(filters.accountEmail!.toLowerCase())
       );
       if (filteredAccount) {
         accountIds = [filteredAccount.id];
-        console.log('[EMAIL TOOLS] Filtrando por cuenta:', filteredAccount.from_email);
+        console.log('[EMAIL TOOLS] Filtrando por cuenta:', filteredAccount.email || filteredAccount.from_email);
       }
     }
 
-    // 🔥 P0 FIX: Obtener folder_id por folder_type
+    // 4. OBTENER FOLDER_ID POR FOLDER_TYPE
     console.log('[EMAIL TOOLS] 🔍 Buscando folders tipo:', folderType);
     const { data: folders, error: folderError } = await supabase
       .from('email_folders')
