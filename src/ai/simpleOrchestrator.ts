@@ -229,15 +229,15 @@ PROHIBICIONES ABSOLUTAS:
 - Si un tool falla, dilo directo: "No pude [acción] porque [razón]"
 - Si no tienes info, di: "No tengo esa información"
 
-REGLAS DE EJECUCIÓN:
-1. "revisar correo" → EJECUTA list_emails INMEDIATAMENTE
-2. "qué dice X correo" → EJECUTA read_email con el emailId
-3. "busca/investiga" → EJECUTA web_search (Tavily)
-4. "mi agenda" → EJECUTA list_events
-5. Después de ejecutar tool → USA LOS DATOS REALES en tu respuesta
+CUÁNDO USAR TOOLS (MUY IMPORTANTE):
+1. Usuario dice "revisar correo/email/mensajes" → USA list_emails
+2. Usuario pregunta por info que NO sabes (tipo de cambio, noticias, empresas) → USA web_search
+3. Usuario dice "mi agenda/calendario/reuniones" → USA list_events
+4. Usuario pide enviar correo → USA send_email
+5. Para TODO lo demás → Responde directo SIN tools
 
 FORMATO DE RESPUESTA:
-Habla natural, sin estructuras técnics.
+Habla natural, sin estructuras técnicas.
 
 Ejemplo CORRECTO:
 "Ok ${userNickname}, revisé tu correo de usuario@gmail.com. Tienes 3 correos:
@@ -262,7 +262,7 @@ TOOLS DISPONIBLES:
 - list_emails: Lista correos reales del usuario
 - read_email: Lee UN correo específico
 - send_email: Envía correo (requiere to, subject, body)
-- web_search: Busca en web con Tavily
+- web_search: Busca en web con Tavily (usa esto para info que no sabes)
 - list_events: Lista eventos del calendario
 - create_event: Crea evento (requiere title, startTime)
 - analyze_document: Analiza PDF/imagen con OCR
@@ -284,32 +284,12 @@ RECUERDA: Si no ejecutaste un tool, NO digas que lo hiciste. La verdad siempre.`
       
       messages.push({ role: 'user', content: request.userMessage });
       
-      // 🔥 P0 FIX: Forzar tool cuando se detectan keywords específicos
-      const lowerMessage = request.userMessage.toLowerCase();
-      let forcedToolChoice: 'auto' | { type: 'function'; function: { name: string } } = 'auto';
-      
-      // Detectar keywords de email
-      if (lowerMessage.match(/\b(revis.*correo|ver.*email|mi.*correo|check.*email|inbox|bandeja|mensajes)/i)) {
-        console.log('[SIMPLE ORCH] 🔥 FORZANDO tool: list_emails');
-        forcedToolChoice = { type: 'function', function: { name: 'list_emails' } };
-      }
-      // Detectar keywords de búsqueda web
-      else if (lowerMessage.match(/\b(busca|investiga|qué es|who is|google|search|encuentra información)/i)) {
-        console.log('[SIMPLE ORCH] 🔥 FORZANDO tool: web_search');
-        forcedToolChoice = { type: 'function', function: { name: 'web_search' } };
-      }
-      // Detectar keywords de calendario
-      else if (lowerMessage.match(/\b(mi agenda|eventos|calendario|reuniones|meetings|schedule)/i)) {
-        console.log('[SIMPLE ORCH] 🔥 FORZANDO tool: list_events');
-        forcedToolChoice = { type: 'function', function: { name: 'list_events' } };
-      }
-      
       let response = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile', // Actualizado: 3.3 soporta tool calling
+        model: 'llama-3.3-70b-versatile',
         max_tokens: 4096,
         messages,
         tools: AVAILABLE_TOOLS,
-        tool_choice: forcedToolChoice,
+        tool_choice: 'auto', // Dejar que Groq decida automáticamente
       });
       
       console.log('[SIMPLE ORCH] Finish reason:', response.choices[0]?.finish_reason);
