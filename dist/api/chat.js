@@ -50,6 +50,7 @@ const orchestrator_1 = require("../ai/orchestrator");
 const aleon_1 = require("../ai/prompts/aleon");
 const router_1 = require("../llm/router");
 const noFakeTools_1 = require("../guards/noFakeTools");
+const openaiReferee_1 = require("../llm/openaiReferee");
 const router = express_1.default.Router();
 const orchestrator = new orchestrator_1.Orchestrator();
 // Anti-duplicado: request_id tracking (30s TTL)
@@ -466,6 +467,11 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
         let fallbackUsed = false;
         let fallbackChain = [];
         let guardrailResult = null; // Guardrail result
+        // OpenAI Referee variables
+        let refereeUsed = false;
+        let refereeReason;
+        let refereeCost = 0;
+        let refereeLatency = 0;
         try {
             // Preparar mensajes con contexto de attachments Y chunks
             let finalMessages = [...messages];
@@ -640,6 +646,44 @@ Ejemplo malo: "Visita https://... para ver el precio."` },
                 }
             }
             // ============================================
+            // C3.5) OPENAI REFEREE - Detección de evasiones (P0 CORE)
+            // ============================================
+            // Detectar si Groq evadió
+            const evasionCheck = (0, openaiReferee_1.detectGroqEvasion)(llmResponse.response.text, orchestratorContext.tools !== undefined && orchestratorContext.tools.length > 0, orchestratorContext.toolUsed !== 'none' && !orchestratorContext.toolFailed);
+            // Detectar contradicción con evidencia
+            const evidenceMismatch = orchestratorContext.toolResult
+                ? (0, openaiReferee_1.detectEvidenceMismatch)(llmResponse.response.text, { toolResult: orchestratorContext.toolResult })
+                : false;
+            const needsReferee = evasionCheck.needsReferee || evidenceMismatch;
+            if (needsReferee && process.env.OPENAI_ROLE === 'referee') {
+                try {
+                    console.log(`[ORCH] ⚖️ OPENAI REFEREE INVOKED - reason=${evasionCheck.reason || 'evidence_mismatch'}`);
+                    const refereeResult = await (0, openaiReferee_1.invokeOpenAIReferee)({
+                        userPrompt: userContent,
+                        groqResponse: llmResponse.response.text,
+                        toolResults: orchestratorContext.toolResult ? { result: orchestratorContext.toolResult } : undefined,
+                        systemState: {
+                            tool_used: orchestratorContext.toolUsed,
+                            tool_failed: orchestratorContext.toolFailed,
+                            web_search: orchestratorContext.webSearchUsed,
+                            web_results: orchestratorContext.webResultsCount
+                        },
+                        detectedIssue: evasionCheck.reason || 'evidence_mismatch'
+                    });
+                    // Reemplazar respuesta con la del referee
+                    llmResponse.response.text = refereeResult.text;
+                    refereeUsed = true;
+                    refereeReason = refereeResult.reason;
+                    refereeCost = refereeResult.cost_estimated_usd;
+                    refereeLatency = refereeResult.latency_ms;
+                    console.log(`[ORCH] ✅ REFEREE CORRECTED - primary_model=groq fallback_model=openai fallback_reason=${refereeReason}`);
+                }
+                catch (refereeError) {
+                    console.error(`[ORCH] ❌ REFEREE FAILED: ${refereeError.message}`);
+                    // Continuar con respuesta de Groq (no bloqueante)
+                }
+            }
+            // ============================================
             // C4) APLICAR GUARDRAIL ANTI-MENTIRAS (P0 REFUERZO)
             // ============================================
             guardrailResult = (0, noFakeTools_1.applyAntiLieGuardrail)(llmResponse.response.text, orchestratorContext.webSearchUsed, orchestratorContext.intent, orchestratorContext.toolFailed, orchestratorContext.toolError // P0: Pasar código de error OAuth
@@ -795,6 +839,11 @@ Ejemplo malo: "Visita https://... para ver el precio."` },
                     fallback_used: fallbackUsed,
                     fallback_chain: fallbackChain,
                     fallback_reason: fallbackUsed ? llmResponse.fallbackChain.errors[fallbackChain[0]] : null,
+                    // OpenAI Referee (P0 CORE)
+                    referee_used: refereeUsed,
+                    referee_reason: refereeReason || null,
+                    referee_cost_usd: refereeCost,
+                    referee_latency_ms: refereeLatency,
                     // Tokens detallados
                     tokens_in: llmResponse.response.tokens_in || orchestratorContext.inputTokens,
                     tokens_out: llmResponse.response.tokens_out || orchestratorContext.outputTokens,

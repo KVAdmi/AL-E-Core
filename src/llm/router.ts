@@ -15,7 +15,7 @@ import axios, { AxiosError } from 'axios';
 // TIPOS
 // ═══════════════════════════════════════════════════════════════
 
-export type LlmProvider = 'groq' | 'fireworks' | 'together';
+export type LlmProvider = 'groq' | 'fireworks' | 'together' | 'openai';
 
 export interface LlmMessage {
   role: 'system' | 'user' | 'assistant';
@@ -92,6 +92,21 @@ const PROVIDER_CONFIGS: Record<LlmProvider, () => ProviderConfig | null> = {
       apiKey,
       defaultModel: 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo',
       timeout: 15000 // 15s
+    };
+  },
+  
+  openai: () => {
+    const apiKey = process.env.OPENAI_API_KEY;
+    const role = process.env.OPENAI_ROLE;
+    
+    // OpenAI SOLO se configura si tiene role=referee
+    if (!apiKey || role !== 'referee') return null;
+    
+    return {
+      baseURL: 'https://api.openai.com/v1',
+      apiKey,
+      defaultModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      timeout: 20000 // 20s
     };
   }
 };
@@ -183,18 +198,18 @@ async function callOpenAICompatible(
  * 2. Fallback 1 (configurable, default=fireworks)
  * 3. Fallback 2 (configurable, default=together)
  * 
- * CRITICAL: OpenAI está BLOQUEADO (no se usa bajo ninguna circunstancia)
+ * NOTA: OpenAI SOLO se usa como referee, NO en cadena de fallback
  */
 export async function generate(
   options: LlmGenerateOptions
 ): Promise<{ response: LlmResponse; fallbackChain: FallbackChain }> {
   
-  // Bloqueo total OpenAI
-  if (process.env.OPENAI_API_KEY) {
-    console.warn('[LLM_ROUTER] ⚠️ OPENAI_API_KEY detected but OpenAI is DISABLED');
+  // Log si OpenAI está configurado (informativo)
+  if (process.env.OPENAI_API_KEY && process.env.OPENAI_ROLE === 'referee') {
+    console.log('[LLM_ROUTER] ✅ OpenAI configured as referee (not in primary chain)');
   }
   
-  // Determinar cadena de proveedores
+  // Determinar cadena de proveedores (sin OpenAI)
   const defaultProvider = (process.env.LLM_DEFAULT_PROVIDER as LlmProvider) || 'groq';
   const fallback1 = (process.env.LLM_FALLBACK_PROVIDER as LlmProvider) || 'fireworks';
   const fallback2 = (process.env.LLM_FALLBACK2_PROVIDER as LlmProvider) || 'together';
@@ -203,7 +218,7 @@ export async function generate(
     defaultProvider,
     ...(fallback1 !== defaultProvider ? [fallback1] : []),
     ...(fallback2 !== defaultProvider && fallback2 !== fallback1 ? [fallback2] : [])
-  ];
+  ].filter(p => p !== 'openai'); // Excluir explícitamente OpenAI del chain
   
   console.log(`[LLM_ROUTER] Provider chain: ${providerChain.join(' → ')}`);
   

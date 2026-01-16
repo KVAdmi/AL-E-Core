@@ -24,6 +24,12 @@ import { Orchestrator } from '../ai/orchestrator';
 import { ALEON_SYSTEM_PROMPT } from '../ai/prompts/aleon';
 import { generate as llmGenerate, verifyOpenAIBlocked } from '../llm/router';
 import { applyAntiLieGuardrail } from '../guards/noFakeTools';
+import { 
+  detectGroqEvasion, 
+  detectEvidenceMismatch, 
+  invokeOpenAIReferee,
+  RefereeReason 
+} from '../llm/openaiReferee';
 
 const router = express.Router();
 const orchestrator = new Orchestrator();
@@ -513,6 +519,12 @@ router.post('/chat', optionalAuth, async (req, res) => {
     let fallbackChain: string[] = [];
     let guardrailResult: any = null; // Guardrail result
     
+    // OpenAI Referee variables
+    let refereeUsed = false;
+    let refereeReason: RefereeReason | undefined;
+    let refereeCost = 0;
+    let refereeLatency = 0;
+    
     try {
       // Preparar mensajes con contexto de attachments Y chunks
       let finalMessages = [...messages];
@@ -727,6 +739,56 @@ Ejemplo malo: "Visita https://... para ver el precio."` },
       }
       
       // ============================================
+      // C3.5) OPENAI REFEREE - Detección de evasiones (P0 CORE)
+      // ============================================
+      
+      // Detectar si Groq evadió
+      const evasionCheck = detectGroqEvasion(
+        llmResponse.response.text,
+        orchestratorContext.tools !== undefined && orchestratorContext.tools.length > 0,
+        orchestratorContext.toolUsed !== 'none' && !orchestratorContext.toolFailed
+      );
+      
+      // Detectar contradicción con evidencia
+      const evidenceMismatch = orchestratorContext.toolResult 
+        ? detectEvidenceMismatch(llmResponse.response.text, { toolResult: orchestratorContext.toolResult })
+        : false;
+      
+      const needsReferee = evasionCheck.needsReferee || evidenceMismatch;
+      
+      if (needsReferee && process.env.OPENAI_ROLE === 'referee') {
+        try {
+          console.log(`[ORCH] ⚖️ OPENAI REFEREE INVOKED - reason=${evasionCheck.reason || 'evidence_mismatch'}`);
+          
+          const refereeResult = await invokeOpenAIReferee({
+            userPrompt: userContent,
+            groqResponse: llmResponse.response.text,
+            toolResults: orchestratorContext.toolResult ? { result: orchestratorContext.toolResult } : undefined,
+            systemState: {
+              tool_used: orchestratorContext.toolUsed,
+              tool_failed: orchestratorContext.toolFailed,
+              web_search: orchestratorContext.webSearchUsed,
+              web_results: orchestratorContext.webResultsCount
+            },
+            detectedIssue: evasionCheck.reason || 'evidence_mismatch'
+          });
+          
+          // Reemplazar respuesta con la del referee
+          llmResponse.response.text = refereeResult.text;
+          refereeUsed = true;
+          refereeReason = refereeResult.reason;
+          refereeCost = refereeResult.cost_estimated_usd;
+          refereeLatency = refereeResult.latency_ms;
+          
+          console.log(`[ORCH] ✅ REFEREE CORRECTED - primary_model=groq fallback_model=openai fallback_reason=${refereeReason}`);
+          
+        } catch (refereeError: any) {
+          console.error(`[ORCH] ❌ REFEREE FAILED: ${refereeError.message}`);
+          // Continuar con respuesta de Groq (no bloqueante)
+        }
+      }
+      
+      // ============================================
       // C4) APLICAR GUARDRAIL ANTI-MENTIRAS (P0 REFUERZO)
       // ============================================
       
@@ -913,6 +975,12 @@ Ejemplo malo: "Visita https://... para ver el precio."` },
           fallback_used: fallbackUsed,
           fallback_chain: fallbackChain,
           fallback_reason: fallbackUsed ? llmResponse.fallbackChain.errors[fallbackChain[0]] : null,
+          
+          // OpenAI Referee (P0 CORE)
+          referee_used: refereeUsed,
+          referee_reason: refereeReason || null,
+          referee_cost_usd: refereeCost,
+          referee_latency_ms: refereeLatency,
           
           // Tokens detallados
           tokens_in: llmResponse.response.tokens_in || orchestratorContext.inputTokens,

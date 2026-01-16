@@ -6,6 +6,7 @@
 
 import express from 'express';
 import { getConfiguredProviders, verifyOpenAIBlocked } from '../llm/router';
+import { getRefereeStats } from '../llm/openaiReferee';
 import { env } from '../config/env';
 import fs from 'fs';
 import path from 'path';
@@ -20,7 +21,7 @@ const router = express.Router();
 router.get('/ai', async (req, res) => {
   try {
     const configuredProviders = getConfiguredProviders();
-    const openaiStatus = verifyOpenAIBlocked();
+    const openaiReferee = !!(process.env.OPENAI_API_KEY && process.env.OPENAI_ROLE === 'referee');
     
     // Leer build hash (últimos 8 chars del commit si existe .git)
     let buildHash = 'unknown';
@@ -51,9 +52,10 @@ router.get('/ai', async (req, res) => {
       fallback2_provider: process.env.LLM_FALLBACK2_PROVIDER || 'together',
       configured_providers: configuredProviders,
       
-      // OpenAI Status
-      openai_disabled: openaiStatus.blocked,
-      openai_message: openaiStatus.message,
+      // OpenAI Referee Status
+      openai_referee_enabled: openaiReferee,
+      openai_referee_model: openaiReferee ? (process.env.OPENAI_MODEL || 'gpt-4o-mini') : null,
+      openai_referee_role: openaiReferee ? 'referee' : null,
       
       // Tools
       tavily_enabled: !!process.env.TAVILY_API_KEY,
@@ -237,6 +239,42 @@ router.get('/ping', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString()
   });
+});
+
+/**
+ * GET /_health/referee
+ * 
+ * Verifica estado del OpenAI Referee
+ */
+router.get('/referee', async (req, res) => {
+  try {
+    const openaiConfigured = !!(process.env.OPENAI_API_KEY && process.env.OPENAI_ROLE === 'referee');
+    
+    if (!openaiConfigured) {
+      return res.json({
+        status: 'disabled',
+        message: 'OpenAI Referee is not configured',
+        stats: null
+      });
+    }
+    
+    const stats = getRefereeStats();
+    
+    res.json({
+      status: 'active',
+      timestamp: new Date().toISOString(),
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      max_tokens: process.env.OPENAI_MAX_TOKENS || 1200,
+      role: process.env.OPENAI_ROLE,
+      stats
+    });
+  } catch (error: any) {
+    console.error('[HEALTH] Error checking referee:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message || 'Referee check failed'
+    });
+  }
 });
 
 export default router;
