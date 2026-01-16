@@ -10,6 +10,7 @@
  */
 
 import Groq from 'groq-sdk';
+import OpenAI from 'openai';
 import { executeTool } from './tools/toolRouter';
 import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
@@ -39,6 +40,15 @@ interface SimpleOrchestratorResponse {
   answer: string;
   toolsUsed: string[];
   executionTime: number;
+  metadata?: {
+    model?: string;
+    finish_reason?: string;
+    groq_failed?: boolean;
+    referee_invoked?: boolean;
+    referee_reason?: string;
+    referee_failed?: boolean;
+    error_handled?: boolean;
+  };
 }
 
 const AVAILABLE_TOOLS: Array<Groq.Chat.ChatCompletionTool> = [
@@ -284,15 +294,80 @@ RECUERDA: Si no ejecutaste un tool, NO digas que lo hiciste. La verdad siempre.`
       
       messages.push({ role: 'user', content: request.userMessage });
       
-      let response = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        max_tokens: 4096,
-        messages,
-        tools: AVAILABLE_TOOLS,
-        tool_choice: 'auto', // Dejar que Groq decida automáticamente
-      });
+      let response;
+      let groqFailed = false;
       
-      console.log('[SIMPLE ORCH] Finish reason:', response.choices[0]?.finish_reason);
+      try {
+        console.log('[ORCH] 🚀 Llamando a Groq con tool calling...');
+        response = await groq.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          max_tokens: 4096,
+          messages,
+          tools: AVAILABLE_TOOLS,
+          tool_choice: 'auto',
+        });
+        
+        console.log('[SIMPLE ORCH] Finish reason:', response.choices[0]?.finish_reason);
+      } catch (groqError: any) {
+        console.error('[ORCH] ❌ Groq tool calling failed:', groqError.message);
+        console.error('[ORCH] Error code:', groqError.code);
+        console.error('[ORCH] Error type:', groqError.type);
+        groqFailed = true;
+        
+        // 🔥 FALLBACK A OPENAI REFEREE
+        console.log('[REFEREE] 🚨 Groq failed, activating OpenAI Referee...');
+        
+        try {
+          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+          
+          const refereeResponse = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            max_tokens: 2048,
+            messages: [
+              {
+                role: 'system',
+                content: `Eres ${assistantName}, asistente personal de ${userNickname}. 
+                
+El sistema de tools falló temporalmente. Responde de manera natural y útil sin inventar datos.
+Si necesitas información externa (clima, noticias, tipo de cambio), di: "Estoy teniendo problemas para consultar esa información ahora mismo. ¿Quieres que lo intente de nuevo en un momento?"
+
+NUNCA inventes datos. NUNCA expongas errores técnicos. Sé conversacional y honesta.`,
+              },
+              { role: 'user', content: request.userMessage },
+            ],
+          });
+          
+          const executionTime = Date.now() - startTime;
+          
+          return {
+            answer: refereeResponse.choices[0]?.message?.content || 'Tuve un problema técnico. ¿Podrías intentar de nuevo?',
+            toolsUsed: [],
+            executionTime,
+            metadata: {
+              model: 'gpt-4o-mini (referee)',
+              finish_reason: 'stop',
+              groq_failed: true,
+              referee_invoked: true,
+              referee_reason: 'groq_tool_calling_failed',
+            },
+          };
+        } catch (refereeError: any) {
+          console.error('[REFEREE] ❌ OpenAI Referee also failed:', refereeError.message);
+          
+          // Último recurso: mensaje seguro
+          return {
+            answer: 'Estoy teniendo problemas técnicos en este momento. ¿Podrías intentar de nuevo en unos segundos?',
+            toolsUsed: [],
+            executionTime: Date.now() - startTime,
+            metadata: {
+              model: 'fallback',
+              groq_failed: true,
+              referee_failed: true,
+              error_handled: true,
+            },
+          };
+        }
+      }
       
       // Array para guardar resultados de tools (para referee)
       const toolResults: any[] = [];
@@ -322,12 +397,16 @@ RECUERDA: Si no ejecutaste un tool, NO digas que lo hiciste. La verdad siempre.`
           const toolName = toolCall.function.name;
           const toolInput = JSON.parse(toolCall.function.arguments);
           
-          console.log(`[SIMPLE ORCH] ⚙️  ${toolName}`);
+          console.log(`[ORCH] ⚙️ Tool: ${toolName}`);
+          console.log(`[ORCH] tool_call_attempted = true`);
+          console.log(`[${toolName.toUpperCase()}] payload =`, JSON.stringify(toolInput));
+          
           toolsUsed.push(toolName);
           
           try {
             const result = await executeTool(request.userId, { name: toolName, parameters: toolInput });
-            console.log(`[SIMPLE ORCH] ✅ ${toolName} success`);
+            console.log(`[${toolName.toUpperCase()}] ✅ Success`);
+            console.log(`[${toolName.toUpperCase()}] response =`, JSON.stringify(result).substring(0, 200));
             
             // Guardar resultado para referee
             toolResults.push({ tool: toolName, result });
@@ -338,7 +417,9 @@ RECUERDA: Si no ejecutaste un tool, NO digas que lo hiciste. La verdad siempre.`
               content: JSON.stringify(result),
             });
           } catch (error: any) {
-            console.error(`[SIMPLE ORCH] ❌ ${toolName}:`, error.message);
+            console.error(`[${toolName.toUpperCase()}] ❌ Error:`, error.message);
+            console.error(`[ORCH] tool_failed = true`);
+            console.error(`[ORCH] tool_error =`, error.message);
             
             // Guardar error para referee
             toolResults.push({ tool: toolName, error: error.message });
