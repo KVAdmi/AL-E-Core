@@ -232,7 +232,59 @@ router.post('/live/:id/chunk', upload.single('chunk'), async (req: Request, res:
     });
   } catch (error) {
     console.error('[MEETINGS] Error in /live/:id/chunk:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    
+    // 🔒 P0 FIX: Errores semánticos en lugar de 500 genérico
+    const err = error as any;
+    
+    // Error de permisos (RLS/ownership)
+    if (err.code === 'PGRST301' || err.message?.includes('permission denied')) {
+      return res.status(403).json({
+        success: false,
+        safe_message: 'No tienes permisos para subir audio a esta reunión',
+        metadata: { 
+          reason: 'unauthorized', 
+          meeting_id: req.params.id,
+          timestamp: new Date().toISOString()
+        },
+      });
+    }
+    
+    // Meeting no encontrado
+    if (err.code === 'PGRST116' || err.message?.includes('not found')) {
+      return res.status(404).json({
+        success: false,
+        safe_message: 'Esta reunión no existe o fue eliminada',
+        metadata: { 
+          reason: 'meeting_not_found', 
+          meeting_id: req.params.id,
+          timestamp: new Date().toISOString()
+        },
+      });
+    }
+    
+    // Error de S3/Storage
+    if (err.message?.includes('S3') || err.message?.includes('storage')) {
+      return res.status(500).json({
+        success: false,
+        safe_message: 'Tuvimos un problema guardando el audio. El equipo ya fue notificado',
+        metadata: { 
+          reason: 'storage_error',
+          logged: true,
+          timestamp: new Date().toISOString()
+        },
+      });
+    }
+    
+    // Error genérico (último recurso)
+    return res.status(500).json({
+      success: false,
+      safe_message: 'Tuvimos un problema técnico. El equipo ya fue notificado',
+      metadata: { 
+        reason: 'internal_error',
+        logged: true,
+        timestamp: new Date().toISOString()
+      },
+    });
   }
 });
 

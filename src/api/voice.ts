@@ -218,24 +218,44 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
     // Validaciones
     if (!audioFile) {
       return res.status(400).json({
-        error: 'NO_AUDIO_FILE',
-        message: 'Se requiere un archivo de audio'
+        success: false,
+        safe_message: 'No recibimos el audio. ¿Puedes intentar grabar de nuevo?',
+        metadata: {
+          reason: 'no_audio_file',
+          code: 'AUDIO_001',
+          timestamp: new Date().toISOString()
+        }
       });
     }
     
-    // 🚨 VALIDACIÓN ANTI-MENTIRA: audio.size > 0
-    if (!audioFile.size || audioFile.size === 0) {
-      console.error('[STT] ❌ Audio file size is 0');
+    // � P0 FIX: Validar tamaño de audio > 0
+    const audioSizeBytes = audioFile.size || 0;
+    console.log(`[VOICE] Audio recibido: ${audioSizeBytes} bytes`);
+    
+    if (audioSizeBytes === 0) {
+      console.error('[VOICE] ❌ Audio vacío (0 bytes)');
       return res.status(400).json({
-        error: 'EMPTY_AUDIO_FILE',
-        message: 'El archivo de audio está vacío. Por favor, vuelve a grabar.'
+        success: false,
+        safe_message: 'No detectamos audio. Verifica tu micrófono e intenta de nuevo',
+        metadata: {
+          reason: 'empty_audio',
+          size: 0,
+          code: 'AUDIO_002',
+          timestamp: new Date().toISOString()
+        }
       });
     }
 
     if (!audioFile.mimetype.startsWith('audio/')) {
       return res.status(400).json({
-        error: 'INVALID_FILE_TYPE',
-        message: 'Solo se permiten archivos de audio'
+        success: false,
+        safe_message: 'El archivo debe ser de audio',
+        metadata: {
+          reason: 'invalid_file_type',
+          received: audioFile.mimetype,
+          code: 'AUDIO_003',
+          timestamp: new Date().toISOString()
+        }
       });
     }
 
@@ -247,7 +267,6 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
     });
     
     // 🚨 P0: LOGS OBLIGATORIOS
-    const audioSizeBytes = audioFile.size;
     const audioSizeKB = (audioSizeBytes / 1024).toFixed(2);
     const estimatedDurationSeconds = Math.round(audioSizeBytes / 16000); // Rough estimate: 16KB/s
     

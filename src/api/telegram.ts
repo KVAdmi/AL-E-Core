@@ -751,6 +751,8 @@ router.get('/messages', requireAuth, async (req, res) => {
     }
     
     // Obtener mensajes del chat (últimos 100)
+    // 🔒 P0 FIX: Query incluye BOTH incoming + outgoing (no filtra direction)
+    console.log(`[TELEGRAM] 📨 Fetching messages for chat ${chatId}`);
     const { data: messages, error: messagesError } = await supabase
       .from('telegram_messages')
       .select('id, text, direction, status, telegram_message_id, created_at')
@@ -763,17 +765,27 @@ router.get('/messages', requireAuth, async (req, res) => {
     if (messagesError) {
       console.error('[TELEGRAM] Error fetching messages:', messagesError);
       return res.status(500).json({
-        ok: false,
-        error: 'DB_ERROR',
-        message: messagesError.message
+        success: false,
+        safe_message: 'Tuvimos un problema cargando los mensajes de Telegram',
+        metadata: {
+          reason: 'db_error',
+          error: messagesError.message,
+          timestamp: new Date().toISOString()
+        }
       });
     }
+    
+    // Log de diagnóstico
+    const inboundCount = messages?.filter(m => m.direction === 'inbound').length || 0;
+    const outboundCount = messages?.filter(m => m.direction === 'outbound').length || 0;
+    console.log(`[TELEGRAM] ✅ Loaded ${messages?.length || 0} messages (${inboundCount} inbound, ${outboundCount} outbound)`);
     
     // Formatear mensajes para el frontend
     const formattedMessages = (messages || []).map(msg => ({
       id: msg.id,
       text: msg.text,
       sender_type: msg.direction === 'inbound' ? 'user' : 'bot',
+      direction: msg.direction, // ✅ Incluir direction explícitamente
       sent_at: msg.created_at,
       status: msg.status
     }));

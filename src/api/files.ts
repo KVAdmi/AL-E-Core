@@ -70,11 +70,31 @@ router.post('/ingest', optionalAuth, upload.array('files', 10), async (req, res)
     // Prioridad: usuario autenticado > userId del body
     const userId = getUserId(req) || bodyUserId;
 
-    // Validar workspace_id requerido
-    if (!workspaceId) {
+    // 🔒 P0 FIX: Validar userId/workspaceId ANTES de procesar
+    if (!userId || userId === 'undefined' || userId === 'null') {
+      console.error('[FILES/INGEST] ❌ userId inválido o faltante');
       return res.status(400).json({
-        error: 'WORKSPACE_REQUIRED',
-        message: 'workspace_id es requerido',
+        success: false,
+        safe_message: 'No pudimos identificar tu usuario. ¿Puedes refrescar la página e intentar de nuevo?',
+        metadata: { 
+          reason: 'missing_user_id', 
+          code: 'USER_001',
+          timestamp: new Date().toISOString()
+        },
+      });
+    }
+
+    // Validar workspace_id requerido
+    if (!workspaceId || workspaceId === 'undefined' || workspaceId === 'null') {
+      console.error('[FILES/INGEST] ❌ workspaceId inválido o faltante');
+      return res.status(400).json({
+        success: false,
+        safe_message: 'No pudimos identificar tu espacio de trabajo. ¿Puedes refrescar la página?',
+        metadata: { 
+          reason: 'missing_workspace_id', 
+          code: 'WORKSPACE_001',
+          timestamp: new Date().toISOString()
+        },
       });
     }
 
