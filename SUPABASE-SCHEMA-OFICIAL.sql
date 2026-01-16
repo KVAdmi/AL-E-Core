@@ -1,0 +1,989 @@
+-- =====================================================
+-- SUPABASE SCHEMA OFICIAL - AL-E CORE
+-- =====================================================
+-- Fecha: 16 de enero de 2026
+-- Fuente: Frontend (producción actual)
+-- Propósito: Documento de referencia único para backend y frontend
+--
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+-- =====================================================
+
+-- =====================================================
+-- SESSIONS & MESSAGES
+-- =====================================================
+
+CREATE TABLE public.ae_sessions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id_old text,
+  assistant_id text NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  title text,
+  updated_at timestamp with time zone DEFAULT now(),
+  metadata jsonb DEFAULT '{}'::jsonb,
+  total_messages integer DEFAULT 0,
+  total_tokens integer DEFAULT 0,
+  estimated_cost numeric DEFAULT 0,
+  workspace_id text DEFAULT 'default'::text,
+  mode text DEFAULT 'universal'::text,
+  last_message_at timestamp with time zone,
+  pinned boolean DEFAULT false,
+  archived boolean DEFAULT false,
+  user_id_uuid uuid,
+  meta jsonb DEFAULT '{}'::jsonb,
+  user_id uuid,
+  CONSTRAINT ae_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT ae_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+
+CREATE TABLE public.ae_messages (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  session_id uuid,
+  role text NOT NULL,
+  content text NOT NULL,
+  emotional_state text,
+  risk_level text,
+  created_at timestamp with time zone DEFAULT now(),
+  tokens integer DEFAULT 0,
+  cost numeric DEFAULT 0,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  updated_at timestamp with time zone DEFAULT now(),
+  user_id_uuid uuid,
+  user_email text,
+  user_display_name text,
+  channel character varying DEFAULT 'web'::character varying CHECK (channel::text = ANY (ARRAY['web'::character varying, 'telegram'::character varying, 'email'::character varying, 'voice'::character varying]::text[])),
+  external_message_id character varying,
+  CONSTRAINT ae_messages_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.ae_requests (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  session_id uuid,
+  ip_address text,
+  user_agent text,
+  endpoint text NOT NULL,
+  method text NOT NULL,
+  status_code integer,
+  response_time integer,
+  tokens_used integer DEFAULT 0,
+  cost numeric DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  metadata jsonb DEFAULT '{}'::jsonb,
+  CONSTRAINT ae_requests_pkey PRIMARY KEY (id),
+  CONSTRAINT ae_requests_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.ae_sessions(id)
+);
+
+-- =====================================================
+-- MEMORY & ACTIONS
+-- =====================================================
+
+CREATE TABLE public.assistant_memories (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  workspace_id text NOT NULL,
+  user_id_old text,
+  mode text NOT NULL,
+  memory text NOT NULL,
+  importance double precision DEFAULT 1,
+  created_at timestamp with time zone DEFAULT now(),
+  user_id_uuid uuid,
+  user_id text,
+  CONSTRAINT assistant_memories_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.ae_memory (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  session_id uuid,
+  type text NOT NULL,
+  content text NOT NULL,
+  importance numeric DEFAULT 0.5,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT ae_memory_pkey PRIMARY KEY (id),
+  CONSTRAINT ae_memory_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.ae_sessions(id)
+);
+
+CREATE TABLE public.ae_user_memory (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id_old text,
+  key text NOT NULL,
+  value text NOT NULL,
+  updated_at timestamp with time zone DEFAULT now(),
+  user_id_uuid uuid,
+  CONSTRAINT ae_user_memory_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.ae_actions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  session_id uuid,
+  message_id uuid,
+  action_type text NOT NULL,
+  parameters jsonb DEFAULT '{}'::jsonb,
+  result jsonb DEFAULT '{}'::jsonb,
+  status text DEFAULT 'pending'::text,
+  created_at timestamp with time zone DEFAULT now(),
+  completed_at timestamp with time zone,
+  CONSTRAINT ae_actions_pkey PRIMARY KEY (id),
+  CONSTRAINT ae_actions_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.ae_sessions(id),
+  CONSTRAINT ae_actions_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.ae_messages(id)
+);
+
+CREATE TABLE public.ae_emotional_events (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  session_id uuid,
+  message_id uuid,
+  emotional_state text NOT NULL,
+  risk_level text NOT NULL,
+  action_taken text NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT ae_emotional_events_pkey PRIMARY KEY (id)
+);
+
+-- =====================================================
+-- FILES & KNOWLEDGE BASE
+-- =====================================================
+
+CREATE TABLE public.ae_files (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  session_id uuid,
+  name text NOT NULL,
+  type text NOT NULL,
+  size bigint NOT NULL,
+  url text NOT NULL,
+  upload_date timestamp with time zone DEFAULT now(),
+  metadata jsonb DEFAULT '{}'::jsonb,
+  workspace_id text NOT NULL,
+  user_id_uuid uuid,
+  project_id text,
+  filename text NOT NULL,
+  mimetype text NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT ae_files_pkey PRIMARY KEY (id),
+  CONSTRAINT ae_files_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.ae_sessions(id)
+);
+
+CREATE TABLE public.ae_chunks (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  file_id uuid,
+  content text NOT NULL,
+  embedding vector(1536), -- USER-DEFINED type for pgvector
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  workspace_id text NOT NULL,
+  user_id_uuid uuid,
+  project_id text,
+  chunk_index integer NOT NULL,
+  importance double precision DEFAULT 1.0,
+  CONSTRAINT ae_chunks_pkey PRIMARY KEY (id),
+  CONSTRAINT ae_chunks_file_id_fkey FOREIGN KEY (file_id) REFERENCES public.ae_files(id)
+);
+
+CREATE TABLE public.kb_sources (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  type text NOT NULL,
+  repo text,
+  path text,
+  content text,
+  updated_at timestamp with time zone DEFAULT now(),
+  source_hash text,
+  CONSTRAINT kb_sources_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.kb_chunks (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  source_id uuid,
+  content text NOT NULL,
+  metadata jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  embedding_status text NOT NULL DEFAULT 'pending'::text,
+  embedding_attempted_at timestamp with time zone,
+  embedding_error text,
+  CONSTRAINT kb_chunks_pkey PRIMARY KEY (id),
+  CONSTRAINT kb_chunks_source_id_fkey FOREIGN KEY (source_id) REFERENCES public.kb_sources(id)
+);
+
+CREATE TABLE public.kb_embeddings (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  chunk_id uuid UNIQUE,
+  embedding vector(1536), -- USER-DEFINED type for pgvector
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT kb_embeddings_pkey PRIMARY KEY (id),
+  CONSTRAINT kb_embeddings_chunk_id_fkey FOREIGN KEY (chunk_id) REFERENCES public.kb_chunks(id)
+);
+
+CREATE TABLE public.vision_requests (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  request_id uuid NOT NULL UNIQUE,
+  image_hash text NOT NULL,
+  full_text text,
+  entities jsonb,
+  structured jsonb,
+  sanitized boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT vision_requests_pkey PRIMARY KEY (id)
+);
+
+-- =====================================================
+-- EMAIL SYSTEM
+-- =====================================================
+
+CREATE TABLE public.email_accounts (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  owner_user_id uuid NOT NULL,
+  provider_label text NOT NULL,
+  from_name text NOT NULL,
+  from_email text NOT NULL,
+  smtp_host text NOT NULL,
+  smtp_port integer NOT NULL DEFAULT 587,
+  smtp_secure boolean NOT NULL DEFAULT false,
+  smtp_user text NOT NULL,
+  smtp_pass_enc text NOT NULL,
+  imap_host text,
+  imap_port integer,
+  imap_secure boolean DEFAULT true,
+  imap_user text,
+  imap_pass_enc text,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  provider character varying DEFAULT 'smtp'::character varying CHECK (provider::text = ANY (ARRAY['ses_inbound'::character varying, 'ses'::character varying, 'gmail'::character varying, 'outlook'::character varying, 'smtp'::character varying, 'imap'::character varying]::text[])),
+  domain character varying,
+  aws_region character varying,
+  aws_access_key_id character varying,
+  aws_secret_access_key_enc text,
+  s3_bucket character varying,
+  status character varying DEFAULT 'active'::character varying CHECK (status::text = ANY (ARRAY['active'::character varying, 'paused'::character varying, 'error'::character varying]::text[])),
+  config jsonb DEFAULT '{}'::jsonb,
+  CONSTRAINT email_accounts_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.email_folders (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  account_id uuid,
+  owner_user_id uuid NOT NULL,
+  folder_name character varying NOT NULL,
+  folder_type character varying NOT NULL,
+  imap_path character varying,
+  unread_count integer DEFAULT 0,
+  total_count integer DEFAULT 0,
+  icon character varying,
+  color character varying,
+  sort_order integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT email_folders_pkey PRIMARY KEY (id),
+  CONSTRAINT email_folders_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.email_accounts(id)
+);
+
+CREATE TABLE public.email_messages (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  account_id uuid NOT NULL,
+  owner_user_id uuid NOT NULL,
+  folder_id uuid,
+  message_uid character varying,
+  message_id character varying,
+  from_address character varying,
+  from_name character varying,
+  to_addresses text[],
+  cc_addresses text[],
+  bcc_addresses text[],
+  subject character varying,
+  body_text text,
+  body_html text,
+  body_preview character varying,
+  has_attachments boolean DEFAULT false,
+  attachment_count integer DEFAULT 0,
+  is_read boolean DEFAULT false,
+  is_starred boolean DEFAULT false,
+  is_important boolean DEFAULT false,
+  labels text[],
+  date timestamp with time zone,
+  in_reply_to character varying,
+  thread_id character varying,
+  size_bytes bigint,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  current_folder_id uuid,
+  CONSTRAINT email_messages_pkey PRIMARY KEY (id),
+  CONSTRAINT email_messages_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.email_accounts(id),
+  CONSTRAINT email_messages_folder_id_fkey FOREIGN KEY (folder_id) REFERENCES public.email_folders(id),
+  CONSTRAINT email_messages_current_folder_id_fkey FOREIGN KEY (current_folder_id) REFERENCES public.email_folders(id)
+);
+
+CREATE TABLE public.email_attachments (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  message_id uuid,
+  draft_id uuid,
+  owner_user_id uuid NOT NULL,
+  filename character varying NOT NULL,
+  content_type character varying,
+  size_bytes bigint,
+  storage_path character varying,
+  download_url text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT email_attachments_pkey PRIMARY KEY (id),
+  CONSTRAINT email_attachments_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.email_messages(id),
+  CONSTRAINT email_attachments_draft_id_fkey FOREIGN KEY (draft_id) REFERENCES public.email_drafts(id)
+);
+
+CREATE TABLE public.email_drafts (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  account_id uuid,
+  owner_user_id uuid NOT NULL,
+  to_addresses text[],
+  cc_addresses text[],
+  bcc_addresses text[],
+  subject character varying,
+  body_text text,
+  body_html text,
+  attachments jsonb,
+  in_reply_to character varying,
+  is_scheduled boolean DEFAULT false,
+  scheduled_for timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT email_drafts_pkey PRIMARY KEY (id),
+  CONSTRAINT email_drafts_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.email_accounts(id)
+);
+
+CREATE TABLE public.email_threads (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  account_id uuid NOT NULL,
+  owner_user_id uuid NOT NULL,
+  thread_id character varying NOT NULL,
+  subject character varying,
+  participants text[],
+  message_count integer DEFAULT 0,
+  last_message_date timestamp with time zone,
+  is_read boolean DEFAULT false,
+  is_starred boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT email_threads_pkey PRIMARY KEY (id),
+  CONSTRAINT email_threads_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.email_accounts(id)
+);
+
+CREATE TABLE public.email_contacts (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  owner_user_id uuid NOT NULL,
+  email_address character varying NOT NULL UNIQUE,
+  display_name character varying,
+  first_name character varying,
+  last_name character varying,
+  company character varying,
+  job_title character varying,
+  phone character varying,
+  notes text,
+  avatar_url text,
+  tags text[],
+  is_favorite boolean DEFAULT false,
+  email_count integer DEFAULT 0,
+  last_contact_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT email_contacts_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.email_rules (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  account_id uuid NOT NULL,
+  owner_user_id uuid NOT NULL,
+  name character varying NOT NULL,
+  is_active boolean DEFAULT true,
+  priority integer DEFAULT 0,
+  conditions jsonb NOT NULL,
+  actions jsonb NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT email_rules_pkey PRIMARY KEY (id),
+  CONSTRAINT email_rules_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.email_accounts(id)
+);
+
+CREATE TABLE public.email_sync_log (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  account_id uuid NOT NULL,
+  sync_type character varying NOT NULL CHECK (sync_type::text = ANY (ARRAY['manual'::character varying, 'auto'::character varying, 'webhook'::character varying]::text[])),
+  status character varying NOT NULL CHECK (status::text = ANY (ARRAY['success'::character varying, 'partial'::character varying, 'failed'::character varying]::text[])),
+  messages_fetched integer DEFAULT 0,
+  messages_new integer DEFAULT 0,
+  messages_updated integer DEFAULT 0,
+  errors text,
+  started_at timestamp with time zone NOT NULL,
+  completed_at timestamp with time zone,
+  duration_ms integer,
+  CONSTRAINT email_sync_log_pkey PRIMARY KEY (id),
+  CONSTRAINT email_sync_log_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.email_accounts(id)
+);
+
+CREATE TABLE public.email_audit_log (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  to character varying NOT NULL,
+  from character varying NOT NULL,
+  subject character varying NOT NULL,
+  body_text text,
+  body_html text,
+  provider character varying NOT NULL,
+  provider_message_id character varying,
+  status character varying NOT NULL CHECK (status::text = ANY (ARRAY['sent'::character varying, 'failed'::character varying, 'pending'::character varying]::text[])),
+  error_message text,
+  sent_by_user_id uuid,
+  sent_at timestamp with time zone DEFAULT now(),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT email_audit_log_pkey PRIMARY KEY (id)
+);
+
+-- =====================================================
+-- MAIL SYSTEM (SES/INBOUND)
+-- =====================================================
+
+CREATE TABLE public.mail_messages_new (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  account_id uuid NOT NULL,
+  source text NOT NULL DEFAULT 'ses'::text,
+  message_id text NOT NULL UNIQUE,
+  from_email text NOT NULL,
+  from_name text,
+  to_email text NOT NULL,
+  to_name text,
+  cc_emails jsonb DEFAULT '[]'::jsonb,
+  bcc_emails jsonb DEFAULT '[]'::jsonb,
+  reply_to text,
+  subject text NOT NULL,
+  body_text text,
+  body_html text,
+  snippet text,
+  received_at timestamp with time zone NOT NULL DEFAULT now(),
+  sent_at timestamp with time zone,
+  s3_bucket text,
+  s3_key text,
+  s3_url text,
+  raw_headers jsonb DEFAULT '{}'::jsonb,
+  status text NOT NULL DEFAULT 'new'::text CHECK (status = ANY (ARRAY['new'::text, 'read'::text, 'archived'::text, 'deleted'::text, 'spam'::text])),
+  folder text DEFAULT 'inbox'::text,
+  is_starred boolean DEFAULT false,
+  is_important boolean DEFAULT false,
+  flag text CHECK (flag = ANY (ARRAY['urgent'::text, 'important'::text, 'pending'::text, 'follow_up'::text, 'low_priority'::text])),
+  labels jsonb DEFAULT '[]'::jsonb,
+  spam_score numeric DEFAULT 0,
+  is_spam boolean DEFAULT false,
+  spam_reason text,
+  has_attachments boolean DEFAULT false,
+  attachments_json jsonb DEFAULT '[]'::jsonb,
+  thread_id text,
+  in_reply_to text,
+  references_text text,
+  size_bytes bigint,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT mail_messages_new_pkey PRIMARY KEY (id),
+  CONSTRAINT mail_messages_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+
+CREATE TABLE public.mail_attachments_new (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  message_id uuid,
+  draft_id uuid,
+  user_id uuid NOT NULL,
+  filename text NOT NULL,
+  content_type text NOT NULL,
+  size_bytes bigint NOT NULL,
+  storage_path text,
+  s3_bucket text,
+  s3_key text,
+  download_url text,
+  is_inline boolean DEFAULT false,
+  content_id text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT mail_attachments_new_pkey PRIMARY KEY (id),
+  CONSTRAINT mail_attachments_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT mail_attachments_new_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.mail_messages_new(id),
+  CONSTRAINT mail_attachments_new_draft_id_fkey FOREIGN KEY (draft_id) REFERENCES public.mail_drafts_new(id)
+);
+
+CREATE TABLE public.mail_drafts_new (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  message_id uuid,
+  account_id uuid,
+  to_emails jsonb DEFAULT '[]'::jsonb,
+  cc_emails jsonb DEFAULT '[]'::jsonb,
+  bcc_emails jsonb DEFAULT '[]'::jsonb,
+  subject text,
+  draft_text text,
+  draft_html text,
+  attachments_json jsonb DEFAULT '[]'::jsonb,
+  status text NOT NULL DEFAULT 'draft'::text CHECK (status = ANY (ARRAY['draft'::text, 'pending_send'::text, 'sent'::text, 'failed'::text])),
+  scheduled_send_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT mail_drafts_new_pkey PRIMARY KEY (id),
+  CONSTRAINT mail_drafts_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT mail_drafts_new_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.mail_messages_new(id)
+);
+
+CREATE TABLE public.mail_filters (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  account_id uuid,
+  name text NOT NULL,
+  description text,
+  conditions jsonb NOT NULL DEFAULT '{}'::jsonb,
+  actions jsonb NOT NULL DEFAULT '{}'::jsonb,
+  priority integer DEFAULT 0,
+  is_active boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT mail_filters_pkey PRIMARY KEY (id),
+  CONSTRAINT mail_filters_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+
+CREATE TABLE public.mail_sync_log_new (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  account_id uuid NOT NULL,
+  sync_type text NOT NULL CHECK (sync_type = ANY (ARRAY['manual'::text, 'auto'::text, 'webhook'::text, 'ses_notification'::text])),
+  status text NOT NULL CHECK (status = ANY (ARRAY['success'::text, 'partial'::text, 'failed'::text])),
+  messages_fetched integer DEFAULT 0,
+  messages_new integer DEFAULT 0,
+  messages_updated integer DEFAULT 0,
+  errors text,
+  details jsonb DEFAULT '{}'::jsonb,
+  started_at timestamp with time zone NOT NULL DEFAULT now(),
+  completed_at timestamp with time zone,
+  duration_ms integer,
+  CONSTRAINT mail_sync_log_new_pkey PRIMARY KEY (id)
+);
+
+-- =====================================================
+-- CALENDAR
+-- =====================================================
+
+CREATE TABLE public.calendar_events (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  owner_user_id uuid NOT NULL,
+  title text NOT NULL,
+  description text,
+  start_at timestamp with time zone NOT NULL,
+  end_at timestamp with time zone NOT NULL,
+  timezone text NOT NULL DEFAULT 'America/Mexico_City'::text,
+  location text,
+  attendees_json jsonb DEFAULT '[]'::jsonb,
+  status text NOT NULL DEFAULT 'scheduled'::text CHECK (status = ANY (ARRAY['scheduled'::text, 'cancelled'::text, 'completed'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  notification_minutes integer DEFAULT 60,
+  source text DEFAULT 'manual'::text,
+  source_id text,
+  reminder_sent boolean DEFAULT false,
+  CONSTRAINT calendar_events_pkey PRIMARY KEY (id)
+);
+
+-- =====================================================
+-- TELEGRAM
+-- =====================================================
+
+CREATE TABLE public.telegram_bots (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  owner_user_id uuid NOT NULL,
+  bot_username text NOT NULL,
+  bot_token_enc text NOT NULL,
+  webhook_secret text NOT NULL,
+  webhook_url text,
+  webhook_set_at timestamp with time zone,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT telegram_bots_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.telegram_chats (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  owner_user_id uuid NOT NULL,
+  bot_id uuid NOT NULL,
+  chat_id bigint NOT NULL,
+  telegram_user_id bigint,
+  telegram_username text,
+  first_seen_at timestamp with time zone NOT NULL DEFAULT now(),
+  last_seen_at timestamp with time zone NOT NULL DEFAULT now(),
+  auto_send_enabled boolean NOT NULL DEFAULT false,
+  chat_name text,
+  last_message_text text,
+  last_message_at timestamp with time zone,
+  CONSTRAINT telegram_chats_pkey PRIMARY KEY (id),
+  CONSTRAINT telegram_chats_bot_id_fkey FOREIGN KEY (bot_id) REFERENCES public.telegram_bots(id)
+);
+
+CREATE TABLE public.telegram_messages (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  owner_user_id uuid NOT NULL,
+  bot_id uuid NOT NULL,
+  chat_id bigint NOT NULL,
+  direction text NOT NULL CHECK (direction = ANY (ARRAY['inbound'::text, 'outbound'::text])),
+  text text NOT NULL,
+  telegram_message_id bigint,
+  status text NOT NULL DEFAULT 'received'::text CHECK (status = ANY (ARRAY['sent'::text, 'failed'::text, 'received'::text])),
+  error_text text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT telegram_messages_pkey PRIMARY KEY (id),
+  CONSTRAINT telegram_messages_bot_id_fkey FOREIGN KEY (bot_id) REFERENCES public.telegram_bots(id)
+);
+
+CREATE TABLE public.telegram_accounts (
+  id uuid NOT NULL,
+  user_id uuid,
+  chat_id bigint NOT NULL,
+  chat_type character varying DEFAULT 'private'::character varying,
+  username character varying,
+  auto_send_enabled boolean DEFAULT false,
+  connected_at timestamp without time zone DEFAULT now(),
+  last_message_at timestamp without time zone,
+  is_active boolean DEFAULT true,
+  CONSTRAINT telegram_accounts_pkey PRIMARY KEY (id),
+  CONSTRAINT telegram_accounts_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+
+-- =====================================================
+-- MEETINGS
+-- =====================================================
+
+CREATE TABLE public.meetings (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  owner_user_id uuid NOT NULL,
+  title text NOT NULL,
+  meeting_type text NOT NULL DEFAULT 'upload'::text,
+  status text NOT NULL DEFAULT 'processing'::text,
+  error_message text,
+  audio_url text,
+  audio_duration_seconds integer,
+  audio_file_size bigint,
+  transcript_text text,
+  transcript_json jsonb,
+  minutes_summary text,
+  minutes_agreements jsonb,
+  minutes_pending jsonb,
+  minutes_decisions jsonb,
+  minutes_risks jsonb,
+  attachments jsonb,
+  is_live boolean DEFAULT false,
+  live_started_at timestamp with time zone,
+  live_ended_at timestamp with time zone,
+  live_chunks_count integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  processed_at timestamp with time zone,
+  mode character varying CHECK (mode::text = ANY (ARRAY['live'::character varying, 'upload'::character varying]::text[])),
+  participants jsonb DEFAULT '[]'::jsonb,
+  auto_send_enabled boolean DEFAULT false,
+  send_email boolean DEFAULT false,
+  send_telegram boolean DEFAULT false,
+  duration_sec integer,
+  finalized_at timestamp with time zone,
+  happened_at timestamp with time zone,
+  scheduled_at timestamp with time zone,
+  CONSTRAINT meetings_pkey PRIMARY KEY (id),
+  CONSTRAINT meetings_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES auth.users(id)
+);
+
+CREATE TABLE public.meeting_transcripts (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  meeting_id uuid NOT NULL,
+  chunk_index integer,
+  text text NOT NULL,
+  speaker_id text,
+  speaker_label text,
+  start_time double precision,
+  end_time double precision,
+  confidence double precision,
+  is_final boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT meeting_transcripts_pkey PRIMARY KEY (id),
+  CONSTRAINT meeting_transcripts_meeting_id_fkey FOREIGN KEY (meeting_id) REFERENCES public.meetings(id)
+);
+
+CREATE TABLE public.meeting_minutes (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  meeting_id uuid NOT NULL,
+  content_markdown text NOT NULL,
+  content_html text,
+  summary text,
+  action_items jsonb DEFAULT '[]'::jsonb,
+  detected_agreements jsonb DEFAULT '[]'::jsonb,
+  participants_detected text[] DEFAULT '{}'::text[],
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT meeting_minutes_pkey PRIMARY KEY (id),
+  CONSTRAINT meeting_minutes_meeting_id_fkey FOREIGN KEY (meeting_id) REFERENCES public.meetings(id)
+);
+
+CREATE TABLE public.meeting_assets (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  meeting_id uuid NOT NULL,
+  s3_key text NOT NULL,
+  s3_bucket text NOT NULL,
+  s3_url text NOT NULL,
+  filename text NOT NULL,
+  mime_type text NOT NULL,
+  size_bytes bigint NOT NULL,
+  asset_type text NOT NULL CHECK (asset_type = ANY (ARRAY['chunk'::text, 'full'::text])),
+  chunk_index integer,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT meeting_assets_pkey PRIMARY KEY (id),
+  CONSTRAINT meeting_assets_meeting_id_fkey FOREIGN KEY (meeting_id) REFERENCES public.meetings(id)
+);
+
+-- =====================================================
+-- NOTIFICATIONS
+-- =====================================================
+
+CREATE TABLE public.notification_jobs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  owner_user_id uuid NOT NULL,
+  type text NOT NULL,
+  payload jsonb NOT NULL,
+  run_at timestamp with time zone NOT NULL,
+  channel text NOT NULL CHECK (channel = ANY (ARRAY['telegram'::text, 'email'::text, 'push'::text])),
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'sent'::text, 'failed'::text])),
+  last_error text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT notification_jobs_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.user_notifications (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  type text NOT NULL,
+  title text NOT NULL,
+  message text NOT NULL,
+  metadata jsonb,
+  is_read boolean DEFAULT false,
+  action_url text,
+  created_at timestamp with time zone DEFAULT now(),
+  read_at timestamp with time zone,
+  CONSTRAINT user_notifications_pkey PRIMARY KEY (id),
+  CONSTRAINT user_notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+
+-- =====================================================
+-- USER MANAGEMENT
+-- =====================================================
+
+CREATE TABLE public.user_profiles (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL UNIQUE,
+  email text NOT NULL,
+  role text NOT NULL DEFAULT 'USER'::text,
+  display_name text,
+  created_at timestamp with time zone DEFAULT now(),
+  preferred_language text DEFAULT 'es'::text,
+  timezone text DEFAULT 'America/Mexico_City'::text,
+  avatar_url text,
+  theme text DEFAULT 'system'::text CHECK (theme = ANY (ARRAY['light'::text, 'dark'::text, 'system'::text])),
+  updated_at timestamp with time zone DEFAULT now(),
+  preferred_name text,
+  assistant_name text DEFAULT 'Luma'::text,
+  tone_pref text DEFAULT 'barrio'::text,
+  assistant_avatar_url text,
+  user_avatar_url text,
+  CONSTRAINT user_profiles_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.user_settings (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL UNIQUE,
+  created_at timestamp with time zone DEFAULT now(),
+  context_persistent boolean DEFAULT true,
+  voice_enabled boolean DEFAULT false,
+  ai_model text DEFAULT 'gpt-4'::text,
+  ai_temperature numeric DEFAULT 0.7,
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT user_settings_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.user_sessions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  ip_address text,
+  user_agent text,
+  device text,
+  location text,
+  created_at timestamp with time zone DEFAULT now(),
+  last_activity_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT user_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT user_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+
+CREATE TABLE public.user_integrations (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  integration_type text NOT NULL,
+  config jsonb NOT NULL DEFAULT '{}'::jsonb,
+  access_token text,
+  refresh_token text,
+  expires_at timestamp with time zone,
+  scopes text[],
+  connected_at timestamp with time zone NOT NULL DEFAULT now(),
+  last_used_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT user_integrations_pkey PRIMARY KEY (id),
+  CONSTRAINT user_integrations_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+
+-- =====================================================
+-- PROJECTS & CONVERSATIONS
+-- =====================================================
+
+CREATE TABLE public.user_projects (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  name text NOT NULL,
+  description text,
+  color text DEFAULT '#3B82F6'::text,
+  icon text DEFAULT '📁'::text,
+  is_archived boolean DEFAULT false,
+  sort_order integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT user_projects_pkey PRIMARY KEY (id),
+  CONSTRAINT user_projects_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+
+CREATE TABLE public.project_members (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  role text NOT NULL DEFAULT 'member'::text,
+  invited_by uuid,
+  invited_at timestamp with time zone DEFAULT now(),
+  accepted_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT project_members_pkey PRIMARY KEY (id),
+  CONSTRAINT project_members_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.user_projects(id),
+  CONSTRAINT project_members_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT project_members_invited_by_fkey FOREIGN KEY (invited_by) REFERENCES auth.users(id)
+);
+
+CREATE TABLE public.user_conversations (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  conversation_id text NOT NULL,
+  title text NOT NULL DEFAULT 'Nueva conversación'::text,
+  messages jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  project_id uuid,
+  CONSTRAINT user_conversations_pkey PRIMARY KEY (id),
+  CONSTRAINT user_conversations_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT user_conversations_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.user_projects(id)
+);
+
+CREATE TABLE public.chat_sessions (
+  id uuid NOT NULL,
+  owner_user_id uuid NOT NULL,
+  session_name text,
+  created_at timestamp with time zone,
+  CONSTRAINT chat_sessions_pkey PRIMARY KEY (id)
+);
+
+-- =====================================================
+-- EVENTS & DECISIONS (KUNNA)
+-- =====================================================
+
+CREATE TABLE public.ae_events (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  workspace_id text NOT NULL,
+  app_id text NOT NULL,
+  user_id text NOT NULL,
+  event_type text NOT NULL,
+  timestamp timestamp with time zone NOT NULL,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT ae_events_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.ae_decisions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  workspace_id text NOT NULL,
+  app_id text NOT NULL,
+  user_id text NOT NULL,
+  event_id uuid,
+  actions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT ae_decisions_pkey PRIMARY KEY (id),
+  CONSTRAINT ae_decisions_event_id_fkey FOREIGN KEY (event_id) REFERENCES public.ae_events(id)
+);
+
+CREATE TABLE public.global_integrations (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  integration_type text NOT NULL UNIQUE,
+  integration_name text NOT NULL,
+  config jsonb NOT NULL DEFAULT '{}'::jsonb,
+  is_active boolean DEFAULT true,
+  last_tested_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()),
+  updated_at timestamp with time zone DEFAULT timezone('utc'::text, now()),
+  CONSTRAINT global_integrations_pkey PRIMARY KEY (id)
+);
+
+-- =====================================================
+-- LEGACY TABLES (marked for deprecation)
+-- =====================================================
+
+CREATE TABLE public.mail_messages_old (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  owner_user_id uuid NOT NULL,
+  thread_id uuid,
+  account_id uuid,
+  direction text NOT NULL CHECK (direction = ANY (ARRAY['inbound'::text, 'outbound'::text])),
+  from_email text NOT NULL,
+  to_emails_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+  cc_json jsonb,
+  bcc_json jsonb,
+  subject text NOT NULL,
+  text_body text NOT NULL,
+  html_body text,
+  attachments_json jsonb,
+  provider_message_id text,
+  status text NOT NULL DEFAULT 'queued'::text CHECK (status = ANY (ARRAY['queued'::text, 'sent'::text, 'failed'::text, 'received'::text])),
+  error_text text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT mail_messages_old_pkey PRIMARY KEY (id),
+  CONSTRAINT mail_messages_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES public.mail_threads_old(id),
+  CONSTRAINT mail_messages_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.email_accounts(id)
+);
+
+CREATE TABLE public.mail_threads_old (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  owner_user_id uuid NOT NULL,
+  subject text NOT NULL,
+  participants_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+  last_message_at timestamp with time zone NOT NULL DEFAULT now(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT mail_threads_old_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.email_folders_backup_20250109 (
+  id uuid,
+  account_id uuid,
+  owner_user_id uuid,
+  folder_name character varying,
+  folder_type character varying,
+  imap_path character varying,
+  unread_count integer,
+  total_count integer,
+  icon character varying,
+  color character varying,
+  sort_order integer,
+  created_at timestamp with time zone,
+  updated_at timestamp with time zone
+);
+
+-- =====================================================
+-- END OF SCHEMA
+-- =====================================================
+-- Última actualización: 16 de enero de 2026
+-- Backend debe sincronizar con este schema
+-- Frontend usa este schema como referencia
+-- =====================================================

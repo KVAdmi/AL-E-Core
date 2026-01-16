@@ -1,8 +1,41 @@
 # 🎯 FRONTEND - CAMBIOS REQUERIDOS PARA AL-E OPERATIVA
 
 **Fecha:** 16 de enero de 2026  
-**Backend Status:** ✅ DESPLEGADO (commit 3ce2ee2)  
+**Backend Status:** ✅ LISTO PARA DEPLOYMENT (commit pendiente)  
 **API Endpoint:** `POST http://100.27.201.233:3000/api/ai/chat`
+
+---
+
+## 🚨 ACTUALIZACIÓN CRÍTICA: SCHEMA ALINEADO (16/01/2026)
+
+### ⚠️ CAMBIOS EN BACKEND QUE AFECTAN FRONTEND:
+
+Backend ahora usa **`user_profiles`** en vez de `user_settings` para personalización:
+
+**Campos que Frontend debe usar:**
+```typescript
+// TABLA: user_profiles
+interface UserProfile {
+  preferred_name: string;    // ← Nickname del usuario
+  assistant_name: string;    // ← Nombre del asistente (default: "AL-E")
+  tone_pref: string;         // ← Tono/estilo (default: "barrio")
+  display_name: string;      // ← Nombre público
+  email: string;
+  timezone: string;          // ← Default: "America/Mexico_City"
+  preferred_language: string; // ← Default: "es"
+  theme: 'light' | 'dark' | 'system';
+  avatar_url?: string;
+  assistant_avatar_url?: string;
+  user_avatar_url?: string;
+}
+```
+
+**Migración SQL ejecutada:**
+- ✅ `migrations/999_fix_user_profiles_backend_alignment.sql`
+- ✅ Valida que existan: `preferred_name`, `assistant_name`, `tone_pref`
+- ✅ Crea perfiles para usuarios sin perfil
+
+**Frontend debe ejecutar esta migración ANTES de desplegar cambios P0**
 
 ---
 
@@ -14,6 +47,7 @@
 3. ✅ Email tools con validación de cuentas
 4. ✅ Metadata estructurada en respuesta JSON
 5. ✅ OpenAI Referee activo
+6. ✅ **FIX CRÍTICO:** user_profiles alignment (user_settings → user_profiles)
 
 ---
 

@@ -191,22 +191,23 @@ export class SimpleOrchestrator {
       
       // 👤 2. CARGAR CONFIGURACIÓN DEL USUARIO
       console.log('[SIMPLE ORCH] 👤 Cargando configuración del usuario...');
-      const { data: userConfig, error: configError } = await supabase
-        .from('user_settings')
-        .select('assistant_name, user_nickname, preferences')
+      const { data: userProfile, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('preferred_name, assistant_name, tone_pref')
         .eq('user_id', request.userId)
         .single();
       
-      if (configError && configError.code !== 'PGRST116') {
-        console.error('[SIMPLE ORCH] ⚠️ Error cargando config:', configError);
+      if (profileError && profileError.code !== 'PGRST116') {
+        console.error('[SIMPLE ORCH] ⚠️ Error cargando perfil:', profileError);
       }
       
-      const assistantName = userConfig?.assistant_name || 'AL-E';
-      const userNickname = userConfig?.user_nickname || 'Usuario';
-      const preferences = userConfig?.preferences || {};
+      const assistantName = userProfile?.assistant_name || 'AL-E';
+      const userNickname = userProfile?.preferred_name || 'Usuario';
+      const tonePref = userProfile?.tone_pref || 'barrio';
       
       console.log('[SIMPLE ORCH] 👤 Nombre asistente:', assistantName);
       console.log('[SIMPLE ORCH] 👤 Nickname usuario:', userNickname);
+      console.log('[SIMPLE ORCH] 👤 Tono preferido:', tonePref);
       
       const messages: Array<Groq.Chat.ChatCompletionMessageParam> = [];
       
