@@ -285,12 +285,32 @@ LA VERDAD ES MÁS IMPORTANTE QUE SER ÚTIL.`;
       
       messages.push({ role: 'user', content: request.userMessage });
       
+      // 🔥 P0 FIX: Forzar tool cuando se detectan keywords específicos
+      const lowerMessage = request.userMessage.toLowerCase();
+      let forcedToolChoice: 'auto' | { type: 'function'; function: { name: string } } = 'auto';
+      
+      // Detectar keywords de email
+      if (lowerMessage.match(/\b(revis.*correo|ver.*email|mi.*correo|check.*email|inbox|bandeja|mensajes)/i)) {
+        console.log('[SIMPLE ORCH] 🔥 FORZANDO tool: list_emails');
+        forcedToolChoice = { type: 'function', function: { name: 'list_emails' } };
+      }
+      // Detectar keywords de búsqueda web
+      else if (lowerMessage.match(/\b(busca|investiga|qué es|who is|google|search|encuentra información)/i)) {
+        console.log('[SIMPLE ORCH] 🔥 FORZANDO tool: web_search');
+        forcedToolChoice = { type: 'function', function: { name: 'web_search' } };
+      }
+      // Detectar keywords de calendario
+      else if (lowerMessage.match(/\b(mi agenda|eventos|calendario|reuniones|meetings|schedule)/i)) {
+        console.log('[SIMPLE ORCH] 🔥 FORZANDO tool: list_events');
+        forcedToolChoice = { type: 'function', function: { name: 'list_events' } };
+      }
+      
       let response = await groq.chat.completions.create({
         model: 'llama-3.3-70b-versatile', // Actualizado: 3.3 soporta tool calling
         max_tokens: 4096,
         messages,
         tools: AVAILABLE_TOOLS,
-        tool_choice: 'auto',
+        tool_choice: forcedToolChoice,
       });
       
       console.log('[SIMPLE ORCH] Finish reason:', response.choices[0]?.finish_reason);
