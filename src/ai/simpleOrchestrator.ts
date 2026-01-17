@@ -44,10 +44,15 @@ interface SimpleOrchestratorResponse {
   metadata?: {
     model?: string;
     finish_reason?: string;
+    tool_call_provider?: 'groq' | 'openai' | 'none';
+    final_response_provider?: 'groq' | 'openai';
+    referee_used?: boolean;
+    referee_reason?: string;
+    stateless_mode?: boolean;
+    server_now_iso?: string;
     groq_failed?: boolean;
     openai_failed?: boolean;
     referee_invoked?: boolean;
-    referee_reason?: string;
     referee_failed?: boolean;
     error_handled?: boolean;
     rate_limit_exceeded?: boolean;
@@ -182,46 +187,77 @@ export class SimpleOrchestrator {
     console.log('[SIMPLE ORCH] User:', request.userId);
     
     try {
-      // 🧠 1. CARGAR MEMORIA DEL USUARIO desde Supabase
-      console.log('[SIMPLE ORCH] 🧠 Cargando memoria del usuario...');
-      const { data: memories, error: memError } = await supabase
-        .from('assistant_memories')
-        .select('memory, importance, created_at')
-        .eq('user_id', request.userId)
-        .eq('workspace_id', workspaceId)
-        .order('importance', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(10);
+      // 🔒 P0: VALIDAR UUID - Si userId no es UUID válido, modo stateless
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const isValidUUID = uuidRegex.test(request.userId);
       
-      if (memError) {
-        console.error('[SIMPLE ORCH] ⚠️ Error cargando memorias:', memError);
+      let statelessMode = false;
+      if (!isValidUUID) {
+        statelessMode = true;
+        console.warn('[ORCH] ⚠️ invalid_user_id -> stateless_mode=true');
+        console.warn(`[ORCH] userId="${request.userId}" no es UUID válido`);
+        console.warn('[ORCH] NO se cargará perfil/memoria/settings');
       }
       
-      const userMemories = memories && memories.length > 0 
-        ? memories.map(m => m.memory).join('\n- ')
-        : 'No hay memorias previas';
+      let userMemories = 'No hay memorias previas';
+      let assistantName = 'AL-E';
+      let userNickname = 'Usuario';
+      let tonePref = 'barrio';
       
-      console.log('[SIMPLE ORCH] 🧠 Memorias cargadas:', memories?.length || 0);
-      
-      // 👤 2. CARGAR CONFIGURACIÓN DEL USUARIO
-      console.log('[SIMPLE ORCH] 👤 Cargando configuración del usuario...');
-      const { data: userProfile, error: profileError } = await supabase
-        .from('user_profiles')
-        .select('preferred_name, assistant_name, tone_pref')
-        .eq('user_id', request.userId)
-        .single();
-      
-      if (profileError && profileError.code !== 'PGRST116') {
-        console.error('[SIMPLE ORCH] ⚠️ Error cargando perfil:', profileError);
+      if (!statelessMode) {
+        // 🧠 1. CARGAR MEMORIA DEL USUARIO desde Supabase
+        console.log('[SIMPLE ORCH] 🧠 Cargando memoria del usuario...');
+        const { data: memories, error: memError } = await supabase
+          .from('assistant_memories')
+          .select('memory, importance, created_at')
+          .eq('user_id', request.userId)
+          .eq('workspace_id', workspaceId)
+          .order('importance', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(10);
+        
+        if (memError) {
+          console.error('[SIMPLE ORCH] ⚠️ Error cargando memorias:', memError);
+        }
+        
+        userMemories = memories && memories.length > 0 
+          ? memories.map(m => m.memory).join('\n- ')
+          : 'No hay memorias previas';
+        
+        console.log('[SIMPLE ORCH] 🧠 Memorias cargadas:', memories?.length || 0);
+        
+        // 👤 2. CARGAR CONFIGURACIÓN DEL USUARIO
+        console.log('[SIMPLE ORCH] 👤 Cargando configuración del usuario...');
+        const { data: userProfile, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('preferred_name, assistant_name, tone_pref')
+          .eq('user_id', request.userId)
+          .single();
+        
+        if (profileError && profileError.code !== 'PGRST116') {
+          console.error('[SIMPLE ORCH] ⚠️ Error cargando perfil:', profileError);
+        }
+        
+        assistantName = userProfile?.assistant_name || 'AL-E';
+        userNickname = userProfile?.preferred_name || 'Usuario';
+        tonePref = userProfile?.tone_pref || 'barrio';
+      } else {
+        console.log('[SIMPLE ORCH] 🚫 Stateless mode: usando defaults (AL-E, Usuario, barrio)');
       }
-      
-      const assistantName = userProfile?.assistant_name || 'AL-E';
-      const userNickname = userProfile?.preferred_name || 'Usuario';
-      const tonePref = userProfile?.tone_pref || 'barrio';
       
       console.log('[SIMPLE ORCH] 👤 Nombre asistente:', assistantName);
       console.log('[SIMPLE ORCH] 👤 Nickname usuario:', userNickname);
       console.log('[SIMPLE ORCH] 👤 Tono preferido:', tonePref);
+      
+      // 🕐 P0: TIME GROUNDING - Inyectar timestamp del servidor
+      const serverNow = new Date();
+      const serverNowISO = serverNow.toISOString();
+      const serverNowLocal = serverNow.toLocaleString('es-MX', { 
+        timeZone: 'America/Mexico_City',
+        dateStyle: 'full',
+        timeStyle: 'short'
+      });
+      console.log('[SIMPLE ORCH] 🕐 Server time:', serverNowISO, '(', serverNowLocal, ')');
       
       const messages: Array<Groq.Chat.ChatCompletionMessageParam> = [];
       
@@ -235,11 +271,19 @@ PERSONALIDAD:
 - NUNCA uses ** (negritas) ni formatos técnicos
 - Di las cosas como yo se las diría
 
+⏰ FECHA Y HORA ACTUAL DEL SERVIDOR:
+- ISO: ${serverNowISO}
+- Local (México): ${serverNowLocal}
+- Timezone: America/Mexico_City
+
+IMPORTANTE: Si respondes sobre clima, eventos o noticias, SIEMPRE usa fechas relativas como "hoy", "mañana", "la próxima semana", NUNCA digas "hoy 11 de enero" si hoy es otra fecha. Usa el timestamp del servidor como referencia.
+
 PROHIBICIONES ABSOLUTAS:
 - NUNCA inventes resultados de tools
 - NUNCA digas "revisé" si no ejecutaste list_emails
 - NUNCA digas "según encontré" si no ejecutaste web_search
 - NUNCA inventes nombres de empresas, personas o correos
+- NUNCA uses fechas absolutas que no coincidan con el server_now_iso
 - Si un tool falla, dilo directo: "No pude [acción] porque [razón]"
 - Si no tienes info, di: "No tengo esa información"
 
@@ -302,7 +346,13 @@ RECUERDA: Si no ejecutaste un tool, NO digas que lo hiciste. La verdad siempre.`
       let groqFailed = false;
       let usingOpenAI = false;
       
-      // 🔥 P0 FIX: Usar OpenAI directamente para tool calling
+      // � P0: TRACKING de metadata para observabilidad
+      let toolCallProvider: 'groq' | 'openai' | 'none' = 'none';
+      let finalResponseProvider: 'groq' | 'openai' = 'groq';
+      let refereeUsed = false;
+      let refereeReasonDetected: string | undefined;
+      
+      // �🔥 P0 FIX: Usar OpenAI directamente para tool calling
       // Groq llama-3.3-70b tiene problemas generando tool calls válidos
       
       // 🔒 P0 COST CONTROL: Verificar límites ANTES de llamar
@@ -345,6 +395,7 @@ RECUERDA: Si no ejecutaste un tool, NO digas que lo hiciste. La verdad siempre.`
           const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
           
           usingOpenAI = true;
+          toolCallProvider = 'openai'; // 📊 TRACKING
           response = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             max_tokens: 600, // P0 LIMIT: maxTokensPerCall
@@ -555,6 +606,10 @@ NUNCA inventes datos.`,
           if (needsReferee) {
             console.log(`[SIMPLE ORCH] ⚖️ OPENAI REFEREE INVOKED - reason=${evasionCheck.reason || 'evidence_mismatch'}`);
             
+            refereeUsed = true; // 📊 TRACKING
+            refereeReasonDetected = evasionCheck.reason || 'evidence_mismatch'; // 📊 TRACKING
+            finalResponseProvider = 'openai'; // 📊 TRACKING (respuesta final viene de referee)
+            
             const refereeResult = await invokeOpenAIReferee({
               userPrompt: request.userMessage,
               groqResponse: finalAnswer,
@@ -576,8 +631,8 @@ NUNCA inventes datos.`,
         }
       }
       
-      // 💾 GUARDAR MEMORIA si la conversación fue importante
-      if (toolsUsed.length > 0 || request.userMessage.length > 50) {
+      // 💾 GUARDAR MEMORIA si la conversación fue importante (SOLO si NO es stateless)
+      if (!statelessMode && (toolsUsed.length > 0 || request.userMessage.length > 50)) {
         console.log('[SIMPLE ORCH] 💾 Guardando memoria...');
         
         const memoryText = `${userNickname} preguntó: "${request.userMessage.substring(0, 200)}". ${assistantName} usó: ${toolsUsed.join(', ') || 'respuesta directa'}.`;
@@ -596,6 +651,8 @@ NUNCA inventes datos.`,
             if (error) console.error('[SIMPLE ORCH] ⚠️ Error guardando memoria:', error);
             else console.log('[SIMPLE ORCH] 💾 Memoria guardada');
           });
+      } else if (statelessMode) {
+        console.log('[SIMPLE ORCH] 🚫 Stateless mode: NO se guarda memoria');
       }
       
       console.log('[SIMPLE ORCH] ══════════════════════════════════════');
@@ -608,7 +665,21 @@ NUNCA inventes datos.`,
         latency_ms_total: executionTime,
       });
       
-      return { answer: correctedAnswer, toolsUsed, executionTime };
+      // 📊 P0: METADATA COMPLETA para observabilidad
+      return { 
+        answer: correctedAnswer, 
+        toolsUsed, 
+        executionTime,
+        metadata: {
+          tool_call_provider: toolCallProvider,
+          final_response_provider: finalResponseProvider,
+          referee_used: refereeUsed,
+          referee_reason: refereeReasonDetected,
+          stateless_mode: statelessMode,
+          server_now_iso: serverNowISO,
+          model: usingOpenAI ? 'openai/gpt-4o-mini' : 'groq/llama-3.3-70b-versatile',
+        }
+      };
       
     } catch (error: any) {
       console.error('[SIMPLE ORCH] 💥 Error:', error);
