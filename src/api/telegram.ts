@@ -781,14 +781,27 @@ router.get('/messages', requireAuth, async (req, res) => {
     console.log(`[TELEGRAM] ✅ Loaded ${messages?.length || 0} messages (${inboundCount} inbound, ${outboundCount} outbound)`);
     
     // Formatear mensajes para el frontend
+    // 🔥 FIX P0: Agregar campos que espera el frontend (incoming, date, from)
     const formattedMessages = (messages || []).map(msg => ({
       id: msg.id,
       text: msg.text,
+      incoming: msg.direction === 'inbound', // ✅ Campo requerido por frontend
+      direction: msg.direction,
       sender_type: msg.direction === 'inbound' ? 'user' : 'bot',
-      direction: msg.direction, // ✅ Incluir direction explícitamente
+      date: msg.created_at, // ✅ Frontend espera "date" no "sent_at"
       sent_at: msg.created_at,
-      status: msg.status
+      status: msg.status,
+      from: { // ✅ Objeto "from" requerido por frontend
+        id: msg.direction === 'inbound' ? 'user' : 'bot',
+        name: msg.direction === 'inbound' ? 'Usuario' : 'AL-E Bot',
+        isBot: msg.direction === 'outbound'
+      }
     }));
+    
+    console.log(`[TELEGRAM] 📤 Returning ${formattedMessages.length} messages to frontend`);
+    if (formattedMessages.length > 0) {
+      console.log('[TELEGRAM] 📋 Sample message:', JSON.stringify(formattedMessages[0], null, 2));
+    }
     
     return res.json({
       ok: true,
