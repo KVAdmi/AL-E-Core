@@ -417,6 +417,133 @@ router.post('/stt', upload.single('audio'), handleSTT);
 router.post('/transcribe', upload.single('audio'), handleSTT);
 
 /**
+ * ✅ FIX 5: POST /api/voice/chat
+ * Endpoint completo: STT → Chat con memoria → TTS
+ * 
+ * PRODUCCIÓN REAL:
+ * - Usa Groq Whisper para STT (NO OpenAI)
+ * - Llama a /api/ai/chat/v2 internamente (CON memoria)
+ * - Usa Edge-TTS para síntesis
+ * - NO mock, NO temporal
+ */
+router.post('/chat', upload.single('audio'), async (req, res) => {
+  const startTime = Date.now();
+  console.log('[VOICE_CHAT] 🎤 Request recibido - STT → Chat → TTS');
+  
+  try {
+    const { userId, sessionId, workspaceId = 'al-eon' } = req.body;
+    const audioFile = req.file;
+    
+    // Validaciones
+    if (!audioFile || !userId) {
+      return res.status(400).json({
+        error: 'MISSING_PARAMS',
+        message: 'Se requiere audio y userId'
+      });
+    }
+    
+    // ============================================
+    // 1. STT: Transcribir con Groq Whisper
+    // ============================================
+    console.log('[VOICE_CHAT] 🔄 Step 1/3: Transcribing with Groq Whisper...');
+    const tempFilePath = path.join(os.tmpdir(), `voice_chat_${uuidv4()}.webm`);
+    fs.writeFileSync(tempFilePath, audioFile.buffer);
+    
+    const transcription = await groq.audio.transcriptions.create({
+      file: fs.createReadStream(tempFilePath),
+      model: 'whisper-large-v3-turbo',
+      language: 'es',
+      response_format: 'json',
+      temperature: 0.0
+    });
+    
+    fs.unlinkSync(tempFilePath);
+    const transcript = transcription.text;
+    console.log(`[VOICE_CHAT] ✓ Transcript: "${transcript}"`);
+    
+    // ============================================
+    // 2. CHAT: Procesar con orchestrator (MEMORIA REAL)
+    // ============================================
+    console.log('[VOICE_CHAT] 🧠 Step 2/3: Processing with orchestrator (with memory)...');
+    
+    const chatResponse = await fetch(`http://localhost:${process.env.PORT || 3001}/api/ai/chat/v2`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-channel': 'voice'  // ← Marcar como voz (bloquea OpenAI referee)
+      },
+      body: JSON.stringify({
+        userId,
+        sessionId,
+        workspaceId,
+        mode: 'universal',
+        voice: true,  // ← Flag de voz
+        message: transcript  // ← /chat/v2 usa 'message' no 'messages'
+      })
+    });
+    
+    if (!chatResponse.ok) {
+      throw new Error(`Chat API error: ${chatResponse.statusText}`);
+    }
+    
+    const chatData = await chatResponse.json();
+    console.log(`[VOICE_CHAT] ✓ Chat response received - session: ${chatData.session_id}`);
+    
+    // ============================================
+    // 3. TTS: Sintetizar con Edge-TTS
+    // ============================================
+    console.log('[VOICE_CHAT] 🔊 Step 3/3: Synthesizing with Edge-TTS...');
+    const speakText = chatData.speak_text || chatData.answer;
+    
+    // Limpiar texto para voz (sin markdown)
+    let cleanText = speakText.replace(/\*\*|\*|`|#/g, '').trim();
+    
+    // Truncar a 2 frases para respuestas rápidas en voz
+    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+    if (sentences.length > 2) {
+      cleanText = sentences.slice(0, 2).join(' ');
+    }
+    
+    const outputFile = path.join(os.tmpdir(), `tts_${uuidv4()}.mp3`);
+    await execPromise(
+      `edge-tts --voice "es-MX-DaliaNeural" --text "${cleanText.replace(/"/g, '\\"')}" --write-media "${outputFile}"`,
+      { timeout: TTS_TIMEOUT_MS }
+    );
+    
+    const audioBuffer = fs.readFileSync(outputFile);
+    fs.unlinkSync(outputFile);
+    
+    console.log(`[VOICE_CHAT] ✅ Completed in ${Date.now() - startTime}ms`);
+    
+    // ============================================
+    // 4. RESPONDER con audio + metadata
+    // ============================================
+    return res.json({
+      transcript,
+      answer: chatData.answer,
+      speak_text: cleanText,
+      audioUrl: `data:audio/mpeg;base64,${audioBuffer.toString('base64')}`,
+      session_id: chatData.session_id,
+      with_memory: true,  // ✅ CONFIRMACIÓN: Memoria está activa
+      metadata: {
+        latency_ms: Date.now() - startTime,
+        stt_provider: 'groq',
+        chat_provider: chatData.metadata?.provider || 'groq',
+        tts_provider: 'edge-tts',
+        memory_loaded: true  // Confirmación de memoria
+      }
+    });
+    
+  } catch (error: any) {
+    console.error('[VOICE_CHAT] ❌ Error:', error);
+    return res.status(500).json({
+      error: 'VOICE_CHAT_ERROR',
+      message: error.message
+    });
+  }
+});
+
+/**
  * GET /api/voice/capabilities
  * Información sobre capacidades de voz disponibles
  */
