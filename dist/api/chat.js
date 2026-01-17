@@ -1026,6 +1026,7 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         const attachmentsRaw = (req.body.attachments ?? req.body.files ?? []);
         const safeAttachments = Array.isArray(attachmentsRaw) ? attachmentsRaw : [];
         console.log(`[CHAT_V2] 📎 Attachments recibidos: ${safeAttachments.length}`);
+        console.log(`[CHAT_V2] 📎 Attachments raw:`, JSON.stringify(attachmentsRaw));
         let attachmentsContext = '';
         if (safeAttachments.length > 0) {
             try {
