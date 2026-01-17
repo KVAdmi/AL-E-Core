@@ -1739,7 +1739,17 @@ Ejemplo malo: "Visita https://... para ver el precio."`
     });
     
   } catch (error: any) {
-    console.error('[CHAT_V2] ❌ Error:', error);
+    console.error('[CHAT_V2] ❌ CRITICAL ERROR:', {
+      error: error.message,
+      error_type: error.name,
+      stack: error.stack?.substring(0, 500),
+      intent: orchestratorContext?.intent?.intent_type,
+      tool_used: orchestratorContext?.toolUsed,
+      tool_failed: orchestratorContext?.toolFailed,
+      timestamp: new Date().toISOString(),
+      user_id: userId,
+      session_id: sessionId
+    });
     
     const latency_ms = Date.now() - startTime;
     
@@ -1751,10 +1761,12 @@ Ejemplo malo: "Visita https://... para ver el precio."`
         error_type: error.name || 'UnknownError',
         intent_detected: orchestratorContext?.intent?.intent_type,
         tool_expected: orchestratorContext?.toolUsed,
-        tool_executed: false,
+        tool_executed: orchestratorContext?.toolUsed !== 'none',
+        tool_failed: orchestratorContext?.toolFailed || false,
         failure_reason: error.code === 'ETIMEDOUT' ? 'TIMEOUT' : 
                         error.message?.includes('OAUTH') ? 'OAUTH_ERROR' :
                         error.message?.includes('provider') ? 'PROVIDER_TIMEOUT' :
+                        error.message?.includes('TOOL_REQUIRED') ? 'TOOL_NOT_EXECUTED' :
                         'UNKNOWN_ERROR',
         stack: typeof error.stack === 'string' ? error.stack.substring(0, 1000) : undefined // Truncar stack
       };

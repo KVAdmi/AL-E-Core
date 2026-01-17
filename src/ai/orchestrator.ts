@@ -590,7 +590,26 @@ export class Orchestrator {
           } catch (parseError: any) {
             console.error(`[ORCH] ❌ ERROR PARSING ARGUMENTS:`, parseError.message);
             console.error(`[ORCH] ❌ ARGUMENTS STRING:`, toolCall.function.arguments);
-            throw new Error(`Failed to parse tool arguments: ${parseError.message}`);
+            
+            // ✅ P0 FIX: Error explícito, no respuesta genérica
+            messages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              name: functionName,
+              content: JSON.stringify({
+                success: false,
+                error: `Error técnico: argumentos inválidos (${parseError.message})`
+              })
+            });
+            
+            toolExecutions.push({
+              tool: functionName,
+              args: {},
+              result: { success: false, error: 'PARSE_ERROR' },
+              success: false
+            });
+            
+            continue; // Saltar ejecución
           }
           
           // 🚨 VALIDACIÓN CRÍTICA PARA send_email
@@ -631,6 +650,39 @@ export class Orchestrator {
             parameters: functionArgs
           });
           
+          // ✅ P0 FIX: Detectar fallos silenciosos de tools
+          if (!result.success && result.error) {
+            console.error(`[ORCH] ❌ TOOL FAILED: ${functionName} - ${result.error}`);
+            
+            // Si el error es crítico (OAuth, timeout), NO permitir respuesta genérica
+            const criticalErrors = ['OAUTH_ERROR', 'TIMEOUT', 'CONNECTION_ERROR', 'AUTH_REQUIRED'];
+            const isCritical = criticalErrors.some(e => result.error?.includes(e));
+            
+            if (isCritical) {
+              console.error(`[ORCH] 🚨 CRITICAL TOOL FAILURE - Blocking generic response`);
+              
+              // Agregar resultado con error explícito
+              messages.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                name: functionName,
+                content: JSON.stringify({
+                  success: false,
+                  error: `No pude consultar ${functionName}. Razón: ${result.error}. Necesitas reconectar tu cuenta.`
+                })
+              });
+              
+              toolExecutions.push({
+                tool: functionName,
+                args: functionArgs,
+                result: { success: false, error: result.error, critical: true },
+                success: false
+              });
+              
+              continue;
+            }
+          }
+          
           // 🚨 VALIDACIÓN ANTI-MENTIRA: send_email DEBE tener messageId
           if ((functionName === 'send_email' || functionName === 'create_and_send_email') && result.success) {
             if (!result.data?.messageId) {
@@ -661,10 +713,13 @@ export class Orchestrator {
         } catch (error: any) {
           console.error(`[ORCH]    ❌ Tool execution error:`, error);
           
+          // ✅ P0 FIX: Log con stack trace completo
+          console.error(`[ORCH]    ❌ Error stack:`, error.stack);
+          
           toolExecutions.push({
             tool: toolCall.function.name,
             args: {},
-            result: { success: false, error: error.message },
+            result: { success: false, error: error.message, stack: error.stack?.substring(0, 500) },
             success: false
           });
           

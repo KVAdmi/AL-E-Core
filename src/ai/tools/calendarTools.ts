@@ -62,7 +62,7 @@ export async function createCalendarEvent(
       .insert([{
         owner_user_id: userId,
         ...event,
-        status: event.status || 'confirmed',
+        status: event.status || 'scheduled', // FIX: confirmed → scheduled (match DB constraint)
         reminder_sent: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
