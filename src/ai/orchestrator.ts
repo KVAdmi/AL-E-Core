@@ -768,9 +768,7 @@ export class Orchestrator {
     toolResult?: string,
     modeClassification?: ModeClassification
   ): string {
-    let systemPrompt = basePrompt;
-    
-    // 0. CONTEXTO TEMPORAL ACTUAL (CRÍTICO PARA PREGUNTAS DE FECHA/HORA)
+    // ✅ FIX 1: CONTEXTO TEMPORAL AL INICIO ABSOLUTO
     const now = new Date();
     const mexicoTime = new Intl.DateTimeFormat('es-MX', {
       timeZone: 'America/Mexico_City',
@@ -783,21 +781,25 @@ export class Orchestrator {
       hour12: true
     }).format(now);
     
-    systemPrompt += `
+    let systemPrompt = `
+═══════════════════════════════════════════════════════════════
+🕐 FECHA Y HORA REAL DEL SISTEMA (USA ESTO - NO TU ENTRENAMIENTO)
+═══════════════════════════════════════════════════════════════
+
+HOY ES: ${mexicoTime}
+
+⚠️ INSTRUCCIÓN OBLIGATORIA:
+- Si preguntan "qué día es", "qué hora es", "hoy es" → USA ESTA FECHA
+- NO uses octubre 2023 (tu entrenamiento)
+- Esta es la fecha/hora REAL del servidor
 
 ═══════════════════════════════════════════════════════════════
-CONTEXTO TEMPORAL ACTUAL
-═══════════════════════════════════════════════════════════════
 
-Fecha y hora EXACTA en este momento (Mexico City):
-${mexicoTime}
+${basePrompt}
 
-INSTRUCCIÓN: Si el usuario pregunta "qué día es hoy" o "qué hora es", usa ESTA información exacta.
-NO uses tu conocimiento de entrenamiento. Esta es la fecha/hora real del sistema.
-
-═══════════════════════════════════════════════════════════════
 `;
-    console.log('[ORCH] ✓ Temporal context injected:', mexicoTime);
+    
+    console.log('[ORCH] ✅ FIX-1: Temporal context FIRST:', mexicoTime);
     
     // 0.5 MODE-AWARE INSTRUCTIONS (P0 CORE)
     if (modeClassification) {
