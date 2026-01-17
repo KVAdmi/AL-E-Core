@@ -542,16 +542,51 @@ export class Orchestrator {
         console.log(`[ORCH] 🔧 Tools structure: ${JSON.stringify(tools, null, 2)}`);
       }
       
+      // ✅ FIX 2: Detectar si tools son OBLIGATORIAS según keywords
+      const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
+      const userContent = lastUserMessage?.content?.toLowerCase() || '';
+      
+      const toolsRequired = tools.length > 0 && (
+        userContent.includes('revisa') || 
+        userContent.includes('consulta') || 
+        userContent.includes('busca') ||
+        userContent.includes('agenda') ||
+        userContent.includes('correo') ||
+        userContent.includes('email') ||
+        userContent.includes('búsqueda') ||
+        userContent.includes('buscando') ||
+        userContent.includes('encuentra')
+      );
+      
+      console.log(`[ORCH] 🔧 Tools required: ${toolsRequired} (based on keywords in user message)`);
+      
       // ✅ USAR GROQ SIEMPRE - Groq Llama 3.3 70B soporta tool calling nativo
       const { callGroqChat } = await import('./providers/groqProvider');
       const response = await callGroqChat({
         messages,
         systemPrompt: iteration === 1 ? systemPrompt : undefined, // Solo primera vez
         tools,
-        toolChoice: 'auto',
+        toolChoice: 'auto',  // Groq solo soporta 'auto' | 'none'
         model,
         maxTokens: 600
       });
+      
+      // ✅ VALIDACIÓN: Si tools eran OBLIGATORIAS y NO se ejecutaron → BLOQUEAR
+      if (toolsRequired && (!response.raw.tool_calls || response.raw.tool_calls.length === 0)) {
+        console.error(`[ORCH] ❌ TOOL REQUIRED BUT NOT EXECUTED`);
+        console.error(`[ORCH] User asked: "${userContent.substring(0, 100)}"`);
+        console.error(`[ORCH] LLM returned text without calling tools - BLOCKED`);
+        
+        return {
+          content: `No pude consultar la información solicitada. El sistema requiere ejecutar una búsqueda/consulta para responder, pero no se pudo completar. Por favor intenta de nuevo.`,
+          toolExecutions: [{
+            tool: 'none',
+            args: {},
+            result: { success: false, error: 'TOOL_REQUIRED_NOT_EXECUTED' },
+            success: false
+          }]
+        };
+      }
       
       // Si no hay tool_calls, retornar respuesta final
       if (!response.raw.tool_calls || response.raw.tool_calls.length === 0) {
