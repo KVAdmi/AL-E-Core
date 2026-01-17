@@ -1091,6 +1091,12 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
   let userEmail: string | undefined;
   let userDisplayName: string | undefined;
   
+  // ✅ FIX 3: Declarar userId en scope del endpoint para memory extraction
+  let userId: string | null = null;
+  let finalWorkspaceId: string = env.defaultWorkspaceId;
+  let message: string = '';  // Mensaje del usuario para memory extraction
+  let finalAnswer: string = '';  // Respuesta del assistant para memory extraction
+  
   try {
     console.log('\n[CHAT_V2] ==================== NUEVA SOLICITUD ====================');
     
@@ -1102,12 +1108,11 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
     // 1. VALIDAR PAYLOAD MÍNIMO
     // ============================================
     
-    const { 
-      message, 
-      sessionId: requestSessionId, 
-      workspaceId, 
-      meta 
-    } = req.body;
+    // Extraer message y otros del body
+    message = req.body.message;
+    const requestSessionId = req.body.sessionId;
+    const workspaceId = req.body.workspaceId;
+    const meta = req.body.meta;
     
     // P0: Extraer userEmail y userDisplayName del payload (multi-user collaboration)
     userEmail = req.body.userEmail;
@@ -1154,7 +1159,7 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
     // ============================================
     
     const authenticatedUserId = getUserId(req);
-    const userId = authenticatedUserId || req.body.userId;
+    userId = authenticatedUserId || req.body.userId;  // ← Asignar a variable del scope superior
     const user_id_uuid = req.user?.id || null;
     
     if (!userId || typeof userId !== 'string') {
@@ -1219,7 +1224,7 @@ router.post('/chat/v2', optionalAuth, async (req, res) => {
     // 3. RESOLVER SESSION (crear si no existe)
     // ============================================
     
-    const finalWorkspaceId = workspaceId || env.defaultWorkspaceId;
+    finalWorkspaceId = workspaceId || env.defaultWorkspaceId;  // ← Asignar a variable del scope superior
     
     if (requestSessionId && isUuid(requestSessionId)) {
       // Session existente
@@ -1626,7 +1631,7 @@ Ejemplo malo: "Visita https://... para ver el precio."`
       orchestratorContext.toolError  // P0: Pasar código de error OAuth
     );
     
-    const finalAnswer = guardrailResult.sanitized 
+    finalAnswer = guardrailResult.sanitized   // ← Asignar a variable del scope superior
       ? guardrailResult.text 
       : llmResult.response.text;
     
@@ -1718,6 +1723,27 @@ Ejemplo malo: "Visita https://... para ver el precio."`
     console.log('[CHAT_V2] ==================== FIN SOLICITUD ====================\n');
     
     // ============================================
+    // 11.5. ✅ FIX 3: GUARDAR MEMORIA NUEVA (PRODUCCIÓN REAL)
+    // ============================================
+    
+    if (userId && userId !== 'guest') {
+      try {
+        console.log('[CHAT_V2] 🧠 Extracting memories...');
+        const { extractAndSaveMemories } = await import('../services/memoryExtractor');
+        
+        await extractAndSaveMemories(
+          userId,
+          finalWorkspaceId,
+          message,  // Mensaje original del usuario
+          finalAnswer  // Respuesta del assistant
+        );
+      } catch (memError: any) {
+        console.error('[CHAT_V2] ❌ Error extracting memories:', memError.message);
+        // NO bloquear respuesta si falla memory extraction
+      }
+    }
+    
+    // ============================================
     // 12. RESPONDER AL FRONTEND
     // ============================================
     
@@ -1726,7 +1752,7 @@ Ejemplo malo: "Visita https://... para ver el precio."`
       speak_text: markdownToSpeakable(finalAnswer),
       should_speak: shouldSpeak(finalAnswer),
       session_id: sessionId,
-      memories_to_add: [], // TODO: Implementar extracción de memories
+      memories_to_add: [],  // Deprecated - se guarda automáticamente via memoryExtractor
       sources: knowledgeSources.length > 0 ? knowledgeSources : undefined, // Agregar sources si hay
       metadata: {
         latency_ms,
