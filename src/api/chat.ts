@@ -756,35 +756,49 @@ Ejemplo malo: "Visita https://... para ver el precio."` },
       
       const needsReferee = evasionCheck.needsReferee || evidenceMismatch;
       
+      // ✅ FIX 4: Detectar modo voz y BLOQUEAR OpenAI referee
+      const isVoiceMode = req.body.voice === true || 
+                          req.body.mode === 'voice' || 
+                          req.headers['x-channel'] === 'voice';
+      
       if (needsReferee && process.env.OPENAI_ROLE === 'referee') {
-        try {
-          console.log(`[ORCH] ⚖️ OPENAI REFEREE INVOKED - reason=${evasionCheck.reason || 'evidence_mismatch'}`);
-          
-          const refereeResult = await invokeOpenAIReferee({
-            userPrompt: userContent,
-            groqResponse: llmResponse.response.text,
-            toolResults: orchestratorContext.toolResult ? { result: orchestratorContext.toolResult } : undefined,
-            systemState: {
-              tool_used: orchestratorContext.toolUsed,
-              tool_failed: orchestratorContext.toolFailed,
-              web_search: orchestratorContext.webSearchUsed,
-              web_results: orchestratorContext.webResultsCount
-            },
-            detectedIssue: evasionCheck.reason || 'evidence_mismatch'
-          });
-          
-          // Reemplazar respuesta con la del referee
-          llmResponse.response.text = refereeResult.text;
-          refereeUsed = true;
-          refereeReason = refereeResult.reason;
-          refereeCost = refereeResult.cost_estimated_usd;
-          refereeLatency = refereeResult.latency_ms;
-          
-          console.log(`[ORCH] ✅ REFEREE CORRECTED - primary_model=groq fallback_model=openai fallback_reason=${refereeReason}`);
-          
-        } catch (refereeError: any) {
-          console.error(`[ORCH] ❌ REFEREE FAILED: ${refereeError.message}`);
-          // Continuar con respuesta de Groq (no bloqueante)
+        
+        // ✅ BLOQUEAR OpenAI en voz (SOLO Groq en voz)
+        if (isVoiceMode) {
+          console.warn(`[ORCH] ⚠️ REFEREE BLOCKED - Voice mode detected (OpenAI forbidden in voice)`);
+          console.warn(`[ORCH] Using Groq response directly - no OpenAI correction`);
+          // NO invocar referee - usar respuesta de Groq directamente
+        } else {
+          // Modo texto: permitir referee
+          try {
+            console.log(`[ORCH] ⚖️ OPENAI REFEREE INVOKED - channel=text, reason=${evasionCheck.reason || 'evidence_mismatch'}`);
+            
+            const refereeResult = await invokeOpenAIReferee({
+              userPrompt: userContent,
+              groqResponse: llmResponse.response.text,
+              toolResults: orchestratorContext.toolResult ? { result: orchestratorContext.toolResult } : undefined,
+              systemState: {
+                tool_used: orchestratorContext.toolUsed,
+                tool_failed: orchestratorContext.toolFailed,
+                web_search: orchestratorContext.webSearchUsed,
+                web_results: orchestratorContext.webResultsCount
+              },
+              detectedIssue: evasionCheck.reason || 'evidence_mismatch'
+            });
+            
+            // Reemplazar respuesta con la del referee
+            llmResponse.response.text = refereeResult.text;
+            refereeUsed = true;
+            refereeReason = refereeResult.reason;
+            refereeCost = refereeResult.cost_estimated_usd;
+            refereeLatency = refereeResult.latency_ms;
+            
+            console.log(`[ORCH] ✅ REFEREE CORRECTED - channel=text, primary_model=groq, fallback_model=openai, fallback_reason=${refereeReason}`);
+            
+          } catch (refereeError: any) {
+            console.error(`[ORCH] ❌ REFEREE FAILED: ${refereeError.message}`);
+            // Continuar con respuesta de Groq (no bloqueante)
+          }
         }
       }
       
