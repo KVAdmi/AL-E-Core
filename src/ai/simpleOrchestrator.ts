@@ -15,6 +15,7 @@ import { executeTool } from './tools/toolRouter';
 import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../db/supabase';
+import { canCallOpenAI, recordOpenAICall, estimateOpenAICost, getOpenAIUsageStats } from '../utils/openaiRateLimiter';
 import {
   detectGroqEvasion,
   detectEvidenceMismatch,
@@ -44,10 +45,13 @@ interface SimpleOrchestratorResponse {
     model?: string;
     finish_reason?: string;
     groq_failed?: boolean;
+    openai_failed?: boolean;
     referee_invoked?: boolean;
     referee_reason?: string;
     referee_failed?: boolean;
     error_handled?: boolean;
+    rate_limit_exceeded?: boolean;
+    limit?: string;
   };
 }
 
@@ -296,76 +300,108 @@ RECUERDA: Si no ejecutaste un tool, NO digas que lo hiciste. La verdad siempre.`
       
       let response;
       let groqFailed = false;
+      let usingOpenAI = false;
       
-      try {
-        console.log('[ORCH] 🚀 Llamando a Groq con tool calling...');
-        response = await groq.chat.completions.create({
-          model: 'llama-3.3-70b-versatile',
-          max_tokens: 4096,
-          messages,
-          tools: AVAILABLE_TOOLS,
-          tool_choice: 'auto',
-        });
+      // 🔥 P0 FIX: Usar OpenAI directamente para tool calling
+      // Groq llama-3.3-70b tiene problemas generando tool calls válidos
+      
+      // 🔒 P0 COST CONTROL: Verificar límites ANTES de llamar
+      const rateLimitCheck = canCallOpenAI();
+      if (!rateLimitCheck.allowed) {
+        console.error('[OPENAI LIMITER] ❌ Límite excedido:', rateLimitCheck.reason);
+        console.error('[OPENAI LIMITER] � Stats:', JSON.stringify(getOpenAIUsageStats(), null, 2));
         
-        console.log('[SIMPLE ORCH] Finish reason:', response.choices[0]?.finish_reason);
-      } catch (groqError: any) {
-        console.error('[ORCH] ❌ Groq tool calling failed:', groqError.message);
-        console.error('[ORCH] Error code:', groqError.code);
-        console.error('[ORCH] Error type:', groqError.type);
-        groqFailed = true;
-        
-        // 🔥 FALLBACK A OPENAI REFEREE
-        console.log('[REFEREE] 🚨 Groq failed, activating OpenAI Referee...');
-        
+        // Fallback a Groq sin tools
+        console.log('[FALLBACK] 🚨 OpenAI limit exceeded, using Groq without tools...');
         try {
-          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-          
-          const refereeResponse = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+          response = await groq.chat.completions.create({
+            model: 'llama-3.3-70b-versatile',
             max_tokens: 2048,
             messages: [
               {
                 role: 'system',
-                content: `Eres ${assistantName}, asistente personal de ${userNickname}. 
-                
-El sistema de tools falló temporalmente. Responde de manera natural y útil sin inventar datos.
-Si necesitas información externa (clima, noticias, tipo de cambio), di: "Estoy teniendo problemas para consultar esa información ahora mismo. ¿Quieres que lo intente de nuevo en un momento?"
-
-NUNCA inventes datos. NUNCA expongas errores técnicos. Sé conversacional y honesta.`,
+                content: `Eres ${assistantName}, asistente personal de ${userNickname}. Los tools no están disponibles temporalmente. Responde de manera natural sin inventar datos.`,
               },
               { role: 'user', content: request.userMessage },
             ],
           });
-          
-          const executionTime = Date.now() - startTime;
-          
+        } catch (groqFallbackError: any) {
           return {
-            answer: refereeResponse.choices[0]?.message?.content || 'Tuve un problema técnico. ¿Podrías intentar de nuevo?',
-            toolsUsed: [],
-            executionTime,
-            metadata: {
-              model: 'gpt-4o-mini (referee)',
-              finish_reason: 'stop',
-              groq_failed: true,
-              referee_invoked: true,
-              referee_reason: 'groq_tool_calling_failed',
-            },
-          };
-        } catch (refereeError: any) {
-          console.error('[REFEREE] ❌ OpenAI Referee also failed:', refereeError.message);
-          
-          // Último recurso: mensaje seguro
-          return {
-            answer: 'Estoy teniendo problemas técnicos en este momento. ¿Podrías intentar de nuevo en unos segundos?',
+            answer: 'Estoy teniendo problemas técnicos. ¿Puedes intentar de nuevo en unos segundos?',
             toolsUsed: [],
             executionTime: Date.now() - startTime,
-            metadata: {
-              model: 'fallback',
-              groq_failed: true,
-              referee_failed: true,
-              error_handled: true,
-            },
+            metadata: { model: 'fallback', rate_limit_exceeded: true, limit: rateLimitCheck.limit },
           };
+        }
+      } else {
+        try {
+          console.log('[ORCH] 🚀 Usando OpenAI para tool calling...');
+          console.log('[OPENAI LIMITER] ✅ Rate limit OK - Remaining:', {
+            perMinute: getOpenAIUsageStats().remainingCalls.perMinute,
+            perHour: getOpenAIUsageStats().remainingCalls.perHour,
+            budget: `$${getOpenAIUsageStats().remainingBudget.toFixed(2)}`
+          });
+          
+          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+          
+          usingOpenAI = true;
+          response = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            max_tokens: 600, // P0 LIMIT: maxTokensPerCall
+            messages: messages as any,
+            tools: AVAILABLE_TOOLS as any,
+            tool_choice: 'auto',
+          });
+          
+          // Registrar uso y costo
+          const inputTokens = response.usage?.prompt_tokens || 0;
+          const outputTokens = response.usage?.completion_tokens || 0;
+          const estimatedCost = estimateOpenAICost(inputTokens, outputTokens);
+          recordOpenAICall(inputTokens + outputTokens, estimatedCost);
+          
+          console.log('[ORCH] ✅ OpenAI tool calling - Finish reason:', response.choices[0]?.finish_reason);
+          console.log('[ORCH] tool_call_attempted =', response.choices[0]?.finish_reason === 'tool_calls');
+        } catch (openaiError: any) {
+          console.error('[ORCH] ❌ OpenAI tool calling failed:', openaiError.message);
+          console.error('[ORCH] Error code:', openaiError.code);
+          groqFailed = true;
+          
+          // Último recurso: Groq sin tools (solo texto)
+          console.log('[FALLBACK] 🚨 OpenAI failed, trying Groq without tools...');
+          
+          try {
+            response = await groq.chat.completions.create({
+              model: 'llama-3.3-70b-versatile',
+              max_tokens: 2048,
+              messages: [
+                {
+                  role: 'system',
+                  content: `Eres ${assistantName}, asistente personal de ${userNickname}. 
+                  
+Los tools no están disponibles temporalmente. Responde de manera natural.
+Si necesitas información externa (clima, correo, etc), di: "Necesito consultar esa información pero tengo problemas técnicos ahora. ¿Intentamos en un momento?"
+
+NUNCA inventes datos.`,
+                },
+                { role: 'user', content: request.userMessage },
+              ],
+            });
+          } catch (groqFallbackError: any) {
+            console.error('[FALLBACK] ❌ Groq fallback failed:', groqFallbackError.message);
+            
+            // Último último recurso
+            return {
+              answer: 'Estoy teniendo problemas técnicos. ¿Puedes intentar de nuevo en unos segundos?',
+              toolsUsed: [],
+              executionTime: Date.now() - startTime,
+              metadata: {
+                model: 'fallback',
+                openai_failed: true,
+                groq_failed: true,
+                error_handled: true,
+              },
+            };
+          }
         }
       }
       
@@ -432,15 +468,27 @@ NUNCA inventes datos. NUNCA expongas errores técnicos. Sé conversacional y hon
           }
         }
         
-        response = await groq.chat.completions.create({
-          model: 'llama-3.3-70b-versatile',
-          max_tokens: 4096,
-          messages,
-          tools: AVAILABLE_TOOLS,
-          tool_choice: 'auto',
-        });
+        // Segunda llamada con resultados de tools (usar el mismo provider)
+        if (usingOpenAI) {
+          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+          response = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            max_tokens: 4096,
+            messages: messages as any,
+            tools: AVAILABLE_TOOLS as any,
+            tool_choice: 'auto',
+          });
+        } else {
+          response = await groq.chat.completions.create({
+            model: 'llama-3.3-70b-versatile',
+            max_tokens: 4096,
+            messages,
+            tools: AVAILABLE_TOOLS,
+            tool_choice: 'auto',
+          });
+        }
         
-        console.log('[SIMPLE ORCH] Finish reason:', response.choices[0]?.finish_reason);
+        console.log('[ORCH] Segunda llamada - Finish reason:', response.choices[0]?.finish_reason);
       }
       
       const executionTime = Date.now() - startTime;
