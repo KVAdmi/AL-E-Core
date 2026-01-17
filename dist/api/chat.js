@@ -655,32 +655,45 @@ Ejemplo malo: "Visita https://... para ver el precio."` },
                 ? (0, openaiReferee_1.detectEvidenceMismatch)(llmResponse.response.text, { toolResult: orchestratorContext.toolResult })
                 : false;
             const needsReferee = evasionCheck.needsReferee || evidenceMismatch;
+            // ✅ FIX 4: Detectar modo voz y BLOQUEAR OpenAI referee
+            const isVoiceMode = req.body.voice === true ||
+                req.body.mode === 'voice' ||
+                req.headers['x-channel'] === 'voice';
             if (needsReferee && process.env.OPENAI_ROLE === 'referee') {
-                try {
-                    console.log(`[ORCH] ⚖️ OPENAI REFEREE INVOKED - reason=${evasionCheck.reason || 'evidence_mismatch'}`);
-                    const refereeResult = await (0, openaiReferee_1.invokeOpenAIReferee)({
-                        userPrompt: userContent,
-                        groqResponse: llmResponse.response.text,
-                        toolResults: orchestratorContext.toolResult ? { result: orchestratorContext.toolResult } : undefined,
-                        systemState: {
-                            tool_used: orchestratorContext.toolUsed,
-                            tool_failed: orchestratorContext.toolFailed,
-                            web_search: orchestratorContext.webSearchUsed,
-                            web_results: orchestratorContext.webResultsCount
-                        },
-                        detectedIssue: evasionCheck.reason || 'evidence_mismatch'
-                    });
-                    // Reemplazar respuesta con la del referee
-                    llmResponse.response.text = refereeResult.text;
-                    refereeUsed = true;
-                    refereeReason = refereeResult.reason;
-                    refereeCost = refereeResult.cost_estimated_usd;
-                    refereeLatency = refereeResult.latency_ms;
-                    console.log(`[ORCH] ✅ REFEREE CORRECTED - primary_model=groq fallback_model=openai fallback_reason=${refereeReason}`);
+                // ✅ BLOQUEAR OpenAI en voz (SOLO Groq en voz)
+                if (isVoiceMode) {
+                    console.warn(`[ORCH] ⚠️ REFEREE BLOCKED - Voice mode detected (OpenAI forbidden in voice)`);
+                    console.warn(`[ORCH] Using Groq response directly - no OpenAI correction`);
+                    // NO invocar referee - usar respuesta de Groq directamente
                 }
-                catch (refereeError) {
-                    console.error(`[ORCH] ❌ REFEREE FAILED: ${refereeError.message}`);
-                    // Continuar con respuesta de Groq (no bloqueante)
+                else {
+                    // Modo texto: permitir referee
+                    try {
+                        console.log(`[ORCH] ⚖️ OPENAI REFEREE INVOKED - channel=text, reason=${evasionCheck.reason || 'evidence_mismatch'}`);
+                        const refereeResult = await (0, openaiReferee_1.invokeOpenAIReferee)({
+                            userPrompt: userContent,
+                            groqResponse: llmResponse.response.text,
+                            toolResults: orchestratorContext.toolResult ? { result: orchestratorContext.toolResult } : undefined,
+                            systemState: {
+                                tool_used: orchestratorContext.toolUsed,
+                                tool_failed: orchestratorContext.toolFailed,
+                                web_search: orchestratorContext.webSearchUsed,
+                                web_results: orchestratorContext.webResultsCount
+                            },
+                            detectedIssue: evasionCheck.reason || 'evidence_mismatch'
+                        });
+                        // Reemplazar respuesta con la del referee
+                        llmResponse.response.text = refereeResult.text;
+                        refereeUsed = true;
+                        refereeReason = refereeResult.reason;
+                        refereeCost = refereeResult.cost_estimated_usd;
+                        refereeLatency = refereeResult.latency_ms;
+                        console.log(`[ORCH] ✅ REFEREE CORRECTED - channel=text, primary_model=groq, fallback_model=openai, fallback_reason=${refereeReason}`);
+                    }
+                    catch (refereeError) {
+                        console.error(`[ORCH] ❌ REFEREE FAILED: ${refereeError.message}`);
+                        // Continuar con respuesta de Groq (no bloqueante)
+                    }
                 }
             }
             // ============================================
@@ -940,6 +953,11 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
     // P0: Declarar userEmail y userDisplayName en scope del endpoint
     let userEmail;
     let userDisplayName;
+    // ✅ FIX 3: Declarar userId en scope del endpoint para memory extraction
+    let userId = null;
+    let finalWorkspaceId = env_1.env.defaultWorkspaceId;
+    let message = ''; // Mensaje del usuario para memory extraction
+    let finalAnswer = ''; // Respuesta del assistant para memory extraction
     try {
         console.log('\n[CHAT_V2] ==================== NUEVA SOLICITUD ====================');
         // CRITICAL: Verificar que OpenAI está bloqueado
@@ -948,7 +966,11 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         // ============================================
         // 1. VALIDAR PAYLOAD MÍNIMO
         // ============================================
-        const { message, sessionId: requestSessionId, workspaceId, meta } = req.body;
+        // Extraer message y otros del body
+        message = req.body.message;
+        const requestSessionId = req.body.sessionId;
+        const workspaceId = req.body.workspaceId;
+        const meta = req.body.meta;
         // P0: Extraer userEmail y userDisplayName del payload (multi-user collaboration)
         userEmail = req.body.userEmail;
         userDisplayName = req.body.userDisplayName;
@@ -987,7 +1009,7 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         // 2. RESOLVER USER_ID (JWT o body)
         // ============================================
         const authenticatedUserId = (0, auth_1.getUserId)(req);
-        const userId = authenticatedUserId || req.body.userId;
+        userId = authenticatedUserId || req.body.userId; // ← Asignar a variable del scope superior
         const user_id_uuid = req.user?.id || null;
         if (!userId || typeof userId !== 'string') {
             return res.status(400).json({
@@ -1037,7 +1059,7 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         // ============================================
         // 3. RESOLVER SESSION (crear si no existe)
         // ============================================
-        const finalWorkspaceId = workspaceId || env_1.env.defaultWorkspaceId;
+        finalWorkspaceId = workspaceId || env_1.env.defaultWorkspaceId; // ← Asignar a variable del scope superior
         if (requestSessionId && (0, helpers_1.isUuid)(requestSessionId)) {
             // Session existente
             sessionId = requestSessionId;
@@ -1383,7 +1405,7 @@ Ejemplo malo: "Visita https://... para ver el precio."`
         // ============================================
         const guardrailResult = (0, noFakeTools_1.applyAntiLieGuardrail)(llmResult.response.text, orchestratorContext.webSearchUsed, orchestratorContext.intent, orchestratorContext.toolFailed, orchestratorContext.toolError // P0: Pasar código de error OAuth
         );
-        const finalAnswer = guardrailResult.sanitized
+        finalAnswer = guardrailResult.sanitized // ← Asignar a variable del scope superior
             ? guardrailResult.text
             : llmResult.response.text;
         if (guardrailResult.sanitized) {
@@ -1462,6 +1484,22 @@ Ejemplo malo: "Visita https://... para ver el precio."`
         console.log(`[CHAT_V2] ✓ Request logged - ${latency_ms}ms`);
         console.log('[CHAT_V2] ==================== FIN SOLICITUD ====================\n');
         // ============================================
+        // 11.5. ✅ FIX 3: GUARDAR MEMORIA NUEVA (PRODUCCIÓN REAL)
+        // ============================================
+        if (userId && userId !== 'guest') {
+            try {
+                console.log('[CHAT_V2] 🧠 Extracting memories...');
+                const { extractAndSaveMemories } = await Promise.resolve().then(() => __importStar(require('../services/memoryExtractor')));
+                await extractAndSaveMemories(userId, finalWorkspaceId, message, // Mensaje original del usuario
+                finalAnswer // Respuesta del assistant
+                );
+            }
+            catch (memError) {
+                console.error('[CHAT_V2] ❌ Error extracting memories:', memError.message);
+                // NO bloquear respuesta si falla memory extraction
+            }
+        }
+        // ============================================
         // 12. RESPONDER AL FRONTEND
         // ============================================
         return res.json({
@@ -1469,7 +1507,7 @@ Ejemplo malo: "Visita https://... para ver el precio."`
             speak_text: (0, textCleaners_1.markdownToSpeakable)(finalAnswer),
             should_speak: (0, textCleaners_1.shouldSpeak)(finalAnswer),
             session_id: sessionId,
-            memories_to_add: [], // TODO: Implementar extracción de memories
+            memories_to_add: [], // Deprecated - se guarda automáticamente via memoryExtractor
             sources: knowledgeSources.length > 0 ? knowledgeSources : undefined, // Agregar sources si hay
             metadata: {
                 latency_ms,
@@ -1482,7 +1520,17 @@ Ejemplo malo: "Visita https://... para ver el precio."`
         });
     }
     catch (error) {
-        console.error('[CHAT_V2] ❌ Error:', error);
+        console.error('[CHAT_V2] ❌ CRITICAL ERROR:', {
+            error: error.message,
+            error_type: error.name,
+            stack: error.stack?.substring(0, 500),
+            intent: orchestratorContext?.intent?.intent_type,
+            tool_used: orchestratorContext?.toolUsed,
+            tool_failed: orchestratorContext?.toolFailed,
+            timestamp: new Date().toISOString(),
+            user_id: userId,
+            session_id: sessionId
+        });
         const latency_ms = Date.now() - startTime;
         // P0: Log obligatorio de errores con contexto completo
         if (sessionId) {
@@ -1492,11 +1540,13 @@ Ejemplo malo: "Visita https://... para ver el precio."`
                 error_type: error.name || 'UnknownError',
                 intent_detected: orchestratorContext?.intent?.intent_type,
                 tool_expected: orchestratorContext?.toolUsed,
-                tool_executed: false,
+                tool_executed: orchestratorContext?.toolUsed !== 'none',
+                tool_failed: orchestratorContext?.toolFailed || false,
                 failure_reason: error.code === 'ETIMEDOUT' ? 'TIMEOUT' :
                     error.message?.includes('OAUTH') ? 'OAUTH_ERROR' :
                         error.message?.includes('provider') ? 'PROVIDER_TIMEOUT' :
-                            'UNKNOWN_ERROR',
+                            error.message?.includes('TOOL_REQUIRED') ? 'TOOL_NOT_EXECUTED' :
+                                'UNKNOWN_ERROR',
                 stack: typeof error.stack === 'string' ? error.stack.substring(0, 1000) : undefined // Truncar stack
             };
             await supabase_1.supabase.from('ae_requests').insert({

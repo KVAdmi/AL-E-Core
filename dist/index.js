@@ -193,7 +193,10 @@ app.get("/health", async (req, res) => {
 app.use("/_health", health_1.default); // Health checks protegidos
 // CRÍTICO: Truth Orchestrator PRIMERO (reemplaza /chat con truth layer)
 app.use("/api/ai", require("./api/truthChat").default); // Truth Chat (Truth Layer + Authority Matrix + LOGS)
-app.use("/api/ai/legacy", chat_1.default); // Old endpoint (sin Truth Layer) - DEPRECATED
+// v2 real (NO legacy): /api/ai/chat/v2
+app.use("/api/ai", chat_1.default);
+// Legacy explícito (si se llega a usar): /api/ai/legacy/chat
+app.use("/api/ai/legacy", chat_1.default); // DEPRECATED
 app.use("/api/files", files_1.default); // Endpoint de ingesta estructural de documentos
 app.use("/api/voice", voice_1.voiceRouter);
 app.use("/api/sessions", sessions_1.sessionsRouter);
@@ -226,7 +229,7 @@ app.use("/api/events", events_1.default); // KUNNA events (multi-app service-to-
 app.use("/api/decide", decide_1.default); // KUNNA rule engine (deterministic actions)
 // Log simple de verificación
 console.log("[DEBUG] healthRouter montado en /_health");
-console.log("[DEBUG] chatRouter (v2) montado en /api/ai");
+console.log("[DEBUG] chatRouter (v2 real) montado en /api/ai (incluye /chat/v2)");
 console.log("[DEBUG] filesRouter (ingest) montado en /api/files");
 console.log("[DEBUG] voiceRouter montado en /api/voice");
 console.log("[DEBUG] sessionsRouter montado en /api/sessions");
