@@ -494,25 +494,21 @@ export class Orchestrator {
   
   /**
    * STEP 6: Decidir modelo (model decision)
-   * Default: Groq (llama3-70b) - rápido y económico
-   * Pro: Groq (mixtral) para large context
-   * Fallback: OpenAI si Groq falla
+   * Default: Groq (llama-3.3-70b) - rápido, económico, 128k context
+   * Fallback: Fireworks/Together si Groq falla
    */
   private decideModel(userMessage: string, chunks: Array<any>, memories: Array<any>): { modelSelected: string; modelReason?: string } {
     const lowerMsg = userMessage.toLowerCase();
     
-    // Large context: usa Mixtral (32k context window)
-    if (chunks.length > 3 || memories.length > 7) {
-      return {
-        modelSelected: 'mixtral-8x7b-32768',
-        modelReason: 'Large context detected (Groq Mixtral 32k)'
-      };
-    }
+    // Llama 3.3 tiene 128k context window - ya no necesitamos Mixtral
+    // Large context o standard: siempre Llama 3.3
+    const isLargeContext = chunks.length > 3 || memories.length > 7;
     
-    // Default: Llama3 70B (más rápido y capaz)
     return {
       modelSelected: 'llama-3.3-70b-versatile',
-      modelReason: 'Standard conversation (Groq Llama3 70B)'
+      modelReason: isLargeContext 
+        ? 'Large context (Groq Llama 3.3 128k)' 
+        : 'Standard conversation (Groq Llama 3.3 70B)'
     };
   }
   
