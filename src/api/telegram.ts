@@ -336,17 +336,74 @@ router.post('/webhook/:botId/:secret', async (req, res) => {
         console.log(`[TELEGRAM] ✓ Mensaje guardado: ${messageId}`);
       }
       
-      // TODO: Enviar a orchestrator para procesamiento
-      // Por ahora, responder con mensaje simple
+      // ✅ FIX 6: PROCESAR CON ORCHESTRATOR (MEMORIA REAL)
       try {
+        console.log(`[TELEGRAM] 🧠 Processing with orchestrator...`);
+        
+        const chatResponse = await fetch(`http://localhost:${process.env.PORT || 3001}/api/ai/chat/v2`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-channel': 'telegram'  // ← Marcar como telegram
+          },
+          body: JSON.stringify({
+            userId: bot.owner_user_id,
+            sessionId: null,  // Nueva sesión por mensaje (o mantener conversación)
+            workspaceId: 'al-eon',
+            mode: 'universal',
+            message: text,  // ← Mensaje del usuario
+            userDisplayName: chatName  // ← Nombre para multi-user
+          })
+        });
+        
+        if (!chatResponse.ok) {
+          throw new Error(`Chat API error: ${chatResponse.statusText}`);
+        }
+        
+        const chatData = await chatResponse.json();
+        console.log(`[TELEGRAM] ✓ Chat response received - session: ${chatData.session_id}`);
+        
+        // Enviar respuesta por Telegram
         const botToken = decrypt(bot.bot_token_enc);
         const telegramBot = new TelegramBot(botToken);
         
-        await telegramBot.sendMessage(chatId, `Recibí tu mensaje: "${text}"\n\nIntegración con AL-E en proceso...`);
+        // Limitar respuesta a 4096 caracteres (límite de Telegram)
+        let responseText = chatData.answer;
+        if (responseText.length > 4000) {
+          responseText = responseText.substring(0, 3997) + '...';
+        }
         
-        console.log(`[TELEGRAM] ✓ Respuesta enviada a ${chatId}`);
-      } catch (error) {
-        console.error('[TELEGRAM] Error sending response:', error);
+        await telegramBot.sendMessage(chatId, responseText, {
+          parse_mode: 'Markdown'
+        });
+        
+        console.log(`[TELEGRAM] ✓ Response sent to ${chatId}`);
+        
+        // Guardar mensaje outbound
+        await supabase.from('telegram_messages').insert({
+          owner_user_id: bot.owner_user_id,
+          bot_id: botId,
+          chat_id: chatId,
+          direction: 'outbound',
+          text: chatData.answer,
+          status: 'sent',
+          metadata: {
+            session_id: chatData.session_id,
+            with_memory: true  // ✅ Confirmación de memoria
+          }
+        });
+        
+      } catch (error: any) {
+        console.error('[TELEGRAM] ❌ Error processing:', error);
+        
+        // Respuesta de error
+        try {
+          const botToken = decrypt(bot.bot_token_enc);
+          const telegramBot = new TelegramBot(botToken);
+          await telegramBot.sendMessage(chatId, 'Ocurrió un error. Intenta de nuevo.');
+        } catch (sendError) {
+          console.error('[TELEGRAM] ❌ Error sending error message:', sendError);
+        }
       }
     }
 
