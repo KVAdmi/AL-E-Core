@@ -195,8 +195,23 @@ export async function extractTextFromImage(
   try {
     console.log('[DOCUMENT TOOLS] 🔍 Extrayendo texto de imagen:', imageUrl);
     
-    // Procesar imagen con Tesseract
-    const result = await Tesseract.recognize(imageUrl, 'spa', {
+    // P0 FIX: Descargar imagen primero (Tesseract no puede fetch URLs en servidor)
+    let imageBuffer: Buffer;
+    try {
+      const response = await fetch(imageUrl);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      imageBuffer = Buffer.from(arrayBuffer);
+      console.log('[DOCUMENT TOOLS] ✅ Imagen descargada:', imageBuffer.length, 'bytes');
+    } catch (fetchError: any) {
+      console.error('[DOCUMENT TOOLS] ❌ Error descargando imagen:', fetchError.message);
+      throw new Error(`No se pudo descargar la imagen: ${fetchError.message}`);
+    }
+    
+    // Procesar imagen con Tesseract (desde buffer)
+    const result = await Tesseract.recognize(imageBuffer, 'spa', {
       logger: (m) => console.log('[OCR]', m)
     });
     
