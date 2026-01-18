@@ -302,8 +302,9 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
   }
 };
 
-// Montar SOLO rutas legacy/truth. NO montar /chat/v2 aquí.
+// Montar rutas legacy/truth + V2 para frontend
 router.post('/truth-chat', optionalAuth, handleTruthChat);
 router.post('/chat', optionalAuth, handleTruthChat);
+router.post('/chat/v2', optionalAuth, handleTruthChat); // ← FIX: Frontend llama /v2
 
 export default router;
