@@ -4,7 +4,7 @@
  * 🔥 REEMPLAZA S3 - USA SUPABASE STORAGE
  */
 
-import { supabase } from '../config/supabase';
+import { supabase } from '../db/supabase';
 
 const BUCKET = 'meetings-audio';
 
