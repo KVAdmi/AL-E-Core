@@ -30,6 +30,7 @@ const groq = new Groq({
 interface SimpleOrchestratorRequest {
   userMessage: string;
   userId: string;
+  sessionId?: string; // ✅ FASE 2: sessionId para memoria persistente
   userEmail?: string;
   conversationHistory?: Array<{ role: string; content: string }>;
   requestId?: string;
@@ -39,6 +40,7 @@ interface SimpleOrchestratorRequest {
 
 interface SimpleOrchestratorResponse {
   answer: string;
+  session_id?: string | null; // ✅ FASE 2: Retornar sessionId para frontend
   toolsUsed: string[];
   executionTime: number;
   metadata?: {
@@ -50,6 +52,7 @@ interface SimpleOrchestratorResponse {
     referee_reason?: string;
     stateless_mode?: boolean;
     server_now_iso?: string;
+    memories_loaded?: number; // ✅ FASE 2: Debug info
     groq_failed?: boolean;
     openai_failed?: boolean;
     referee_invoked?: boolean;
@@ -744,7 +747,8 @@ NUNCA inventes datos.`,
       
       // 📊 P0: METADATA COMPLETA para observabilidad
       return { 
-        answer: correctedAnswer, 
+        answer: correctedAnswer,
+        session_id: request.sessionId || null, // ✅ FASE 2: Retornar session_id para persistencia
         toolsUsed, 
         executionTime,
         metadata: {
@@ -755,6 +759,7 @@ NUNCA inventes datos.`,
           stateless_mode: statelessMode,
           server_now_iso: serverNowISO,
           model: usingOpenAI ? 'openai/gpt-4o-mini' : 'groq/llama-3.3-70b-versatile',
+          memories_loaded: !statelessMode ? userMemories.split('\n').length - 1 : 0, // Debug info
         }
       };
       
@@ -763,6 +768,7 @@ NUNCA inventes datos.`,
       const executionTime = Date.now() - startTime;
       return {
         answer: `Disculpa, error: ${error.message}`,
+        session_id: request.sessionId || null, // ✅ FASE 2: Retornar session_id incluso en error
         toolsUsed: [],
         executionTime,
       };

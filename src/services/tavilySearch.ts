@@ -49,24 +49,30 @@ export async function webSearch(options: TavilySearchOptions): Promise<TavilySea
     } = options;
 
     if (!TAVILY_API_KEY) {
+      console.error('[TAVILY] ❌ TAVILY_API_KEY not configured');
       throw new Error('TAVILY_API_KEY not configured');
     }
 
-    console.log(`[TAVILY] Searching: "${query}"`);
-    console.log(`[TAVILY] Depth: ${searchDepth}, Max results: ${maxResults}`);
+    console.log(`[TAVILY] 🔍 Searching: "${query}"`);
+    console.log(`[TAVILY] 🔑 API Key present: ${TAVILY_API_KEY ? 'YES' : 'NO'}`);
+    console.log(`[TAVILY] ⚙️  Depth: ${searchDepth}, Max results: ${maxResults}`);
+
+    const requestPayload = {
+      api_key: TAVILY_API_KEY,
+      query: query,
+      search_depth: 'advanced', // 🚨 FORZAR ADVANCED siempre para mejores resultados
+      max_results: 10, // 🚨 AUMENTAR resultados para más posibilidades
+      include_domains: includeDomains,
+      exclude_domains: excludeDomains,
+      include_answer: true,
+      include_raw_content: true // 🚨 INCLUIR contenido RAW para más contexto
+    };
+    
+    console.log('[TAVILY] 📤 Request payload:', JSON.stringify(requestPayload, null, 2));
 
     const response = await axios.post(
       TAVILY_API_URL,
-      {
-        api_key: TAVILY_API_KEY,
-        query: query,
-        search_depth: 'advanced', // 🚨 FORZAR ADVANCED siempre para mejores resultados
-        max_results: 10, // 🚨 AUMENTAR resultados para más posibilidades
-        include_domains: includeDomains,
-        exclude_domains: excludeDomains,
-        include_answer: true,
-        include_raw_content: true // 🚨 INCLUIR contenido RAW para más contexto
-      },
+      requestPayload,
       {
         headers: {
           'Content-Type': 'application/json'
@@ -74,6 +80,9 @@ export async function webSearch(options: TavilySearchOptions): Promise<TavilySea
         timeout: 20000 // 🚨 20 segundos - más tiempo para búsqueda profunda
       }
     );
+    
+    console.log('[TAVILY] 📡 HTTP Status:', response.status);
+    console.log('[TAVILY] 📊 Response data keys:', Object.keys(response.data || {}));
 
     const results: TavilySearchResult[] = response.data.results.map((r: any) => ({
       title: r.title,
@@ -110,7 +119,10 @@ export async function webSearch(options: TavilySearchOptions): Promise<TavilySea
     };
   } catch (error: any) {
     const responseTime = Date.now() - startTime;
-    console.error('[TAVILY] Error:', error.message);
+    console.error('[TAVILY] ❌ Error completo:', error);
+    console.error('[TAVILY] ❌ Error message:', error.message);
+    console.error('[TAVILY] ❌ Error response:', error.response?.data || 'No response data');
+    console.error('[TAVILY] ❌ Error status:', error.response?.status || 'No status');
     
     return {
       query: options.query,

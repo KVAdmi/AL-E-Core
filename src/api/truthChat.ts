@@ -248,6 +248,10 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
     console.log('[CHAT] User Email:', userEmail || 'N/A');
     console.log('[CHAT] Message:', userMessage.substring(0, 100));
     
+    // ✅ FASE 2: Extraer sessionId del body
+    const sessionId = req.body.sessionId || req.body.session_id || null;
+    console.log('[CHAT] Session ID:', sessionId || 'N/A (creará nueva)');
+    
     // 🔥 SIMPLE ORCHESTRATOR - Como GitHub Copilot
     const orchestrator = await getSimpleOrchestrator();
     
@@ -255,6 +259,7 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
     const result = await orchestrator.orchestrate({
       userMessage,
       userId,
+      sessionId, // ✅ FASE 2: Pasar sessionId al orchestrator
       userEmail,
       conversationHistory: messages.slice(0, -1), // Excluir último mensaje
       requestId: `req-${Date.now()}`,
@@ -274,6 +279,7 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
     // Respuesta con metadata y debug info
     return res.json({
       answer: result.answer,
+      session_id: result.session_id || sessionId || null, // ✅ FASE 2: Retornar sessionId
       toolsUsed: safeToolsUsed,
       executionTime: result.executionTime,
       metadata: {
@@ -282,6 +288,7 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
         model: 'groq/llama-3.3-70b-versatile',
         tools_executed: safeToolsUsed.length,
         source: 'SimpleOrchestrator',
+        ...result.metadata, // ✅ FASE 2: Incluir metadata del orchestrator (memories_loaded, etc)
       },
       debug: {
         tools_detail: safeToolsUsed.map((tool: string) => ({
