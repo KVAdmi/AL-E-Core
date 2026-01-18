@@ -53,6 +53,11 @@ interface SimpleOrchestratorResponse {
     stateless_mode?: boolean;
     server_now_iso?: string;
     memories_loaded?: number; // ✅ FASE 2: Debug info
+    // 🧠 P0 TELEMETRÍA MEMORY-FIRST (Director 18-ene-2026)
+    memory_first_triggered?: boolean;
+    memory_first_source_id?: string;
+    final_answer_source?: 'memory_first' | 'llm' | 'llm+referee';
+    referee_skipped_reason?: string;
     groq_failed?: boolean;
     openai_failed?: boolean;
     referee_invoked?: boolean;
@@ -274,6 +279,99 @@ export class SimpleOrchestrator {
       console.log('[SIMPLE ORCH] 👤 Nombre asistente:', assistantName);
       console.log('[SIMPLE ORCH] 👤 Nickname usuario:', userNickname);
       console.log('[SIMPLE ORCH] 👤 Tono preferido:', tonePref);
+      
+      // ============================================
+      // 🧠 P0 MEMORY-FIRST: HARD RULE (Director 18-ene-2026)
+      // ============================================
+      // Si hay memoria Y la pregunta es tipo "¿Cuál es mi X?", 
+      // responder DIRECTO desde memoria (no LLM)
+      
+      let memoryFirstTriggered = false;
+      let memoryFirstSourceId = '';
+      let memoryFirstAnswer = '';
+      
+      // Detectar preguntas de recuperación de memoria
+      const userMessageLower = request.userMessage.toLowerCase();
+      const isMemoryQuestion = /¿cuál es mi|cómo me llamo|mi \w+ (es|favorito)|qué es mi|cuál era mi/i.test(userMessageLower);
+      
+      if (!statelessMode && isMemoryQuestion && userMemories !== 'No hay memorias previas') {
+        console.log('[SIMPLE ORCH] 🎯 MEMORY-FIRST: Pregunta detectada, buscando en memoria...');
+        
+        // Extraer qué está preguntando (ej: "número", "nombre", "color")
+        const questionMatch = userMessageLower.match(/¿?cuál es mi (\w+)|cómo me llamo|mi (\w+) (es|favorito)/i);
+        
+        if (questionMatch) {
+          const searchTerm = questionMatch[1] || questionMatch[2] || '';
+          console.log('[SIMPLE ORCH] 🔍 Buscando:', searchTerm);
+          
+          // Buscar en userMemories (simple text search por ahora)
+          const memoriesLower = userMemories.toLowerCase();
+          
+          // Buscar líneas que contengan el término
+          const memoryLines = userMemories.split('\n');
+          let foundMemory = '';
+          
+          for (const line of memoryLines) {
+            if (line.toLowerCase().includes(searchTerm)) {
+              foundMemory = line;
+              break;
+            }
+          }
+          
+          // Si no encontró por término específico, buscar patrones de respuesta
+          if (!foundMemory) {
+            // Buscar "42", "es 42", "favorito es X"
+            const numberMatch = userMemories.match(/\b\d+\b/);
+            if (numberMatch && searchTerm.includes('número')) {
+              foundMemory = `número ${numberMatch[0]}`;
+            }
+          }
+          
+          if (foundMemory) {
+            console.log('[SIMPLE ORCH] ✅ MEMORY-FIRST: Match encontrado');
+            memoryFirstTriggered = true;
+            memoryFirstSourceId = foundMemory.substring(0, 100);
+            
+            // Construir respuesta directa
+            const extractedValue = foundMemory.match(/\b\d+\b/)?.[0] || 
+                                   foundMemory.match(/es (\w+)/)?.[1] || 
+                                   foundMemory.match(/favorito.*?(\w+)/)?.[1];
+            
+            if (extractedValue) {
+              memoryFirstAnswer = `Tu ${searchTerm} favorito es ${extractedValue}. (Según lo que me dijiste antes)`;
+            } else {
+              memoryFirstAnswer = `Según mis notas: ${foundMemory.trim()}`;
+            }
+            
+            console.log('[SIMPLE ORCH] 📝 MEMORY-FIRST ANSWER:', memoryFirstAnswer);
+          } else {
+            console.log('[SIMPLE ORCH] ⚠️ MEMORY-FIRST: No se encontró match para:', searchTerm);
+          }
+        }
+      }
+      
+      // Si memory-first encontró respuesta, retornar inmediatamente (skip LLM)
+      if (memoryFirstTriggered && memoryFirstAnswer) {
+        console.log('[SIMPLE ORCH] 🚀 MEMORY-FIRST: Respondiendo sin LLM');
+        
+        return {
+          answer: memoryFirstAnswer,
+          session_id: request.sessionId,
+          toolsUsed: [],
+          executionTime: Date.now() - startTime,
+          metadata: {
+            model: 'memory-first',
+            memory_first_triggered: true,
+            memory_first_source_id: memoryFirstSourceId,
+            final_answer_source: 'memory_first',
+            referee_skipped_reason: 'memory_first',
+          },
+        };
+      }
+      
+      // ============================================
+      // CONTINUAR CON FLUJO NORMAL (LLM)
+      // ============================================
       
       // 🕐 P0: TIME GROUNDING - Inyectar timestamp del servidor
       const serverNow = new Date();
@@ -770,6 +868,11 @@ NUNCA inventes datos.`,
           server_now_iso: serverNowISO,
           model: usingOpenAI ? 'openai/gpt-4o-mini' : 'groq/llama-3.3-70b-versatile',
           memories_loaded: !statelessMode ? userMemories.split('\n').length - 1 : 0, // Debug info
+          // 🧠 P0 TELEMETRÍA MEMORY-FIRST (Director 18-ene-2026)
+          memory_first_triggered: false,
+          memory_first_source_id: '',
+          final_answer_source: refereeUsed ? 'llm+referee' : 'llm',
+          referee_skipped_reason: refereeUsed ? undefined : 'not_needed',
         }
       };
       
