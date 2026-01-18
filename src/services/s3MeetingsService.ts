@@ -1,20 +1,12 @@
 /**
- * S3 Service para Meetings
+ * Supabase Storage Service para Meetings
  * Maneja storage de audio/video chunks y archivos completos
+ * 🔥 REEMPLAZA S3 - USA SUPABASE STORAGE
  */
 
-import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { supabase } from '../config/supabase';
 
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION || 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-  },
-});
-
-const BUCKET = process.env.AWS_S3_BUCKET_MEETINGS || 'al-eon-meetings';
+const BUCKET = 'meetings-audio';
 
 export interface UploadChunkParams {
   userId: string;
@@ -33,116 +25,134 @@ export interface UploadFileParams {
 }
 
 /**
- * Upload audio chunk para modo LIVE
+ * Upload audio chunk para modo LIVE usando Supabase Storage
  */
 export async function uploadMeetingChunk(params: UploadChunkParams) {
   const { userId, meetingId, chunkIndex, buffer, mimeType } = params;
 
   // Path: meetings/{userId}/{meetingId}/chunks/chunk-{index}.webm
-  const key = `meetings/${userId}/${meetingId}/chunks/chunk-${String(chunkIndex).padStart(5, '0')}.webm`;
+  const path = `meetings/${userId}/${meetingId}/chunks/chunk-${String(chunkIndex).padStart(5, '0')}.webm`;
 
-  const command = new PutObjectCommand({
-    Bucket: BUCKET,
-    Key: key,
-    Body: buffer,
-    ContentType: mimeType,
-    Metadata: {
-      userId,
-      meetingId,
-      chunkIndex: String(chunkIndex),
-      uploadedAt: new Date().toISOString(),
-    },
-  });
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, buffer, {
+      contentType: mimeType,
+      upsert: true, // Sobrescribir si existe
+    });
 
-  await s3Client.send(command);
+  if (error) {
+    console.error('[SupabaseMeetings] ❌ Error uploading chunk:', error);
+    throw new Error(`Failed to upload chunk: ${error.message}`);
+  }
+
+  // Obtener URL pública
+  const { data: urlData } = supabase.storage
+    .from(BUCKET)
+    .getPublicUrl(path);
 
   return {
-    s3Key: key,
+    s3Key: path, // Mantenemos el nombre por compatibilidad con DB
     s3Bucket: BUCKET,
-    s3Url: `https://${BUCKET}.s3.amazonaws.com/${key}`,
+    s3Url: urlData.publicUrl,
     sizeBytes: buffer.length,
   };
 }
 
 /**
- * Upload archivo completo para modo UPLOAD
+ * Upload archivo completo para modo UPLOAD usando Supabase Storage
  */
 export async function uploadMeetingFile(params: UploadFileParams) {
   const { userId, meetingId, buffer, filename, mimeType } = params;
 
   // Path: meetings/{userId}/{meetingId}/original/{filename}
-  const key = `meetings/${userId}/${meetingId}/original/${filename}`;
+  const path = `meetings/${userId}/${meetingId}/original/${filename}`;
 
-  const command = new PutObjectCommand({
-    Bucket: BUCKET,
-    Key: key,
-    Body: buffer,
-    ContentType: mimeType,
-    Metadata: {
-      userId,
-      meetingId,
-      originalFilename: filename,
-      uploadedAt: new Date().toISOString(),
-    },
-  });
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, buffer, {
+      contentType: mimeType,
+      upsert: true,
+    });
 
-  await s3Client.send(command);
+  if (error) {
+    console.error('[SupabaseMeetings] ❌ Error uploading file:', error);
+    throw new Error(`Failed to upload file: ${error.message}`);
+  }
+
+  // Obtener URL pública
+  const { data: urlData } = supabase.storage
+    .from(BUCKET)
+    .getPublicUrl(path);
 
   return {
-    s3Key: key,
+    s3Key: path,
     s3Bucket: BUCKET,
-    s3Url: `https://${BUCKET}.s3.amazonaws.com/${key}`,
+    s3Url: urlData.publicUrl,
     sizeBytes: buffer.length,
   };
 }
 
 /**
- * Generar URL pre-firmada para descarga (válida 1 hora)
+ * Generar URL firmada para descarga (válida 1 hora)
  */
-export async function getSignedDownloadUrl(s3Key: string, expiresIn: number = 3600) {
-  const command = new GetObjectCommand({
-    Bucket: BUCKET,
-    Key: s3Key,
-  });
+export async function getSignedDownloadUrl(path: string, expiresIn: number = 3600) {
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(path, expiresIn);
 
-  return getSignedUrl(s3Client, command, { expiresIn });
-}
-
-/**
- * Verificar si un archivo existe en S3
- */
-export async function checkFileExists(s3Key: string): Promise<boolean> {
-  try {
-    const command = new HeadObjectCommand({
-      Bucket: BUCKET,
-      Key: s3Key,
-    });
-    await s3Client.send(command);
-    return true;
-  } catch (error: any) {
-    if (error.name === 'NotFound') {
-      return false;
-    }
-    throw error;
+  if (error) {
+    console.error('[SupabaseMeetings] ❌ Error creating signed URL:', error);
+    throw new Error(`Failed to create signed URL: ${error.message}`);
   }
+
+  return data.signedUrl;
 }
 
 /**
- * Obtener metadata de archivo
+ * Verificar si un archivo existe en Supabase Storage
  */
-export async function getFileMetadata(s3Key: string) {
-  const command = new HeadObjectCommand({
-    Bucket: BUCKET,
-    Key: s3Key,
-  });
+export async function checkFileExists(path: string): Promise<boolean> {
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .list(path.split('/').slice(0, -1).join('/'), {
+      search: path.split('/').pop(),
+    });
 
-  const response = await s3Client.send(command);
+  if (error) {
+    console.error('[SupabaseMeetings] ❌ Error checking file:', error);
+    return false;
+  }
+
+  return data && data.length > 0;
+}
+
+/**
+ * Obtener metadata de archivo desde Supabase Storage
+ */
+export async function getFileMetadata(path: string) {
+  // Supabase Storage no tiene endpoint directo para metadata,
+  // pero podemos obtener info básica desde list()
+  const parts = path.split('/');
+  const filename = parts.pop();
+  const folder = parts.join('/');
+
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .list(folder, {
+      search: filename,
+    });
+
+  if (error || !data || data.length === 0) {
+    throw new Error(`File not found: ${path}`);
+  }
+
+  const file = data[0];
 
   return {
-    contentLength: response.ContentLength,
-    contentType: response.ContentType,
-    lastModified: response.LastModified,
-    metadata: response.Metadata,
+    contentLength: file.metadata?.size || 0,
+    contentType: file.metadata?.mimetype || 'application/octet-stream',
+    lastModified: new Date(file.created_at),
+    metadata: file.metadata,
   };
 }
 
