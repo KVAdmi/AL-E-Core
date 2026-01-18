@@ -158,6 +158,25 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
         fileUrl = att.signedUrl.trim();
       }
 
+      // P0 GUARDRAIL: Imágenes SOLO desde Supabase Storage
+      // (EC2 no tiene salida a internet, no puede fetch URLs externas)
+      if ((fileType === 'image' || fileName?.match(/\.(png|jpg|jpeg|gif|bmp|webp)$/i)) && fileUrl) {
+        const isSupabaseUrl = fileUrl.includes('supabase') || fileUrl.includes(process.env.SUPABASE_URL || '');
+        if (!isSupabaseUrl) {
+          console.warn('[TRUTH CHAT] ⚠️ Imagen externa rechazada (solo Supabase Storage):', fileUrl.substring(0, 100));
+          return res.status(400).json({
+            error: 'EXTERNAL_IMAGE_NOT_SUPPORTED',
+            safe_message: 'Para analizar imágenes, súbelas directamente aquí. No puedo acceder a imágenes desde URLs externas.',
+            details: {
+              fileName,
+              fileType,
+              reason: 'only_supabase_storage'
+            },
+            wasBlocked: true
+          });
+        }
+      }
+
       // 2) Si es Supabase Storage: bucket + path → signed URL
       if (!fileUrl && typeof att.bucket === 'string' && typeof att.path === 'string') {
         const bucket = String(att.bucket);

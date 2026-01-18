@@ -195,23 +195,11 @@ export async function extractTextFromImage(
   try {
     console.log('[DOCUMENT TOOLS] 🔍 Extrayendo texto de imagen:', imageUrl);
     
-    // P0 FIX: Descargar imagen primero (Tesseract no puede fetch URLs en servidor)
-    let imageBuffer: Buffer;
-    try {
-      const axios = await import('axios');
-      const response = await axios.default.get(imageUrl, {
-        responseType: 'arraybuffer',
-        timeout: 15000
-      });
-      imageBuffer = Buffer.from(response.data);
-      console.log('[DOCUMENT TOOLS] ✅ Imagen descargada:', imageBuffer.length, 'bytes');
-    } catch (fetchError: any) {
-      console.error('[DOCUMENT TOOLS] ❌ Error descargando imagen:', fetchError.message);
-      throw new Error(`No se pudo descargar la imagen: ${fetchError.message}`);
-    }
+    // P0: Imágenes solo desde Supabase Storage (signed URLs)
+    // EC2 no tiene salida a internet para URLs externas
+    // Tesseract puede trabajar directamente con signed URLs de Supabase
     
-    // Procesar imagen con Tesseract (desde buffer)
-    const result = await Tesseract.recognize(imageBuffer, 'spa', {
+    const result = await Tesseract.recognize(imageUrl, 'spa', {
       logger: (m) => console.log('[OCR]', m)
     });
     
