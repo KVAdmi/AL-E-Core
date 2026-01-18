@@ -395,6 +395,13 @@ ${userMemories}
 
 Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una persona real.
 `;
+
+      // 🔍 P0 DEBUG: Imprimir bloque de memoria inyectado
+      console.log('[SIMPLE ORCH] ══════════════════════════════════════');
+      console.log('[SIMPLE ORCH] 📋 MEMORIA INYECTADA AL PROMPT:');
+      console.log('[SIMPLE ORCH]', userMemories.split('\n').length, 'líneas de memoria');
+      console.log('[SIMPLE ORCH] Preview:', userMemories.substring(0, 300));
+      console.log('[SIMPLE ORCH] ══════════════════════════════════════');
       
       if (request.conversationHistory && request.conversationHistory.length > 0) {
         request.conversationHistory.forEach(msg => {
@@ -685,6 +692,7 @@ NUNCA inventes datos.`,
           
           if (needsReferee) {
             console.log(`[SIMPLE ORCH] ⚖️ OPENAI REFEREE INVOKED - reason=${evasionCheck.reason || 'evidence_mismatch'}`);
+            console.log(`[SIMPLE ORCH] 📝 RESPUESTA ANTES DEL REFEREE:`, finalAnswer.substring(0, 150));
             
             refereeUsed = true; // 📊 TRACKING
             refereeReasonDetected = evasionCheck.reason || 'evidence_mismatch'; // 📊 TRACKING
@@ -703,7 +711,9 @@ NUNCA inventes datos.`,
             });
             
             correctedAnswer = refereeResult.text;
-            console.log(`[SIMPLE ORCH] ✅ REFEREE CORRECTED - primary_model=groq fallback_model=openai`);
+            console.log(`[SIMPLE ORCH] ✅ REFEREE CORRECTED`);
+            console.log(`[SIMPLE ORCH] 📝 RESPUESTA DESPUÉS DEL REFEREE:`, correctedAnswer.substring(0, 150));
+            console.log(`[SIMPLE ORCH] 🔄 CAMBIO: ${finalAnswer === correctedAnswer ? 'NINGUNO' : 'SÍ MODIFICÓ'}`);
           }
         } catch (refereeError: any) {
           console.error(`[SIMPLE ORCH] ❌ REFEREE FAILED: ${refereeError.message}`);
