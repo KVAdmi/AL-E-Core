@@ -712,7 +712,7 @@ NUNCA inventes datos.`,
       }
       
       // 💾 GUARDAR MEMORIA si la conversación fue importante (SOLO si NO es stateless)
-      if (!statelessMode && (toolsUsed.length > 0 || request.userMessage.length > 50)) {
+      if (!statelessMode && (toolsUsed.length > 0 || request.userMessage.length > 20)) { // ✅ FASE 2: Umbral bajado a 20 chars
         console.log('[SIMPLE ORCH] 💾 Guardando memoria...');
         
         const memoryText = `${userNickname} preguntó: "${request.userMessage.substring(0, 200)}". ${assistantName} usó: ${toolsUsed.join(', ') || 'respuesta directa'}.`;
