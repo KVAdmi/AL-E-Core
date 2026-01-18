@@ -198,12 +198,12 @@ export async function extractTextFromImage(
     // P0 FIX: Descargar imagen primero (Tesseract no puede fetch URLs en servidor)
     let imageBuffer: Buffer;
     try {
-      const response = await fetch(imageUrl);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      const arrayBuffer = await response.arrayBuffer();
-      imageBuffer = Buffer.from(arrayBuffer);
+      const axios = await import('axios');
+      const response = await axios.default.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: 15000
+      });
+      imageBuffer = Buffer.from(response.data);
       console.log('[DOCUMENT TOOLS] ✅ Imagen descargada:', imageBuffer.length, 'bytes');
     } catch (fetchError: any) {
       console.error('[DOCUMENT TOOLS] ❌ Error descargando imagen:', fetchError.message);
