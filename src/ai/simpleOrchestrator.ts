@@ -236,7 +236,7 @@ export class SimpleOrchestrator {
         const { data: memories, error: memError } = await supabase
           .from('assistant_memories')
           .select('memory, importance, created_at')
-          .eq('user_id', request.userId)
+          .eq('user_id_uuid', request.userId) // ✅ FASE 2: Usar user_id_uuid para UUIDs
           .eq('workspace_id', workspaceId)
           .order('importance', { ascending: false })
           .order('created_at', { ascending: false })
@@ -722,7 +722,7 @@ NUNCA inventes datos.`,
           .from('assistant_memories')
           .insert({
             workspace_id: workspaceId,
-            user_id: request.userId,
+            user_id_uuid: request.userId, // ✅ FASE 2: Usar user_id_uuid para UUIDs
             mode: 'universal',
             memory: memoryText,
             importance,
