@@ -405,15 +405,16 @@ export async function executeTool(
         };
 
       // ════════════════════════════════════════════════════════
-      // MEETINGS TOOLS (Modo Altavoz + Upload)
+      // MEETINGS TOOLS (🚧 EN DESARROLLO - NO OPERATIVO)
       // ════════════════════════════════════════════════════════
       
       case 'start_live_meeting':
         return {
-          success: true,
+          success: false,
           data: {
-            message: 'Para iniciar una reunión presencial, el usuario debe usar el botón "Iniciar Reunión" en la app móvil/web con acceso al micrófono.',
-            instruction: 'Este tool se ejecuta desde el frontend. El backend recibirá chunks de audio vía POST /api/meetings/live/:id/chunk'
+            error: 'Feature en desarrollo',
+            message: '🚧 Las reuniones en vivo NO están operativas aún. Requieren pipeline de streaming de audio que no está implementado.',
+            status: 'not_implemented'
           }
         };
 

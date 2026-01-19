@@ -19,10 +19,10 @@ interface OpenAIUsage {
 }
 
 const OPENAI_LIMITS = {
-  maxCallsPerMinute: 10,
-  maxCallsPerHour: 50,
-  maxCallsPerDay: 200,
-  maxMonthlyUSD: 20,
+  maxCallsPerMinute: 60,     // Aumentado para uso intensivo
+  maxCallsPerHour: 500,      // Suficiente para día de trabajo completo
+  maxCallsPerDay: 2000,      // Cubre múltiples usuarios
+  maxMonthlyUSD: 100,        // Ajustable según presupuesto
   maxTokensPerCall: 600
 };
 

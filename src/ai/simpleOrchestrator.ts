@@ -35,6 +35,7 @@ interface SimpleOrchestratorRequest {
   conversationHistory?: Array<{ role: string; content: string }>;
   requestId?: string;
   route?: string;
+  voice?: boolean; // ← P0: Flag para detectar modo voz
   workspaceId?: string;
 }
 
@@ -67,6 +68,7 @@ interface SimpleOrchestratorResponse {
     limit?: string;
     openai_blocked?: boolean;
     voice_mode?: boolean;
+    requires_tools?: boolean; // ← P0: Flag para fallback que necesita tools
     error?: string;
   };
 }
@@ -200,7 +202,9 @@ export class SimpleOrchestrator {
     
     try {
       // 🔒 GUARDRAIL ABSOLUTO: OPENAI PROHIBIDO EN MODO VOZ
+      // 🔒 GUARDRAIL: Detectar modo voz (route o flag voice)
       const isVoiceMode = request.route?.includes('/voice') || 
+                          request.voice === true ||  // ← P0: Detectar por flag también
                           request.userMessage?.toLowerCase().includes('[voice]') ||
                           false; // TODO: detectar desde channel o metadata
       
@@ -529,10 +533,42 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
       const rateLimitCheck = canCallOpenAI();
       if (!rateLimitCheck.allowed) {
         console.error('[OPENAI LIMITER] ❌ Límite excedido:', rateLimitCheck.reason);
-        console.error('[OPENAI LIMITER] � Stats:', JSON.stringify(getOpenAIUsageStats(), null, 2));
+        console.error('[OPENAI LIMITER] 📊 Stats:', JSON.stringify(getOpenAIUsageStats(), null, 2));
         
         // Fallback a Groq sin tools
         console.log('[FALLBACK] 🚨 OpenAI limit exceeded, using Groq without tools...');
+        
+        // 🚫 P0: Si la pregunta requiere tools, decláralo
+        const requiresTools = /correo|email|agenda|calendario|busca|investiga|envía|programa|crea evento/i.test(request.userMessage);
+        
+        if (requiresTools) {
+          console.warn('[FALLBACK] ⚠️ Request requires tools but fallback is text-only');
+          return {
+            answer: `No puedo ejecutar esa acción ahora (límite temporal de operaciones). 
+
+**Puedo ayudarte con:**
+✓ Responder preguntas
+✓ Analizar texto
+✓ Dar recomendaciones
+
+**NO puedo (temporalmente):**
+✗ Correos
+✗ Agenda
+✗ Búsquedas web
+✗ Acciones externas
+
+Intenta de nuevo en unos minutos o reformula tu pregunta.`,
+            toolsUsed: [],
+            executionTime: Date.now() - startTime,
+            metadata: { 
+              model: 'fallback-blocked', 
+              rate_limit_exceeded: true, 
+              limit: rateLimitCheck.limit,
+              requires_tools: true 
+            },
+          };
+        }
+        
         try {
           response = await groq.chat.completions.create({
             model: 'llama-3.3-70b-versatile',
@@ -540,12 +576,13 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
             messages: [
               {
                 role: 'system',
-                content: `Eres ${assistantName}, asistente personal de ${userNickname}. Los tools no están disponibles temporalmente. Responde de manera natural sin inventar datos.`,
+                content: `Eres ${assistantName}, asistente personal de ${userNickname}. IMPORTANTE: No puedes ejecutar acciones (correos, agenda, búsquedas). Solo puedes conversar y analizar texto. Si te piden una acción, di claramente "No puedo ejecutar acciones ahora, intenta en unos minutos".`,
               },
               { role: 'user', content: request.userMessage },
             ],
           });
         } catch (groqFallbackError: any) {
+          console.error('[FALLBACK] ❌ Groq fallback error:', groqFallbackError.message);
           return {
             answer: 'Estoy teniendo problemas técnicos. ¿Puedes intentar de nuevo en unos segundos?',
             toolsUsed: [],
