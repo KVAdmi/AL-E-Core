@@ -202,10 +202,19 @@ export async function executeTool(
           throw new Error('title y startTime son requeridos');
         }
         
+        // P0 FIX: Validar que la fecha no sea pasado (Groq alucinando 2023)
+        const eventStartDate = new Date(parameters.startTime);
+        const now = new Date();
+        
+        if (eventStartDate.getFullYear() < 2025) {
+          console.error('[TOOL ROUTER] 🚨 FECHA INVÁLIDA detectada:', parameters.startTime);
+          throw new Error(`Fecha inválida: ${parameters.startTime}. La fecha debe ser 2026 o posterior. Fecha actual: ${now.toISOString().split('T')[0]}`);
+        }
+        
         const eventResult = await createCalendarEvent(userId, {
           title: parameters.title,
           start_at: parameters.startTime,
-          end_at: parameters.endTime || new Date(new Date(parameters.startTime).getTime() + 60 * 60 * 1000).toISOString(), // +1 hora por defecto
+          end_at: parameters.endTime || new Date(eventStartDate.getTime() + 60 * 60 * 1000).toISOString(), // +1 hora por defecto
           description: parameters.description || ''
         });
         
