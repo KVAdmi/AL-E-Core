@@ -83,8 +83,8 @@ export async function executeTool(
               date: e.date,
               is_read: e.is_read,
               has_attachments: e.has_attachments
-            })),
-            instruction: '🔥 IMPORTANTE: Para leer el contenido completo de cualquiera de estos correos, usa read_email con el emailId correspondiente.'
+            }))
+            // P1 FIX: instruction eliminada - no contaminar data para UI
           }
         };
 
