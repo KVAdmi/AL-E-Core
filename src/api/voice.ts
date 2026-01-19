@@ -228,9 +228,15 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
       });
     }
     
-    // � P0 FIX: Validar tamaño de audio > 0
+    // 📊 P0 INSTRUMENTACIÓN: Bytes, duración estimada, metadata
     const audioSizeBytes = audioFile.size || 0;
-    console.log(`[VOICE] Audio recibido: ${audioSizeBytes} bytes`);
+    const audioMimeType = audioFile.mimetype || 'unknown';
+    const estimatedDuration = audioSizeBytes > 0 ? Math.round(audioSizeBytes / 16000) : 0; // ~16KB/seg aprox
+    
+    console.log('[VOICE] 📊 AUDIO RECIBIDO:');
+    console.log('  - Bytes:', audioSizeBytes);
+    console.log('  - MimeType:', audioMimeType);
+    console.log('  - Duración estimada:', estimatedDuration, 'seg');
     
     if (audioSizeBytes === 0) {
       console.error('[VOICE] ❌ Audio vacío (0 bytes)');
@@ -309,7 +315,15 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
       console.log(`[STT] 📊 Duración estimada: ${audioSeconds}s`);
       console.log(`[STT] 🌍 Idioma detectado: ${transcription.language || 'auto'}`);
       console.log(`[STT] 🎯 Whisper llamado: ${whisperCalled ? 'true' : 'false'}`);
-      console.log(`[STT] Texto transcrito (${transcription.text.length} chars): "${transcription.text.substring(0, 100)}..."`);
+      console.log(`[STT] 📝 Texto transcrito (${transcription.text.length} chars): "${transcription.text.substring(0, 100)}..."`);
+      
+      // 🚨 P0 CRÍTICO: Detectar si ASR devolvió texto vacío
+      if (!transcription.text || transcription.text.trim().length === 0) {
+        console.error('[STT] 🚨 FUGA DETECTADA: Whisper devolvió texto vacío');
+        console.error('[STT] 🚨 Audio bytes:', audioSizeBytes);
+        console.error('[STT] 🚨 Duración estimada:', estimatedDuration, 'seg');
+        console.error('[STT] 🚨 MimeType:', audioMimeType);
+      }
       
       // 🚨 P0: VALIDAR que whisper SÍ se llamó
       if (!whisperCalled) {
