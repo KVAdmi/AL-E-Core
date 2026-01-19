@@ -195,11 +195,20 @@ export async function extractTextFromImage(
   try {
     console.log('[DOCUMENT TOOLS] 🔍 Extrayendo texto de imagen:', imageUrl);
     
-    // P0: Imágenes solo desde Supabase Storage (signed URLs)
-    // EC2 no tiene salida a internet para URLs externas
-    // Tesseract puede trabajar directamente con signed URLs de Supabase
+    // P0: Descargar imagen a buffer ANTES de OCR
+    // Tesseract no puede hacer fetch directo en EC2 sin internet
+    console.log('[DOCUMENT TOOLS] 📥 Descargando imagen...');
+    const imageResponse = await fetch(imageUrl);
     
-    const result = await Tesseract.recognize(imageUrl, 'spa', {
+    if (!imageResponse.ok) {
+      throw new Error(`HTTP ${imageResponse.status}: ${imageResponse.statusText}`);
+    }
+    
+    const imageBuffer = await imageResponse.arrayBuffer();
+    console.log('[DOCUMENT TOOLS] ✅ Imagen descargada:', imageBuffer.byteLength, 'bytes');
+    
+    // OCR con buffer en lugar de URL
+    const result = await Tesseract.recognize(Buffer.from(imageBuffer), 'spa', {
       logger: (m) => console.log('[OCR]', m)
     });
     
@@ -216,11 +225,12 @@ export async function extractTextFromImage(
     };
     
   } catch (error: any) {
+    console.error('[DOCUMENT TOOLS] ❌ Error descargando imagen:', error.message);
     console.error('[DOCUMENT TOOLS] ❌ Error en OCR:', error);
     return {
       success: false,
       documentType: 'image',
-      error: error.message
+      error: `No se pudo descargar la imagen: ${error.message}`
     };
   }
 }
