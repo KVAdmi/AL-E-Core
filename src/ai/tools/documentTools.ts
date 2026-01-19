@@ -427,6 +427,17 @@ export async function analyzeDocument(
       else if (fileUrl.match(/\.(png|jpg|jpeg|gif|bmp)/)) fileType = 'image';
     }
     
+    // 🔥 FIX: Normalizar MIME types (frontend envía "image/png" en vez de "image")
+    if (fileType?.startsWith('image/')) {
+      fileType = 'image';
+    } else if (fileType?.includes('pdf')) {
+      fileType = 'pdf';
+    } else if (fileType?.includes('spreadsheet') || fileType?.includes('excel')) {
+      fileType = 'excel';
+    } else if (fileType?.includes('word') || fileType?.includes('document')) {
+      fileType = 'word';
+    }
+    
     // Ejecutar análisis según tipo
     switch (fileType) {
       case 'pdf':
