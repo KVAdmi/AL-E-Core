@@ -83,22 +83,32 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
       });
     }
     
-  // Validar messages
-  const { messages, userConfirmed, attachments } = req.body;
+  // Validar messages - Acepta ambos formatos: messages[] O message (singular)
+  const { messages, message, userConfirmed, attachments } = req.body;
     
-    console.log('[TRUTH CHAT] Messages type:', typeof messages);
-    console.log('[TRUTH CHAT] Messages is array:', Array.isArray(messages));
-    console.log('[TRUTH CHAT] Messages length:', messages?.length);
+    console.log('[TRUTH CHAT] Raw messages:', messages);
+    console.log('[TRUTH CHAT] Raw message (singular):', message);
     
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      console.log('[TRUTH CHAT] ERROR: Invalid messages array');
+    // ✅ BACKWARD COMPATIBILITY: Convertir message (singular) a messages[]
+    let messagesArray = messages;
+    if (!messages && message) {
+      console.log('[TRUTH CHAT] Converting singular message to array format');
+      messagesArray = [{ role: 'user', content: message }];
+    }
+    
+    console.log('[TRUTH CHAT] Messages array type:', typeof messagesArray);
+    console.log('[TRUTH CHAT] Messages is array:', Array.isArray(messagesArray));
+    console.log('[TRUTH CHAT] Messages length:', messagesArray?.length);
+    
+    if (!messagesArray || !Array.isArray(messagesArray) || messagesArray.length === 0) {
+      console.log('[TRUTH CHAT] ERROR: Invalid messages - neither messages[] nor message provided');
       return res.status(400).json({
-        error: 'messages must be a non-empty array',
+        error: 'messages (array) or message (string) is required',
         wasBlocked: true,
       });
     }
     
-    const lastMessage = messages[messages.length - 1];
+    const lastMessage = messagesArray[messagesArray.length - 1];
     if (!lastMessage || lastMessage.role !== 'user') {
       return res.status(400).json({
         error: 'Last message must be from user',
@@ -280,7 +290,7 @@ const handleTruthChat = async (req: express.Request, res: express.Response) => {
       userId,
       sessionId, // ✅ FASE 2: Pasar sessionId al orchestrator
       userEmail,
-      conversationHistory: messages.slice(0, -1), // Excluir último mensaje
+      conversationHistory: messagesArray.slice(0, -1), // Excluir último mensaje (usar messagesArray)
       requestId: `req-${Date.now()}`,
       route: '/api/ai/chat',
     });
