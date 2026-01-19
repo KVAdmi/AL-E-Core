@@ -81,7 +81,7 @@ export async function listEmails(
     console.log('[EMAIL TOOLS] 🔍 Verificando cuentas configuradas...');
     const { data: accounts, error: accountError } = await supabase
       .from('email_accounts')
-      .select('id, email_address, from_email, is_active, owner_user_id, provider, status')
+      .select('id, from_email, from_name, is_active, owner_user_id, provider, status')
       .eq('owner_user_id', userId);
 
     console.log('[EMAIL TOOLS] 📊 Cuentas encontradas:', accounts?.length || 0);
@@ -98,7 +98,8 @@ export async function listEmails(
     if (accounts.length > 0) {
       console.log('[EMAIL TOOLS] ✅ Primera cuenta:', {
         id: accounts[0].id,
-        email: accounts[0].email_address || accounts[0].from_email,
+        email: accounts[0].from_email,
+        name: accounts[0].from_name,
         status: accounts[0].status,
         is_active: accounts[0].is_active,
         owner_user_id: accounts[0].owner_user_id
@@ -119,13 +120,12 @@ export async function listEmails(
     console.log('[EMAIL TOOLS] Account IDs a buscar:', accountIds);
     
     if (filters?.accountEmail) {
-      const emailField = activeAccounts[0].from_email ? 'from_email' : 'email_address';
       const filteredAccount = activeAccounts.find(a => 
-        (a[emailField] || '').toLowerCase().includes(filters.accountEmail!.toLowerCase())
+        (a.from_email || '').toLowerCase().includes(filters.accountEmail!.toLowerCase())
       );
       if (filteredAccount) {
         accountIds = [filteredAccount.id];
-        console.log('[EMAIL TOOLS] Filtrando por cuenta:', filteredAccount.email_address || filteredAccount.from_email);
+        console.log('[EMAIL TOOLS] Filtrando por cuenta:', filteredAccount.from_email);
       }
     }
 
