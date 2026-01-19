@@ -228,6 +228,17 @@ export async function extractTextFromImage(
   } catch (error: any) {
     console.error('[DOCUMENT TOOLS] ❌ Error descargando imagen:', error.message);
     console.error('[DOCUMENT TOOLS] ❌ Error en OCR:', error);
+    
+    // 🔴 P0: Detectar error de permisos (bucket privado o signed URL expirada)
+    if (error.response?.status === 400 || error.response?.status === 404 || error.response?.status === 403 || error.response?.status === 401) {
+      console.error('[DOCUMENT TOOLS] 🔒 Error de acceso: HTTP', error.response.status);
+      return {
+        success: false,
+        documentType: 'image',
+        error: 'No pude acceder al archivo (URL expirada o sin permisos). Reintenta subiendo la imagen nuevamente.'
+      };
+    }
+    
     return {
       success: false,
       documentType: 'image',
