@@ -333,30 +333,54 @@ function analyzeTextContent(text: string): {
     });
   });
   
-  // Identificar hallazgos clave
+  // Identificar hallazgos clave (P0 FIX: Ser específico, no genérico)
   const keyFindings: string[] = [];
-  const riskKeywords = ['riesgo', 'problema', 'crítico', 'urgente', 'falla', 'error'];
-  const commitmentKeywords = ['compromiso', 'entrega', 'plazo', 'deadline', 'vencimiento'];
   
-  const sentences = text.split(/[.!?]\n/).filter(s => s.trim().length > 20);
-  
-  sentences.forEach(sentence => {
-    const lowerSent = sentence.toLowerCase();
-    
-    // Hallazgos importantes (contienen números grandes o palabras clave)
-    if (/\d{4,}/.test(sentence) || /importante|clave|principal|destacar/.test(lowerSent)) {
-      if (keyFindings.length < 5) {
-        keyFindings.push(sentence.trim());
-      }
+  // Extraer información estructurada según contexto
+  if (lower.includes('supabase') || lower.includes('dashboard')) {
+    // Extraer tablas mencionadas
+    const tables = text.match(/\b(ae_\w+|email_\w+|user_\w+|calendar_\w+|chat_\w+)\b/g) || [];
+    const uniqueTables = [...new Set(tables)].slice(0, 5);
+    if (uniqueTables.length > 0) {
+      keyFindings.push(`Tablas de base de datos: ${uniqueTables.join(', ')}`);
     }
-  });
+    
+    // Extraer emails
+    const emails = text.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) || [];
+    if (emails.length > 0) {
+      keyFindings.push(`Emails encontrados: ${emails.slice(0, 3).join(', ')}`);
+    }
+    
+    // Extraer roles
+    const roles = text.match(/\b(USER|ADMIN|GUEST)\b/g) || [];
+    if (roles.length > 0) {
+      keyFindings.push(`Roles: ${[...new Set(roles)].join(', ')}`);
+    }
+  } else {
+    // Fallback genérico: buscar frases con números o palabras clave
+    const sentences = text.split(/[.!?\n]/).filter(s => s.trim().length > 20);
+    
+    sentences.forEach(sentence => {
+      const lowerSent = sentence.toLowerCase();
+      
+      // Priorizar frases con datos concretos
+      if (/\d{3,}/.test(sentence) || /\b(total|monto|precio|cantidad|fecha)\b/.test(lowerSent)) {
+        if (keyFindings.length < 5) {
+          keyFindings.push(sentence.trim());
+        }
+      }
+    });
+  }
   
   // Identificar riesgos
+  const riskKeywords = ['riesgo', 'problema', 'crítico', 'urgente', 'falla', 'error'];
+  const sentences = text.split(/[.!?\n]/).filter(s => s.trim().length > 20);
   const risks = sentences
     .filter(s => riskKeywords.some(kw => s.toLowerCase().includes(kw)))
     .slice(0, 5);
   
   // Identificar compromisos
+  const commitmentKeywords = ['compromiso', 'entrega', 'plazo', 'deadline', 'vencimiento'];
   const commitments = sentences
     .filter(s => commitmentKeywords.some(kw => s.toLowerCase().includes(kw)))
     .slice(0, 5);
@@ -389,6 +413,7 @@ function extractContext(text: string, match: string, contextLength = 50): string
 
 /**
  * Genera resumen ejecutivo del documento
+ * P0 FIX: Detectar CONTEXTO REAL sin inventar
  */
 function generateSummary(
   text: string,
@@ -396,19 +421,67 @@ function generateSummary(
   numbers: Array<{ value: number; context: string }>
 ): string {
   const wordCount = text.split(/\s+/).length;
-  const largeNumbers = numbers.filter(n => n.value >= 1000).slice(0, 3);
+  const lower = text.toLowerCase();
   
-  let summary = `Documento de ${wordCount} palabras. `;
+  // DETECTAR CONTEXTO REAL (sin inventar)
+  let contextType = '';
   
-  if (keyFindings.length > 0) {
-    summary += `Hallazgos principales: ${keyFindings[0]}. `;
+  // Dashboard/UI screenshots
+  if (lower.includes('supabase') || lower.includes('dashboard') || lower.includes('table editor')) {
+    contextType = 'Dashboard de Supabase';
+  } else if (lower.includes('chrome') && lower.includes('historial') && lower.includes('favoritos')) {
+    contextType = 'Captura de pantalla de navegador';
+  } else if (lower.includes('factura') || lower.includes('invoice') || lower.includes('total a pagar')) {
+    contextType = 'Factura';
+  } else if (lower.includes('contrato') || lower.includes('acuerdo') || lower.includes('cláusula')) {
+    contextType = 'Documento legal/Contrato';
+  } else if (lower.includes('class ') && lower.includes('function') && lower.includes('return')) {
+    contextType = 'Código fuente';
+  } else if (lower.includes('user') && lower.includes('email') && lower.includes('uuid')) {
+    contextType = 'Datos de base de datos';
   }
   
-  if (largeNumbers.length > 0) {
-    summary += `Números destacados: ${largeNumbers.map(n => `$${n.value.toLocaleString()}`).join(', ')}. `;
+  // CONSTRUIR RESUMEN ESPECÍFICO
+  let summary = '';
+  
+  if (contextType) {
+    summary = `📋 Tipo: ${contextType}. `;
+    
+    // Agregar detalles específicos según contexto
+    if (contextType.includes('Supabase')) {
+      // Extraer nombres de tablas
+      const tables = text.match(/\b(ae_\w+|email_\w+|user_\w+|calendar_\w+|chat_\w+)\b/g) || [];
+      const uniqueTables = [...new Set(tables)].slice(0, 5);
+      if (uniqueTables.length > 0) {
+        summary += `Tablas visibles: ${uniqueTables.join(', ')}. `;
+      }
+      
+      // Extraer emails de usuarios
+      const emails = text.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) || [];
+      if (emails.length > 0) {
+        summary += `Usuarios: ${emails.slice(0, 3).join(', ')}. `;
+      }
+    } else if (contextType.includes('Factura')) {
+      const largeNumbers = numbers.filter(n => n.value >= 100).slice(0, 3);
+      if (largeNumbers.length > 0) {
+        summary += `Montos: ${largeNumbers.map(n => `$${n.value.toLocaleString()}`).join(', ')}. `;
+      }
+    }
+  } else {
+    // Fallback genérico solo si NO identificamos contexto
+    summary = `📄 Documento de ${wordCount} palabras. `;
+    
+    if (keyFindings.length > 0) {
+      summary += `Texto principal extraído: "${keyFindings[0].substring(0, 100)}...". `;
+    }
+    
+    const largeNumbers = numbers.filter(n => n.value >= 1000).slice(0, 3);
+    if (largeNumbers.length > 0) {
+      summary += `Números: ${largeNumbers.map(n => `$${n.value.toLocaleString()}`).join(', ')}. `;
+    }
   }
   
-  return summary;
+  return summary.trim();
 }
 
 /**
