@@ -19,6 +19,9 @@ import * as pdfjsLib from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
 import Tesseract from 'tesseract.js';
+import sharp from 'sharp';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface DocumentAnalysisResult {
   success: boolean;
@@ -188,32 +191,68 @@ export async function analyzeWord(
 
 /**
  * Extrae texto de una imagen usando OCR
+ * P0 FIX: Download robusto + conversión sharp + OCR offline
  */
 export async function extractTextFromImage(
   imageUrl: string
 ): Promise<DocumentAnalysisResult> {
+  let tmpFilePath: string | null = null;
+  
   try {
-    console.log('[DOCUMENT TOOLS] 🔍 Extrayendo texto de imagen:', imageUrl);
+    console.log('[DOCUMENT TOOLS] 🔍 Extrayendo texto de imagen:', imageUrl.substring(0, 100));
     
-    // P0: Descargar imagen con axios (más robusto que fetch en Node.js)
+    // PASO 1: Descargar imagen con axios (timeout, validación)
     console.log('[DOCUMENT TOOLS] 📥 Descargando imagen con axios...');
     const imageResponse = await axios.get(imageUrl, {
       responseType: 'arraybuffer',
       timeout: 30000, // 30 segundos
+      maxRedirects: 0,
       headers: {
         'User-Agent': 'AL-E-Core/1.0'
       }
     });
     
+    // PASO 2: Validar Content-Type
+    const contentType = imageResponse.headers['content-type'] || '';
+    if (!contentType.includes('image')) {
+      throw new Error(`NOT_AN_IMAGE: Content-Type is ${contentType}`);
+    }
+    
     const imageBuffer = Buffer.from(imageResponse.data);
     console.log('[DOCUMENT TOOLS] ✅ Imagen descargada:', imageBuffer.byteLength, 'bytes');
     
-    // OCR con buffer
-    const result = await Tesseract.recognize(imageBuffer, 'spa', {
-      logger: (m) => console.log('[OCR]', m)
+    // PASO 3: Convertir a PNG estable con sharp (normalización)
+    console.log('[DOCUMENT TOOLS] 🔧 Convirtiendo imagen a PNG con sharp...');
+    const pngBuffer = await sharp(imageBuffer)
+      .png()
+      .toBuffer();
+    
+    console.log('[DOCUMENT TOOLS] ✅ Imagen convertida a PNG:', pngBuffer.byteLength, 'bytes');
+    
+    // PASO 4: Guardar temporal (Tesseract necesita file path para offline mode)
+    const tmpDir = '/tmp';
+    tmpFilePath = path.join(tmpDir, `ocr-${Date.now()}.png`);
+    fs.writeFileSync(tmpFilePath, pngBuffer);
+    console.log('[DOCUMENT TOOLS] 💾 Imagen guardada en:', tmpFilePath);
+    
+    // PASO 5: OCR con Tesseract en modo offline (sin descargas de internet)
+    console.log('[DOCUMENT TOOLS] 🔍 Ejecutando OCR (offline mode)...');
+    const result = await Tesseract.recognize(tmpFilePath, 'spa', {
+      logger: (m) => {
+        if (m.status === 'recognizing text') {
+          console.log('[OCR] Progreso:', Math.round(m.progress * 100), '%');
+        }
+      }
     });
     
     const fullText = result.data.text;
+    console.log('[DOCUMENT TOOLS] ✅ OCR completado. Texto extraído:', fullText.length, 'caracteres');
+    
+    // PASO 6: Limpiar archivo temporal
+    if (tmpFilePath && fs.existsSync(tmpFilePath)) {
+      fs.unlinkSync(tmpFilePath);
+      console.log('[DOCUMENT TOOLS] 🗑️ Archivo temporal eliminado');
+    }
     
     // Analizar contenido
     const analysis = analyzeTextContent(fullText);
@@ -226,8 +265,18 @@ export async function extractTextFromImage(
     };
     
   } catch (error: any) {
-    console.error('[DOCUMENT TOOLS] ❌ Error descargando imagen:', error.message);
-    console.error('[DOCUMENT TOOLS] ❌ Error en OCR:', error);
+    console.error('[DOCUMENT TOOLS] ❌ Error en pipeline OCR:', error.message);
+    console.error('[DOCUMENT TOOLS] ❌ Stack:', error.stack);
+    
+    // Cleanup: eliminar archivo temporal si existe
+    if (tmpFilePath && fs.existsSync(tmpFilePath)) {
+      try {
+        fs.unlinkSync(tmpFilePath);
+        console.log('[DOCUMENT TOOLS] 🗑️ Archivo temporal eliminado (cleanup)');
+      } catch (cleanupError) {
+        console.error('[DOCUMENT TOOLS] ⚠️ No se pudo eliminar archivo temporal:', cleanupError);
+      }
+    }
     
     // 🔴 P0: Detectar error de permisos (bucket privado o signed URL expirada)
     if (error.response?.status === 400 || error.response?.status === 404 || error.response?.status === 403 || error.response?.status === 401) {
