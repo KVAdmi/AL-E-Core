@@ -570,7 +570,9 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
         }
         
         try {
-          console.log('[ORCH] 🚀 Usando OpenAI para tool calling...');
+          // 📊 GOVERNANCE: OpenAI como fallback controlado (texto-only, sin tools)
+          console.log('[ORCH] ⚠️ OPENAI FALLBACK activado (Groq falló)');
+          console.log('[OPENAI] 📋 RESTRICCIONES: Texto-only, sin tools, sin memoria, sin voz');
           console.log('[OPENAI LIMITER] ✅ Rate limit OK - Remaining:', {
             perMinute: getOpenAIUsageStats().remainingCalls.perMinute,
             perHour: getOpenAIUsageStats().remainingCalls.perHour,
@@ -581,6 +583,8 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
           
           usingOpenAI = true;
           toolCallProvider = 'openai'; // 📊 TRACKING
+          
+          // 🚫 GOVERNANCE: OpenAI SIN tools (fallback texto-only)
           response = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             max_tokens: 600, // P0 LIMIT: maxTokensPerCall
@@ -595,7 +599,7 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
           const estimatedCost = estimateOpenAICost(inputTokens, outputTokens);
           recordOpenAICall(inputTokens + outputTokens, estimatedCost);
           
-          console.log('[ORCH] ✅ OpenAI tool calling - Finish reason:', response.choices[0]?.finish_reason);
+          console.log('[ORCH] ✅ OpenAI fallback completado - Finish reason:', response.choices[0]?.finish_reason);
           console.log('[ORCH] tool_call_attempted =', response.choices[0]?.finish_reason === 'tool_calls');
         } catch (openaiError: any) {
           console.error('[ORCH] ❌ OpenAI tool calling failed:', openaiError.message);
@@ -756,13 +760,14 @@ NUNCA inventes datos.`,
         }
         
         if (!mentionedTools) {
-          console.warn('[SIMPLE ORCH] ⚠️ Respuesta no menciona tools ejecutados - forzando estructura');
-          
-          const toolsSummary = toolResults.map((tr: any, idx: number) => 
-            `${idx + 1}. Tool: ${tr.toolName}\n   Resultado: ${JSON.stringify(tr.result).substring(0, 200)}`
-          ).join('\n');
-          
-          finalAnswer = `⚠️ Ejecuté las siguientes acciones:\n\n${toolsSummary}\n\n---\n\n${finalAnswer}`;
+          console.warn('[SIMPLE ORCH] ⚠️ Respuesta no menciona tools ejecutados');
+          // 🚫 P0 UX: NO mostrar tool traces al usuario
+          // Tool traces quedan SOLO en logs del servidor
+          console.log('[SIMPLE ORCH] 📊 Tools ejecutados (solo logs):', toolsUsed);
+          console.log('[SIMPLE ORCH] 📊 Resultados (solo logs):', toolResults.map((tr: any) => ({
+            tool: tr.toolName,
+            success: tr.result?.success
+          })));
         }
       }
       
