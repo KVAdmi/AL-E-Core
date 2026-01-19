@@ -169,9 +169,10 @@ const AVAILABLE_TOOLS: Array<Groq.Chat.ChatCompletionTool> = [
       parameters: {
         type: 'object',
         properties: {
-          documentUrl: { type: 'string', description: 'URL o path del documento' },
+          fileUrl: { type: 'string', description: 'URL del archivo a analizar' },
+          fileType: { type: 'string', description: 'Tipo de archivo: pdf, image, excel, word (opcional, se detecta auto)' },
         },
-        required: ['documentUrl'],
+        required: ['fileUrl'],
       },
     },
   },
@@ -584,13 +585,12 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
           usingOpenAI = true;
           toolCallProvider = 'openai'; // 📊 TRACKING
           
-          // 🚫 GOVERNANCE: OpenAI SIN tools (fallback texto-only)
+          // 🚫 GOVERNANCE P0 FIX: OpenAI REALMENTE SIN tools (fallback texto-only)
           response = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             max_tokens: 600, // P0 LIMIT: maxTokensPerCall
             messages: messages as any,
-            tools: AVAILABLE_TOOLS as any,
-            tool_choice: 'auto',
+            // NO enviar tools ni tool_choice para forzar texto-only
           });
           
           // Registrar uso y costo

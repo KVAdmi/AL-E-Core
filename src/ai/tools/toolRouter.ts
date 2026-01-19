@@ -605,10 +605,10 @@ export function detectRequiredTools(query: string): string[] {
     tools.push('estimate_project_cost');
   }
   
-  // Calendar tools
+  // Calendar tools (CANON: create_event / list_events)
   if (lower.includes('agenda') || lower.includes('cita') || lower.includes('reunión')) {
     if (lower.includes('crea') || lower.includes('agendar')) {
-      tools.push('create_calendar_event');
+      tools.push('create_event'); // CANON (era create_calendar_event legacy)
     } else if (lower.includes('lista') || lower.includes('tengo')) {
       tools.push('list_calendar_events');
     } else if (lower.includes('detecta') || lower.includes('extrae')) {
