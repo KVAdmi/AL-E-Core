@@ -125,13 +125,59 @@ Esto explica por qué "el micro no sirve para reuniones".
 
 ---
 
-## 4️⃣ RUTA DEL FRONTEND (NECESITA AUDITORÍA)
+## 4️⃣ RUTA DEL FRONTEND (CONFIRMADO)
 
-**Backend espera:** `/api/voice/chat` o `/api/voice/...`
+**Backend espera:** `route: '/voice'` en el request body
 
-**¿Frontend envía?** 🔍 **PENDIENTE VERIFICAR**
+**Frontend envía:** ❌ **NADA**
 
-Si el frontend usa otra ruta (ej: `/api/chat` directo), el guardrail **NUNCA** se dispara.
+### Código Frontend Confirmado
+
+`src/hooks/useVoiceMode.js` línea 363:
+```javascript
+const chatResponse = await fetch(`${CORE_BASE_URL}/api/ai/chat/v2`, {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+    'x-request-id': chatRequestId,
+  },
+  body: JSON.stringify({
+    message: userText,    // ← Texto del STT
+    sessionId,
+    workspaceId,
+    meta: { ... }
+    // ❌ NO PASA route: '/voice'
+    // ❌ NO PASA voice: true
+    // ❌ NO hay [voice] en mensaje
+  })
+});
+```
+
+### Flujo Real (ROTO)
+
+```
+Frontend mic → POST /api/voice/transcribe (STT)
+              ↓
+              Obtiene texto
+              ↓
+              POST /api/ai/chat/v2  ← ❌ Llama como chat normal
+              {
+                message: "hola",
+                sessionId: "...",
+                // ❌ Sin route, sin voice flag
+              }
+              ↓
+              Orchestrator recibe request sin contexto
+              ↓
+              isVoiceMode = false  ← ❌ SIEMPRE
+              ↓
+              Guardrail NO se activa
+              ↓
+              OpenAI puede ejecutarse si Groq falla
+```
+
+**🚨 CONFIRMADO:** El guardrail NUNCA se activa en producción porque el frontend no identifica las peticiones como "modo voz".
 
 ---
 
