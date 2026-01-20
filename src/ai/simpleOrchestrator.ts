@@ -77,6 +77,17 @@ const AVAILABLE_TOOLS: Array<Groq.Chat.ChatCompletionTool> = [
   {
     type: 'function',
     function: {
+      name: 'get_user_info',
+      description: 'Obtiene información sobre el usuario actual y el asistente. USA ESTO cuando pregunten "¿quién eres?", "¿quién soy?", "¿cómo te llamas?", "¿cómo me llamo?".',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'list_emails',
       description: 'Lista los correos del usuario. Usa esto cuando pidan "revisar correo", "ver emails", "qué correos tengo".',
       parameters: {

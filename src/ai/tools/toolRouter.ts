@@ -5,6 +5,8 @@
  * Maneja email, calendar, telegram, y otras capacidades.
  */
 
+import { supabase } from '../../db/supabase';
+
 import {
   listEmails,
   readEmail,
@@ -66,7 +68,32 @@ export async function executeTool(
 
     const { name, parameters } = toolCall;
 
-    // Email Tools
+    // ════════════════════════════════════════════════════════
+    // USER INFO TOOL (para todos los usuarios)
+    // ════════════════════════════════════════════════════════
+    
+    if (name === 'get_user_info') {
+      // Obtener configuración del usuario desde DB
+      const { data: userProfile } = await supabase
+        .from('user_profiles')
+        .select('preferred_name, assistant_name, tone_pref')
+        .eq('user_id', userId)
+        .single();
+      
+      return {
+        success: true,
+        data: {
+          user_name: userProfile?.preferred_name || 'Usuario',
+          assistant_name: userProfile?.assistant_name || 'AL-E',
+          tone: userProfile?.tone_pref || 'profesional',
+          message: `Tú eres ${userProfile?.assistant_name || 'AL-E'}, asistente ejecutiva de ${userProfile?.preferred_name || 'Usuario'}.`
+        }
+      };
+    }
+
+    // ════════════════════════════════════════════════════════
+    // EMAIL TOOLS
+    // ════════════════════════════════════════════════════════
     switch (name) {
       case 'list_emails':
         const emails = await listEmails(userId, parameters);
