@@ -526,108 +526,92 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
       let refereeUsed = false;
       let refereeReasonDetected: string | undefined;
       
-      // �🔥 P0 FIX: Usar OpenAI directamente para tool calling
-      // Groq llama-3.3-70b tiene problemas generando tool calls válidos
+      // � P0 FIX CRÍTICO: GROQ PRIMERO para tool calling
+      // OpenAI solo como fallback si Groq falla completamente
       
-      // 🔒 P0 COST CONTROL: Verificar límites ANTES de llamar
-      const rateLimitCheck = canCallOpenAI();
-      if (!rateLimitCheck.allowed) {
-        console.error('[OPENAI LIMITER] ❌ Límite excedido:', rateLimitCheck.reason);
-        console.error('[OPENAI LIMITER] 📊 Stats:', JSON.stringify(getOpenAIUsageStats(), null, 2));
-        
-        // Fallback a Groq sin tools
-        console.log('[FALLBACK] 🚨 OpenAI limit exceeded, using Groq without tools...');
-        
-        // 🚫 P0: Si la pregunta requiere tools, decláralo
-        const requiresTools = /correo|email|agenda|calendario|busca|investiga|envía|programa|crea evento/i.test(request.userMessage);
-        
-        if (requiresTools) {
-          console.warn('[FALLBACK] ⚠️ Request requires tools but fallback is text-only');
-          return {
-            answer: `No puedo ejecutar esa acción ahora (límite temporal de operaciones). 
-
-**Puedo ayudarte con:**
-✓ Responder preguntas
-✓ Analizar texto
-✓ Dar recomendaciones
-
-**NO puedo (temporalmente):**
-✗ Correos
-✗ Agenda
-✗ Búsquedas web
-✗ Acciones externas
-
-Intenta de nuevo en unos minutos o reformula tu pregunta.`,
-            toolsUsed: [],
-            executionTime: Date.now() - startTime,
-            metadata: { 
-              model: 'fallback-blocked', 
-              rate_limit_exceeded: true, 
-              limit: rateLimitCheck.limit,
-              requires_tools: true 
-            },
-          };
-        }
-        
-        try {
-          response = await groq.chat.completions.create({
-            model: 'llama-3.3-70b-versatile',
-            max_tokens: 2048,
-            messages: [
-              {
-                role: 'system',
-                content: `Eres ${assistantName}, asistente personal de ${userNickname}. IMPORTANTE: No puedes ejecutar acciones (correos, agenda, búsquedas). Solo puedes conversar y analizar texto. Si te piden una acción, di claramente "No puedo ejecutar acciones ahora, intenta en unos minutos".`,
-              },
-              { role: 'user', content: request.userMessage },
-            ],
-          });
-        } catch (groqFallbackError: any) {
-          console.error('[FALLBACK] ❌ Groq fallback error:', groqFallbackError.message);
-          return {
-            answer: 'Estoy teniendo problemas técnicos. ¿Puedes intentar de nuevo en unos segundos?',
-            toolsUsed: [],
-            executionTime: Date.now() - startTime,
-            metadata: { model: 'fallback', rate_limit_exceeded: true, limit: rateLimitCheck.limit },
-          };
-        }
-      } else {
-        // 🔒 GUARDRAIL: Si modo voz, bloquear OpenAI
+      try {
+        // � GUARDRAIL: Si modo voz, bloquear OpenAI
         if (openaiBlocked) {
-          console.error('[GUARDRAIL] 🚫 OpenAI BLOCKED in voice mode');
+          console.warn('[GUARDRAIL] 🔒 Voice mode active - OpenAI blocked, Groq only');
+        }
+        
+        console.log('[ORCH] 🚀 Llamando GROQ con tools...');
+        toolCallProvider = 'groq';
+        
+        response = await groq.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          max_tokens: 4096,
+          messages: messages as any,
+          tools: AVAILABLE_TOOLS as any,
+          tool_choice: 'auto',
+        });
+        
+        console.log('[ORCH] ✅ GROQ response OK - Finish reason:', response.choices[0]?.finish_reason);
+        
+      } catch (groqError: any) {
+        console.error('[ORCH] ❌ GROQ FAILED:', groqError.message);
+        groqFailed = true;
+        
+        // 🔒 Si modo voz Y Groq falló, NO usar OpenAI
+        if (openaiBlocked) {
+          console.error('[GUARDRAIL] 🚫 Voice mode + Groq failed = NO FALLBACK');
           return {
-            answer: 'Lo siento, no puedo procesar tool calls en modo voz. Por favor, cambia a modo texto.',
+            answer: 'Estoy teniendo problemas técnicos en modo voz. Intenta de nuevo o usa modo texto.',
             toolsUsed: [],
             executionTime: Date.now() - startTime,
             metadata: { 
               model: 'blocked', 
               openai_blocked: true, 
               voice_mode: true,
-              error: 'OpenAI disabled in voice/hands-free mode'
+              groq_failed: true,
+              error: groqError.message
             },
           };
         }
         
+        // � Verificar límites OpenAI antes de usarlo como fallback
+        const rateLimitCheck = canCallOpenAI();
+        if (!rateLimitCheck.allowed) {
+          console.error('[OPENAI LIMITER] ❌ Límite excedido:', rateLimitCheck.reason);
+          return {
+            answer: `Estoy teniendo problemas técnicos temporales. Intenta de nuevo en unos minutos.
+
+(Groq falló: ${groqError.message.substring(0, 100)})
+(OpenAI: ${rateLimitCheck.reason})`,
+            toolsUsed: [],
+            executionTime: Date.now() - startTime,
+            metadata: { 
+              model: 'all-failed', 
+              groq_failed: true,
+              rate_limit_exceeded: true, 
+              limit: rateLimitCheck.limit,
+              error: `Groq: ${groqError.message} | OpenAI: ${rateLimitCheck.reason}`
+            },
+          };
+        }
+        
+        // ⚠️ FALLBACK: OpenAI texto-only (sin tools)
         try {
-          // 📊 GOVERNANCE: OpenAI como fallback controlado (texto-only, sin tools)
           console.log('[ORCH] ⚠️ OPENAI FALLBACK activado (Groq falló)');
-          console.log('[OPENAI] 📋 RESTRICCIONES: Texto-only, sin tools, sin memoria, sin voz');
-          console.log('[OPENAI LIMITER] ✅ Rate limit OK - Remaining:', {
-            perMinute: getOpenAIUsageStats().remainingCalls.perMinute,
-            perHour: getOpenAIUsageStats().remainingCalls.perHour,
-            budget: `$${getOpenAIUsageStats().remainingBudget.toFixed(2)}`
-          });
+          console.log('[OPENAI] 📋 RESTRICCIONES: Texto-only, sin tools');
+          console.log('[OPENAI LIMITER] ✅ Rate limit OK');
           
           const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
           
           usingOpenAI = true;
-          toolCallProvider = 'openai'; // 📊 TRACKING
+          toolCallProvider = 'none'; // ← Sin tools disponibles
           
-          // 🚫 GOVERNANCE P0 FIX: OpenAI REALMENTE SIN tools (fallback texto-only)
           response = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
-            max_tokens: 600, // P0 LIMIT: maxTokensPerCall
-            messages: messages as any,
-            // NO enviar tools ni tool_choice para forzar texto-only
+            max_tokens: 600,
+            messages: [
+              {
+                role: 'system',
+                content: `Eres ${assistantName}. IMPORTANTE: No puedes ejecutar acciones (correos, agenda, búsquedas). Si te piden una acción, responde: "No puedo ejecutar esa acción ahora (problemas técnicos temporales). Intenta de nuevo en unos minutos."`
+              },
+              { role: 'user', content: request.userMessage }
+            ],
+            // NO tools - texto-only
           });
           
           // Registrar uso y costo
@@ -636,49 +620,21 @@ Intenta de nuevo en unos minutos o reformula tu pregunta.`,
           const estimatedCost = estimateOpenAICost(inputTokens, outputTokens);
           recordOpenAICall(inputTokens + outputTokens, estimatedCost);
           
-          console.log('[ORCH] ✅ OpenAI fallback completado - Finish reason:', response.choices[0]?.finish_reason);
-          console.log('[ORCH] tool_call_attempted =', response.choices[0]?.finish_reason === 'tool_calls');
+          console.log('[ORCH] ✅ OpenAI fallback completado (texto-only)');
+          
         } catch (openaiError: any) {
-          console.error('[ORCH] ❌ OpenAI tool calling failed:', openaiError.message);
-          console.error('[ORCH] Error code:', openaiError.code);
-          groqFailed = true;
-          
-          // Último recurso: Groq sin tools (solo texto)
-          console.log('[FALLBACK] 🚨 OpenAI failed, trying Groq without tools...');
-          
-          try {
-            response = await groq.chat.completions.create({
-              model: 'llama-3.3-70b-versatile',
-              max_tokens: 2048,
-              messages: [
-                {
-                  role: 'system',
-                  content: `Eres ${assistantName}, asistente personal de ${userNickname}. 
-                  
-Los tools no están disponibles temporalmente. Responde de manera natural.
-Si necesitas información externa (clima, correo, etc), di: "Necesito consultar esa información pero tengo problemas técnicos ahora. ¿Intentamos en un momento?"
-
-NUNCA inventes datos.`,
-                },
-                { role: 'user', content: request.userMessage },
-              ],
-            });
-          } catch (groqFallbackError: any) {
-            console.error('[FALLBACK] ❌ Groq fallback failed:', groqFallbackError.message);
-            
-            // Último último recurso
-            return {
-              answer: 'Estoy teniendo problemas técnicos. ¿Puedes intentar de nuevo en unos segundos?',
-              toolsUsed: [],
-              executionTime: Date.now() - startTime,
-              metadata: {
-                model: 'fallback',
-                openai_failed: true,
-                groq_failed: true,
-                error_handled: true,
-              },
-            };
-          }
+          console.error('[ORCH] ❌ OpenAI fallback TAMBIÉN falló:', openaiError.message);
+          return {
+            answer: 'Estoy teniendo problemas técnicos graves. Por favor intenta de nuevo más tarde.',
+            toolsUsed: [],
+            executionTime: Date.now() - startTime,
+            metadata: {
+              model: 'all-failed',
+              groq_failed: true,
+              openai_failed: true,
+              error: `Groq: ${groqError.message} | OpenAI: ${openaiError.message}`
+            },
+          };
         }
       }
       
