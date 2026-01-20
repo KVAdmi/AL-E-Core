@@ -413,7 +413,7 @@ function extractContext(text: string, match: string, contextLength = 50): string
 
 /**
  * Genera resumen ejecutivo del documento
- * P0 FIX: Detectar CONTEXTO REAL sin inventar
+ * P0 FIX: Si no detecta contexto específico, devolver texto completo para análisis LLM
  */
 function generateSummary(
   text: string,
@@ -468,17 +468,13 @@ function generateSummary(
       }
     }
   } else {
-    // Fallback genérico solo si NO identificamos contexto
-    summary = `📄 Documento de ${wordCount} palabras. `;
+    // ⚠️ P0: Si NO identificamos contexto específico, devolver texto COMPLETO
+    // para que el LLM lo analice (no hacer resumen básico aquí)
+    summary = `📄 Documento de ${wordCount} palabras (texto completo extraído, listo para análisis). `;
     
-    if (keyFindings.length > 0) {
-      summary += `Texto principal extraído: "${keyFindings[0].substring(0, 100)}...". `;
-    }
-    
-    const largeNumbers = numbers.filter(n => n.value >= 1000).slice(0, 3);
-    if (largeNumbers.length > 0) {
-      summary += `Números: ${largeNumbers.map(n => `$${n.value.toLocaleString()}`).join(', ')}. `;
-    }
+    // Agregar primeras 500 palabras para contexto
+    const firstWords = text.split(/\s+/).slice(0, 500).join(' ');
+    summary += `\n\nCONTENIDO:\n${firstWords}${wordCount > 500 ? '...' : ''}`;
   }
   
   return summary.trim();
