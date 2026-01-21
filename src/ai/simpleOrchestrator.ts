@@ -675,17 +675,55 @@ IMPORTANTE:
           console.log(`[ORCH] ✅ Mistral Large 3 respondió correctamente`);
           console.log(`[ORCH] 📊 Tools disponibles: ${AVAILABLE_TOOLS.length}`);
           
-          // Simular estructura de response compatible con Groq/OpenAI
-          response = {
-            choices: [{
-              message: {
-                role: 'assistant',
-                content: result.final_answer
-              },
-              finish_reason: 'stop'
-            }],
-            usage: result.usage
-          };
+          // 🔥 P0: MISTRAL NO SOPORTA NATIVE TOOL CALLING
+          // Parsear JSON manual: {"tool": "create_event", "params": {...}}
+          let parsedToolCall: { tool: string; params: any } | null = null;
+          
+          try {
+            // Buscar JSON en la respuesta
+            const jsonMatch = result.final_answer.match(/\{[\s\S]*"tool"[\s\S]*\}/);
+            if (jsonMatch) {
+              parsedToolCall = JSON.parse(jsonMatch[0]);
+              console.log('[ORCH] 🔧 Tool call detected in Mistral response:', parsedToolCall?.tool);
+            }
+          } catch (parseError) {
+            console.log('[ORCH] No JSON tool call found in response');
+          }
+          
+          // Si detectó tool call, simular estructura OpenAI para el loop
+          if (parsedToolCall && parsedToolCall.tool) {
+            response = {
+              choices: [{
+                message: {
+                  role: 'assistant',
+                  content: '',
+                  tool_calls: [{
+                    id: `call_${Date.now()}`,
+                    type: 'function' as const,
+                    function: {
+                      name: parsedToolCall.tool,
+                      arguments: JSON.stringify(parsedToolCall.params)
+                    }
+                  }]
+                },
+                finish_reason: 'tool_calls'
+              }],
+              usage: result.usage
+            } as any;
+            console.log('[ORCH] 🔄 Converted to tool_calls format');
+          } else {
+            // Respuesta normal sin tools
+            response = {
+              choices: [{
+                message: {
+                  role: 'assistant',
+                  content: result.final_answer
+                },
+                finish_reason: 'stop'
+              }],
+              usage: result.usage
+            };
+          }
           
           toolCallProvider = 'bedrock_mistral';
           
