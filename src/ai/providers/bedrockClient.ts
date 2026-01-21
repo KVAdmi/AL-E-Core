@@ -70,7 +70,7 @@ export async function callMistral(
   };
 
   const command = new InvokeModelCommand({
-    modelId: 'mistral.mistral-large-2411-v1:0', // 🔥 P0: Mistral Large 3 (24K context)
+    modelId: 'mistral.mistral-large-3-675b-instruct', // 🔥 P0: Mistral Large 3 (675B)
     contentType: 'application/json',
     accept: 'application/json',
     body: JSON.stringify(body)
