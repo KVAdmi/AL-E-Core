@@ -432,6 +432,32 @@ export async function executeTool(
         };
 
       // ════════════════════════════════════════════════════════
+      // COHERE COMMAND R (RAG / BÚSQUEDA INTERNA)
+      // ════════════════════════════════════════════════════════
+      
+      case 'search_internal_docs':
+        if (!parameters.query) {
+          throw new Error('query es requerido');
+        }
+        
+        const { callCohere } = await import('../providers/cohereClient');
+        
+        const cohereResult = await callCohere({
+          query: parameters.query,
+          documents: parameters.documents || [], // Opcional: pasar docs para RAG
+          maxTokens: 1024,
+          temperature: 0.3
+        });
+        
+        return {
+          success: true,
+          data: {
+            answer: cohereResult.text,
+            citations: cohereResult.citations
+          }
+        };
+
+      // ════════════════════════════════════════════════════════
       // MEETINGS TOOLS (🚧 EN DESARROLLO - NO OPERATIVO)
       // ════════════════════════════════════════════════════════
       

@@ -22,6 +22,8 @@ import {
   invokeOpenAIReferee,
   type RefereeReason
 } from '../llm/openaiReferee';
+import { selectProvider, callProvider, type Provider, type Route } from './providers/providerRouter';
+import { type BedrockMessage } from './providers/bedrockClient';
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -41,20 +43,24 @@ interface SimpleOrchestratorRequest {
 
 interface SimpleOrchestratorResponse {
   answer: string;
-  session_id?: string | null; // ✅ FASE 2: Retornar sessionId para frontend
+  session_id?: string | null;
   toolsUsed: string[];
   executionTime: number;
+  // 🎯 P0: CONTRATO NUEVO (multi-provider architecture)
+  tool_trace?: Array<{ tool: string; result: any; timestamp: number }>;
+  provider_used?: Provider;
+  route?: Route;
+  request_id?: string;
   metadata?: {
     model?: string;
     finish_reason?: string;
-    tool_call_provider?: 'groq' | 'openai' | 'none';
-    final_response_provider?: 'groq' | 'openai';
+    tool_call_provider?: 'groq' | 'openai' | 'bedrock_claude' | 'bedrock_mistral' | 'none';
+    final_response_provider?: Provider;
     referee_used?: boolean;
     referee_reason?: string;
     stateless_mode?: boolean;
     server_now_iso?: string;
-    memories_loaded?: number; // ✅ FASE 2: Debug info
-    // 🧠 P0 TELEMETRÍA MEMORY-FIRST (Director 18-ene-2026)
+    memories_loaded?: number;
     memory_first_triggered?: boolean;
     memory_first_source_id?: string;
     final_answer_source?: 'memory_first' | 'llm' | 'llm+referee';
@@ -186,6 +192,20 @@ const AVAILABLE_TOOLS: Array<Groq.Chat.ChatCompletionTool> = [
           fileType: { type: 'string', description: 'Tipo de archivo: pdf, image, excel, word (opcional, se detecta auto)' },
         },
         required: ['fileUrl'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_internal_docs',
+      description: 'Busca información en documentos internos o base de conocimiento usando Cohere Command R. Usa esto cuando necesites información de FAQs, documentos guardados, o contexto histórico.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Pregunta o búsqueda a realizar en los documentos internos' },
+        },
+        required: ['query'],
       },
     },
   },
@@ -538,15 +558,67 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
       let groqFailed = false;
       let usingOpenAI = false;
       
-      // � P0: TRACKING de metadata para observabilidad
-      let toolCallProvider: 'groq' | 'openai' | 'none' = 'none';
-      let finalResponseProvider: 'groq' | 'openai' = 'groq';
+      // 🎯 P0: TRACKING de metadata para observabilidad
+      let toolCallProvider: 'groq' | 'openai' | 'bedrock_mistral' | 'none' = 'none';
+      let finalResponseProvider: Provider = 'groq';
       let refereeUsed = false;
       let refereeReasonDetected: string | undefined;
       
-      // � P0 FIX CRÍTICO: GROQ PRIMERO para tool calling
+      // 🧠 P0: DETECCIÓN INTELIGENTE - ¿Necesita tools?
+      const needsTools = /revisar|leer|ver|lista|correo|email|agenda|calendario|cita|evento|enviar|buscar|clima|noticia/i.test(request.userMessage);
+      console.log(`[ORCH] 🔍 Mensaje requiere tools? ${needsTools ? 'SÍ' : 'NO'}`);
+      
+      // 🎯 P0: MULTI-PROVIDER ROUTER
+      // Si NO necesita tools Y NO es voz → Usar Bedrock Mistral
+      const shouldUseBedrock = !needsTools && !openaiBlocked;
+      
+      if (shouldUseBedrock) {
+        console.log('[ORCH] 🧠 Razonamiento sin tools → Intentando Mistral Large 3...');
+        try {
+          const route: Route = request.route?.includes('document') ? 'documents' : 'chat';
+          const provider = selectProvider(route, false);
+          finalResponseProvider = provider;
+          
+          // Extraer system prompt del primer mensaje
+          const systemPromptContent = messages[0]?.role === 'system' ? messages[0].content : '';
+          const systemPrompt = typeof systemPromptContent === 'string' ? systemPromptContent : JSON.stringify(systemPromptContent);
+          const chatMessages = messages.filter(m => m.role !== 'system');
+          
+          // Convertir mensajes al formato simple (no BedrockMessage aún)
+          const simpleMessages = chatMessages.map(m => ({
+            role: m.role,
+            content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+          }));
+          
+          const result = await callProvider(provider, simpleMessages, systemPrompt);
+          
+          console.log(`[ORCH] ✅ ${provider} response OK`);
+          
+          // Simular estructura de response compatible con Groq/OpenAI
+          response = {
+            choices: [{
+              message: {
+                role: 'assistant',
+                content: result.final_answer
+              },
+              finish_reason: 'stop'
+            }],
+            usage: result.usage
+          };
+          
+          toolCallProvider = 'none'; // Bedrock no tiene tool-calling por ahora
+          
+        } catch (bedrockError: any) {
+          console.error('[ORCH] ❌ Bedrock failed:', bedrockError.message);
+          console.log('[ORCH] ⚠️ Fallback a Groq...');
+          // Continúa al flujo normal de Groq
+        }
+      }
+      
+      // 🚀 P0 FIX CRÍTICO: GROQ para tool calling O si Bedrock falló
       // OpenAI solo como fallback si Groq falla completamente
       
+      if (!response) { // Solo si Bedrock no respondió
       try {
         // � GUARDRAIL: Si modo voz, bloquear OpenAI
         if (openaiBlocked) {
@@ -655,6 +727,7 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
           };
         }
       }
+      } // fin if (!response)
       
       // Array para guardar resultados de tools (para referee)
       const toolResults: any[] = [];

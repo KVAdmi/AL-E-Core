@@ -9,6 +9,7 @@ import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../db/supabase';
 import { TTSRequest, TTSResponse, STTRequest, STTResponse } from '../types';
+import { textToSpeech, type PollyVoice, type PollyGender } from '../ai/tts/pollyService';
 
 const router = express.Router();
 const execPromise = promisify(exec);
@@ -40,20 +41,21 @@ const upload = multer({
 
 /**
  * POST /api/voice/tts
- * Convierte texto a voz usando Edge-TTS (Microsoft)
+ * Convierte texto a voz usando Amazon Polly
  * 
- * P0: TTS REAL - Edge-TTS
+ * P0: TTS REAL - Amazon Polly (México)
  * - Timeout: 15s
  * - Log obligatorio en ae_requests
  * - Formato: mp3
- * - Voz: es-MX-DaliaNeural (México, femenina) por default
+ * - Voces: Mia (mujer, default) y Andrés (hombre)
+ * - Engine: neural (alta calidad)
  */
 router.post('/tts', async (req, res) => {
   const startTime = Date.now();
   console.log('[TTS] 🔊 Request recibido:', req.body);
 
   try {
-    const { text, voice, format = 'mp3', language, sessionId, userId }: TTSRequest = req.body;
+    const { text, voice, gender, format = 'mp3', language, sessionId, userId }: TTSRequest & { gender?: PollyGender } = req.body;
 
     // Validaciones básicas
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -89,35 +91,31 @@ router.post('/tts', async (req, res) => {
 
     console.log(`[TTS] Text length: ${cleanText.length} chars`);
 
-    // Seleccionar voz (default: es-MX-DaliaNeural - México femenina)
-    const selectedVoice = voice || 'es-MX-DaliaNeural';
-
-    // Generar archivo temporal
-    const tempDir = os.tmpdir();
-    const outputFile = path.join(tempDir, `tts_${uuidv4()}.mp3`);
+    // Determinar voz Polly
+    let pollyVoice: PollyVoice = 'Mia'; // Default: mujer
+    
+    if (voice === 'Andrés' || voice === 'Andres' || voice === 'male') {
+      pollyVoice = 'Andres'; // Sin acento
+    } else if (gender === 'male') {
+      pollyVoice = 'Andres'; // Sin acento
+    }
+    
+    console.log(`[TTS] Using Polly voice: ${pollyVoice}`);
 
     try {
-      // Llamar a edge-tts con timeout
-      console.log('[TTS] 🔄 Calling Edge-TTS...');
+      // Llamar a Polly TTS
+      console.log('[TTS] 🔄 Calling Amazon Polly...');
       
-      const ttsCommand = `edge-tts --voice "${selectedVoice}" --text "${cleanText.replace(/"/g, '\\"')}" --write-media "${outputFile}"`;
-      
-      const ttsPromise = execPromise(ttsCommand, {
-        timeout: TTS_TIMEOUT_MS
+      const pollyResponse = await textToSpeech({
+        text: cleanText,
+        voice: pollyVoice,
+        engine: 'neural'
       });
       
-      await ttsPromise;
-      
-      // Verificar que el archivo se generó
-      if (!fs.existsSync(outputFile)) {
-        throw new Error('TTS file not generated');
-      }
-
-      const audioBuffer = fs.readFileSync(outputFile);
       const latency_ms = Date.now() - startTime;
       const estimatedDuration = Math.ceil(cleanText.length / 15); // ~15 chars/sec promedio
 
-      console.log(`[TTS] ✅ Síntesis completada en ${latency_ms}ms, ${audioBuffer.length} bytes`);
+      console.log(`[TTS] ✅ Síntesis completada en ${latency_ms}ms, ${pollyResponse.audioStream.length} bytes`);
 
       // Log en ae_requests
       try {
@@ -132,9 +130,10 @@ router.post('/tts', async (req, res) => {
           metadata: {
             text_chars: cleanText.length,
             text_original_chars: text.length,
-            tts_provider: 'edge-tts',
-            tts_voice: selectedVoice,
-            audio_size_bytes: audioBuffer.length,
+            tts_provider: 'amazon-polly',
+            tts_voice: pollyResponse.voice,
+            tts_engine: pollyResponse.engine,
+            audio_size_bytes: pollyResponse.audioStream.length,
             audio_format: 'mp3',
             estimated_duration_seconds: estimatedDuration,
             truncated: cleanText.length < text.length
@@ -144,12 +143,9 @@ router.post('/tts', async (req, res) => {
         console.error('[TTS] Error logging request:', logError);
       }
 
-      // Limpiar archivo temporal
-      fs.unlinkSync(outputFile);
-
       // Devolver audio como base64 (más fácil para frontend)
       const response: TTSResponse = {
-        audioUrl: `data:audio/mpeg;base64,${audioBuffer.toString('base64')}`,
+        audioUrl: `data:${pollyResponse.contentType};base64,${Buffer.from(pollyResponse.audioStream).toString('base64')}`,
         format: 'mp3',
         duration: estimatedDuration
       };
@@ -157,10 +153,6 @@ router.post('/tts', async (req, res) => {
       return res.json(response);
 
     } catch (ttsError: any) {
-      // Limpiar archivo temporal en caso de error
-      if (fs.existsSync(outputFile)) {
-        fs.unlinkSync(outputFile);
-      }
 
       const latency_ms = Date.now() - startTime;
 
@@ -176,10 +168,10 @@ router.post('/tts', async (req, res) => {
           latency_ms,
           metadata: {
             error: ttsError.message,
-            error_type: ttsError.killed ? 'TIMEOUT' : 'TTS_ERROR',
+            error_type: 'POLLY_ERROR',
             text_chars: cleanText.length,
-            tts_provider: 'edge-tts',
-            tts_voice: selectedVoice
+            tts_provider: 'amazon-polly',
+            tts_voice: pollyVoice
           }
         });
       } catch (logError) {
