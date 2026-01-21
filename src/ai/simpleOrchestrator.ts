@@ -1,34 +1,27 @@
 /**
- * SIMPLE ORCHESTRATOR - Como GitHub Copilot
+ * SIMPLE ORCHESTRATOR - Amazon Nova Pro Edition
  * 
- * NO bloquea, NO pide permisos, NO valida evidencia antes.
- * Razona → Ejecuta → Responde.
+ * Cerebro único: Amazon Nova Pro vía Bedrock Converse API.
+ * NO fallbacks, NO Groq, NO Mistral ejecutor, NO Marketplace.
  * 
- * Filosofía: Mejor pedir perdón que pedir permiso.
+ * Razona → Ejecuta tools → Responde.
  * 
- * 🚀 POWERED BY GROQ - Llama 3.3 70B
+ * 🧠 POWERED BY AMAZON NOVA PRO (us-east-1)
+ * � POWERED BY BEDROCK KNOWLEDGE BASE (RAG)
+ * 
+ * DIRECTOR: 21-ene-2026
  */
 
-import Groq from 'groq-sdk';
-import OpenAI from 'openai';
 import { executeTool } from './tools/toolRouter';
 import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../db/supabase';
-import { canCallOpenAI, recordOpenAICall, estimateOpenAICost, getOpenAIUsageStats } from '../utils/openaiRateLimiter';
-import {
-  detectGroqEvasion,
-  detectEvidenceMismatch,
-  invokeOpenAIReferee,
-  type RefereeReason
-} from '../llm/openaiReferee';
-import { selectProvider, callProvider, type Provider, type Route } from './providers/providerRouter';
-import { type BedrockMessage, callMistral } from './providers/bedrockClient';
 import { queryKnowledgeBase, requiresKnowledgeBase, formatKBContextForPrompt } from './knowledge/bedrockKB';
+import { callNovaPro, buildToolResultBlock, type NovaMessage } from './providers/bedrockNovaClient';
+import type { ToolUseBlock, ContentBlock } from '@aws-sdk/client-bedrock-runtime';
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-});
+// 🧠 Amazon Nova Pro es el único cerebro autorizado
+// Configuración vía bedrockNovaClient.ts
 
 interface SimpleOrchestratorRequest {
   userMessage: string;
@@ -47,172 +40,32 @@ interface SimpleOrchestratorResponse {
   session_id?: string | null;
   toolsUsed: string[];
   executionTime: number;
-  // 🎯 P0: CONTRATO NUEVO (multi-provider architecture)
+  // 🎯 Amazon Nova Pro metadata
   tool_trace?: Array<{ tool: string; result: any; timestamp: number }>;
-  provider_used?: Provider;
-  route?: Route;
   request_id?: string;
   metadata?: {
     model?: string;
     finish_reason?: string;
-    tool_call_provider?: 'groq' | 'openai' | 'bedrock_claude' | 'bedrock_mistral' | 'none';
-    final_response_provider?: Provider;
-    referee_used?: boolean;
-    referee_reason?: string;
+    tool_call_provider?: 'bedrock_nova' | 'none';
+    final_response_provider?: 'bedrock_nova';
     stateless_mode?: boolean;
     server_now_iso?: string;
     memories_loaded?: number;
     memory_first_triggered?: boolean;
     memory_first_source_id?: string;
-    final_answer_source?: 'memory_first' | 'llm' | 'llm+referee' | 'kb_empty';
-    referee_skipped_reason?: string;
-    groq_failed?: boolean;
-    openai_failed?: boolean;
-    referee_invoked?: boolean;
-    referee_failed?: boolean;
-    error_handled?: boolean;
-    rate_limit_exceeded?: boolean;
-    limit?: string;
-    openai_blocked?: boolean;
-    voice_mode?: boolean;
-    requires_tools?: boolean; // ← P0: Flag para fallback que necesita tools
-    kb_retrieved?: number; // ← P0: Chunks retrieved from Bedrock KB
-    kb_top_scores?: number[]; // ← P0: Top relevance scores
+    final_answer_source?: 'memory_first' | 'llm' | 'kb_empty';
+    kb_retrieved?: number;
+    kb_top_scores?: number[];
+    nova_input_tokens?: number;
+    nova_output_tokens?: number;
+    nova_total_tokens?: number;
     error?: string;
   };
 }
 
-const AVAILABLE_TOOLS: Array<Groq.Chat.ChatCompletionTool> = [
-  {
-    type: 'function',
-    function: {
-      name: 'get_user_info',
-      description: 'Obtiene información sobre el usuario actual y el asistente. USA ESTO cuando pregunten "¿quién eres?", "¿quién soy?", "¿cómo te llamas?", "¿cómo me llamo?".',
-      parameters: {
-        type: 'object',
-        properties: {},
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'list_emails',
-      description: 'Lista los correos del usuario. Usa esto cuando pidan "revisar correo", "ver emails", "qué correos tengo".',
-      parameters: {
-        type: 'object',
-        properties: {
-          unreadOnly: { type: 'boolean', description: 'Si true, solo muestra correos no leídos' },
-          limit: { type: 'number', description: 'Número máximo de correos a retornar (default: 20)' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'read_email',
-      description: 'Lee el contenido completo de un correo específico. Usa esto cuando digan "qué dice", "léelo", "abre el correo".',
-      parameters: {
-        type: 'object',
-        properties: {
-          emailId: { type: 'string', description: 'ID del correo a leer' },
-        },
-        required: ['emailId'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'send_email',
-      description: 'Envía un correo electrónico.',
-      parameters: {
-        type: 'object',
-        properties: {
-          to: { type: 'string', description: 'Email del destinatario' },
-          subject: { type: 'string', description: 'Asunto del correo' },
-          body: { type: 'string', description: 'Cuerpo del correo' },
-        },
-        required: ['to', 'subject', 'body'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'web_search',
-      description: 'Busca información en internet con Tavily. Usa esto cuando necesites datos actuales.',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Consulta de búsqueda' },
-        },
-        required: ['query'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'list_events',
-      description: 'Lista los eventos del calendario del usuario.',
-      parameters: {
-        type: 'object',
-        properties: {
-          startDate: { type: 'string', description: 'Fecha de inicio (ISO format)' },
-          endDate: { type: 'string', description: 'Fecha de fin (ISO format)' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'create_event',
-      description: 'Crea un nuevo evento en el calendario.',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string', description: 'Título del evento' },
-          startTime: { type: 'string', description: 'Hora de inicio (ISO format)' },
-          endTime: { type: 'string', description: 'Hora de fin (ISO format)' },
-          description: { type: 'string', description: 'Descripción del evento' },
-        },
-        required: ['title', 'startTime'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'analyze_document',
-      description: 'Analiza un documento (PDF, imagen, etc) usando OCR y extracción de información.',
-      parameters: {
-        type: 'object',
-        properties: {
-          fileUrl: { type: 'string', description: 'URL del archivo a analizar' },
-          fileType: { type: 'string', description: 'Tipo de archivo: pdf, image, excel, word (opcional, se detecta auto)' },
-        },
-        required: ['fileUrl'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'search_internal_docs',
-      description: 'Busca información en documentos internos o base de conocimiento usando Cohere Command R. Usa esto cuando necesites información de FAQs, documentos guardados, o contexto histórico.',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Pregunta o búsqueda a realizar en los documentos internos' },
-        },
-        required: ['query'],
-      },
-    },
-  },
-];
+// 🔧 TOOLS DISPONIBLES (SCOPE CERRADO)
+// Solo create_event, send_email, read_email
+// Definición completa está en bedrockNovaClient.ts con toolConfig nativo
 
 export class SimpleOrchestrator {
   async orchestrate(request: SimpleOrchestratorRequest): Promise<SimpleOrchestratorResponse> {
@@ -230,43 +83,22 @@ export class SimpleOrchestrator {
     });
     
     console.log('[SIMPLE ORCH] ══════════════════════════════════════');
-    console.log('[SIMPLE ORCH] 🚀 GROQ (Llama 3.3 70B)');
+    console.log('[SIMPLE ORCH] 🧠 AMAZON NOVA PRO (Bedrock Converse)');
     console.log('[SIMPLE ORCH] Request:', request.userMessage.substring(0, 100));
     console.log('[SIMPLE ORCH] User:', request.userId);
     
     try {
-      // 🔒 GUARDRAIL ABSOLUTO: OPENAI PROHIBIDO EN MODO VOZ
-      // 🔒 GUARDRAIL: Detectar modo voz (route o flag voice)
-      const isVoiceMode = request.route?.includes('/voice') || 
-                          request.voice === true ||  // ← P0: Detectar por flag también
-                          request.userMessage?.toLowerCase().includes('[voice]') ||
-                          false; // TODO: detectar desde channel o metadata
-      
-      if (isVoiceMode) {
-        console.warn('[GUARDRAIL] 🚫 OPENAI DISABLED - voice_handsfree mode active');
-        console.warn('[GUARDRAIL] STT: Groq Whisper ONLY');
-        console.warn('[GUARDRAIL] LLM: Groq ONLY');
-        console.warn('[GUARDRAIL] Referee: DISABLED');
-      }
-      
       // 🔒 P0: VALIDAR UUID - Si userId no es UUID válido, modo stateless
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const isValidUUID = uuidRegex.test(request.userId);
       
       let statelessMode = false;
-      let openaiBlocked = false; // 🔒 GUARDRAIL: Se activa en modo voz
       
       if (!isValidUUID) {
         statelessMode = true;
         console.warn('[ORCH] ⚠️ invalid_user_id -> stateless_mode=true');
         console.warn(`[ORCH] userId="${request.userId}" no es UUID válido`);
         console.warn('[ORCH] NO se cargará perfil/memoria/settings');
-      }
-      
-      // 🔒 ACTIVAR GUARDRAIL si modo voz detectado
-      if (isVoiceMode) {
-        openaiBlocked = true;
-        console.warn('[GUARDRAIL] ✅ openai_blocked=true (voice mode active)');
       }
       
       let userMemories = 'No hay memorias previas';
@@ -276,28 +108,28 @@ export class SimpleOrchestrator {
       
       if (!statelessMode) {
         // 🧠 1. CARGAR MEMORIA DEL USUARIO desde Supabase
-        console.log('[SIMPLE ORCH] 🧠 Cargando memoria del usuario...');
+        console.log('[ORCH] 🧠 Cargando memoria del usuario...');
         const { data: memories, error: memError } = await supabase
           .from('assistant_memories')
           .select('memory, importance, created_at')
-          .eq('user_id_uuid', request.userId) // ✅ FASE 2: Usar user_id_uuid para UUIDs
+          .eq('user_id_uuid', request.userId)
           .eq('workspace_id', workspaceId)
           .order('importance', { ascending: false })
           .order('created_at', { ascending: false })
           .limit(10);
         
         if (memError) {
-          console.error('[SIMPLE ORCH] ⚠️ Error cargando memorias:', memError);
+          console.error('[ORCH] ⚠️ Error cargando memorias:', memError);
         }
         
         userMemories = memories && memories.length > 0 
           ? memories.map(m => m.memory).join('\n- ')
           : 'No hay memorias previas';
         
-        console.log('[SIMPLE ORCH] 🧠 Memorias cargadas:', memories?.length || 0);
+        console.log('[ORCH] 🧠 Memorias cargadas:', memories?.length || 0);
         
         // 👤 2. CARGAR CONFIGURACIÓN DEL USUARIO
-        console.log('[SIMPLE ORCH] 👤 Cargando configuración del usuario...');
+        console.log('[ORCH] 👤 Cargando configuración del usuario...');
         const { data: userProfile, error: profileError } = await supabase
           .from('user_profiles')
           .select('preferred_name, assistant_name, tone_pref')
@@ -305,22 +137,22 @@ export class SimpleOrchestrator {
           .single();
         
         if (profileError && profileError.code !== 'PGRST116') {
-          console.error('[SIMPLE ORCH] ⚠️ Error cargando perfil:', profileError);
+          console.error('[ORCH] ⚠️ Error cargando perfil:', profileError);
         }
         
         assistantName = userProfile?.assistant_name || 'AL-E';
         userNickname = userProfile?.preferred_name || 'Usuario';
         tonePref = userProfile?.tone_pref || 'barrio';
       } else {
-        console.log('[SIMPLE ORCH] 🚫 Stateless mode: usando defaults (AL-E, Usuario, barrio)');
+        console.log('[ORCH] 🚫 Stateless mode: usando defaults (AL-E, Usuario, barrio)');
       }
       
-      console.log('[SIMPLE ORCH] 👤 Nombre asistente:', assistantName);
-      console.log('[SIMPLE ORCH] 👤 Nickname usuario:', userNickname);
-      console.log('[SIMPLE ORCH] 👤 Tono preferido:', tonePref);
+      console.log('[ORCH] 👤 Asistente:', assistantName);
+      console.log('[ORCH] 👤 Usuario:', userNickname);
+      console.log('[ORCH] 👤 Tono:', tonePref);
       
       // ============================================
-      // 🧠 P0 MEMORY-FIRST: HARD RULE (Director 18-ene-2026)
+      // 🧠 MEMORY-FIRST: HARD RULE
       // ============================================
       // Si hay memoria Y la pregunta es tipo "¿Cuál es mi X?", 
       // responder DIRECTO desde memoria (no LLM)
@@ -403,7 +235,6 @@ export class SimpleOrchestrator {
             memory_first_triggered: true,
             memory_first_source_id: memoryFirstSourceId,
             final_answer_source: 'memory_first',
-            referee_skipped_reason: 'memory_first',
           },
         };
       }
@@ -474,7 +305,12 @@ export class SimpleOrchestrator {
       });
       console.log('[SIMPLE ORCH] 🕐 Server time:', serverNowISO, '(', serverNowLocal, ')');
       
-      const messages: Array<Groq.Chat.ChatCompletionMessageParam> = [];
+      // Array para conversación (solo usado si hay conversationHistory)
+      interface HistoryMessage {
+        role: 'user' | 'assistant';
+        content: string;
+      }
+      const conversationMessages: HistoryMessage[] = [];
       
       // 🎭 SYSTEM PROMPT: AL-E COMO PERSONA REAL (NO ROBOT)
       const systemPrompt = `Eres ${assistantName} (Asistente Lógica Ejecutiva), la asistente ejecutiva personal de ${userNickname}.
@@ -612,442 +448,218 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
       if (request.conversationHistory && request.conversationHistory.length > 0) {
         request.conversationHistory.forEach(msg => {
           if (msg.role === 'user' || msg.role === 'assistant') {
-            messages.push({ role: msg.role as 'user' | 'assistant', content: msg.content });
+            conversationMessages.push({ role: msg.role as 'user' | 'assistant', content: msg.content });
           }
         });
       }
       
-      messages.push({ role: 'user', content: request.userMessage });
+      // ═══════════════════════════════════════════════════════════
+      // 🧠 AMAZON NOVA PRO - CEREBRO EJECUTIVO ÚNICO
+      // ═══════════════════════════════════════════════════════════
       
-      let response;
+      console.log('[MODEL] amazon.nova-pro-v1:0');
+      console.log('[ORCH] 🧠 AMAZON NOVA PRO - Cerebro único con tool calling nativo');
+      console.log('[ORCH] 🔧 Tools disponibles: create_event, send_email, read_email');
       
-      // 🎯 P0: TRACKING de metadata para observabilidad
-      let toolCallProvider: 'bedrock_mistral' | 'none' = 'none';
-      let finalResponseProvider: Provider = 'bedrock_mistral';
-      let refereeUsed = false;
-      let refereeReasonDetected: string | undefined;
+      // Convertir mensajes a formato Nova
+      const novaMessages: NovaMessage[] = [];
+      let novaSystemPrompt = systemPrompt;
       
-      // 🔥 P0 CRÍTICO: MISTRAL LARGE 3 SIEMPRE - NO FALLBACK
-      // Eliminada detección de tools - SIEMPRE usa Mistral con tools disponibles
-      console.log('[ORCH] 🧠 MISTRAL LARGE 3 - Único cerebro, tools siempre disponibles');
-      
-      // 🎯 FORZAR MISTRAL (NO OPCIONAL)
-      const shouldUseBedrock = true;  // SIEMPRE usar Mistral
-      
-      if (shouldUseBedrock) {
-        console.log('[ORCH] 🧠 Llamando Mistral Large 3 con TODAS las tools...');
-        try {
-          const route: Route = request.route?.includes('document') ? 'documents' : 'chat';
-          const provider = selectProvider(route, false);
-          finalResponseProvider = provider;
-          
-          // Extraer system prompt del primer mensaje
-          const systemPromptContent = messages[0]?.role === 'system' ? messages[0].content : '';
-          const systemPrompt = typeof systemPromptContent === 'string' ? systemPromptContent : JSON.stringify(systemPromptContent);
-          const chatMessages = messages.filter(m => m.role !== 'system');
-          
-          // 🔥 CRÍTICO: Incluir tools en system prompt para Mistral
-          const toolsDescription = AVAILABLE_TOOLS.map(t => 
-            `- ${t.function.name}: ${t.function.description}`
-          ).join('\n');
-          
-          const enhancedSystemPrompt = `${systemPrompt}
-
-═══════════════════════════════════════════════════════════
-🛠️ HERRAMIENTAS DISPONIBLES (USA CUANDO NECESITES):
-${toolsDescription}
-
-IMPORTANTE:
-- Tienes acceso real a estas herramientas
-- Si el usuario pide una acción que corresponde a una tool, ÚSALA
-- NO digas "no puedo hacer X" si la herramienta existe
-- Para usar una tool, responde en JSON: {"tool": "nombre", "params": {...}}
-═══════════════════════════════════════════════════════════`;
-          
-          // Convertir mensajes al formato simple
-          const simpleMessages = chatMessages.map(m => ({
-            role: m.role,
-            content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
-          }));
-          
-          const result = await callProvider(provider, simpleMessages, enhancedSystemPrompt);
-          
-          console.log(`[ORCH] ✅ Mistral Large 3 respondió correctamente`);
-          console.log(`[ORCH] 📊 Tools disponibles: ${AVAILABLE_TOOLS.length}`);
-          
-          // 🔥 P0: MISTRAL NO SOPORTA NATIVE TOOL CALLING
-          // Parsear JSON manual: {"tool": "create_event", "params": {...}}
-          let parsedToolCall: { tool: string; params: any } | null = null;
-          
-          try {
-            // Buscar JSON en la respuesta
-            const jsonMatch = result.final_answer.match(/\{[\s\S]*"tool"[\s\S]*\}/);
-            if (jsonMatch) {
-              parsedToolCall = JSON.parse(jsonMatch[0]);
-              console.log('[ORCH] 🔧 Tool call detected in Mistral response:', parsedToolCall?.tool);
-            }
-          } catch (parseError) {
-            console.log('[ORCH] No JSON tool call found in response');
-          }
-          
-          // Si detectó tool call, simular estructura OpenAI para el loop
-          if (parsedToolCall && parsedToolCall.tool) {
-            response = {
-              choices: [{
-                message: {
-                  role: 'assistant',
-                  content: '',
-                  tool_calls: [{
-                    id: `call_${Date.now()}`,
-                    type: 'function' as const,
-                    function: {
-                      name: parsedToolCall.tool,
-                      arguments: JSON.stringify(parsedToolCall.params)
-                    }
-                  }]
-                },
-                finish_reason: 'tool_calls'
-              }],
-              usage: result.usage
-            } as any;
-            console.log('[ORCH] 🔄 Converted to tool_calls format');
-          } else {
-            // Respuesta normal sin tools
-            response = {
-              choices: [{
-                message: {
-                  role: 'assistant',
-                  content: result.final_answer
-                },
-                finish_reason: 'stop'
-              }],
-              usage: result.usage
-            };
-          }
-          
-          toolCallProvider = 'bedrock_mistral';
-          
-        } catch (bedrockError: any) {
-          console.error('[ORCH] ❌ Mistral Large 3 FAILED:', bedrockError.message);
-          console.error('[ORCH] 🚫 NO HAY FALLBACK - Retornando error');
-          
-          // 🔥 SIN FALLBACK - Error explícito
-          return {
-            answer: 'Tengo un problema técnico temporal con mi sistema de razonamiento. Por favor intenta de nuevo en unos segundos.',
-            toolsUsed: [],
-            executionTime: Date.now() - startTime,
-            metadata: {
-              model: 'mistral-large-3',
-              error: bedrockError.message,
-              error_handled: true
-            },
-          };
-        }
+      for (const msg of conversationMessages) {
+        novaMessages.push({
+          role: msg.role,
+          content: msg.content
+        });
       }
       
-      // 🚀 P0 FIX CRÍTICO: GROQ para tool calling O si Bedrock falló
-      // OpenAI solo como fallback si Groq falla completamente
+      // Agregar mensaje actual del usuario
+      novaMessages.push({
+        role: 'user',
+        content: request.userMessage
+      });
       
+      // Primera llamada a Nova Pro
+      console.log('[ORCH] � Llamada inicial a Nova Pro...');
+      let novaResponse;
       
-      // 🔥 P0 CRÍTICO: NO HAY FALLBACK A GROQ NI OPENAI
-      // Mistral Large 3 es el único cerebro autorizado
-      // Si Mistral falla → error explícito, usuario reintenta
-      
-      if (!response) {
-        console.error('[ORCH] ❌ CRITICAL: No response from Mistral');
+      try {
+        novaResponse = await callNovaPro(novaMessages, novaSystemPrompt, 4096);
+        console.log('[ORCH] ✅ Nova Pro respondió');
+        console.log('[ORCH] Stop reason:', novaResponse.stopReason);
+        console.log('[ORCH] Tool uses:', novaResponse.toolUses?.length || 0);
+      } catch (novaError: any) {
+        console.error('[ORCH] ❌ AMAZON NOVA PRO FAILED:', novaError.message);
+        console.error('[ORCH] 🚫 NO HAY FALLBACK - Retornando error');
+        
         return {
-          answer: 'Error crítico del sistema. Por favor intenta de nuevo.',
+          answer: 'Tengo un problema técnico temporal con mi sistema de razonamiento. Por favor intenta de nuevo en unos segundos.',
           toolsUsed: [],
           executionTime: Date.now() - startTime,
           metadata: {
-            model: 'mistral-large-3',
-            error: 'No model executed',
-            error_handled: true
+            model: 'amazon.nova-pro-v1:0',
+            error: novaError.message,
+            tool_call_provider: 'none',
+            final_response_provider: 'bedrock_nova'
           },
         };
       }
-      
-      // 🔥 P0 CRÍTICO: NO HAY FALLBACK A GROQ NI OPENAI
-      // Mistral Large 3 es el único cerebro autorizado
-      // Si Mistral falla → error explícito, usuario reintenta
-      
-      if (!response) {
-        console.error('[ORCH] ❌ CRITICAL: No response from Mistral');
-        return {
-          answer: 'Error crítico del sistema. Por favor intenta de nuevo.',
-          toolsUsed: [],
-          executionTime: Date.now() - startTime,
-          metadata: {
-            model: 'mistral-large-3',
-            error: 'No model executed',
-            error_handled: true
-          },
-        };
-      }
-      // Array para guardar resultados de tools (para referee)
-      const toolResults: any[] = [];
+      // ═══════════════════════════════════════════════════════════
+      // 🔧 TOOL EXECUTION LOOP (AMAZON NOVA PRO)
+      // ═══════════════════════════════════════════════════════════
       
       const toolsUsed: string[] = [];
+      const toolResults: any[] = [];
       let iterations = 0;
       const maxIterations = 5;
       
-      while (response.choices[0]?.finish_reason === 'tool_calls' && iterations < maxIterations) {
+      // Loop mientras Nova indique tool_use
+      while (novaResponse.stopReason === 'tool_use' && iterations < maxIterations) {
         iterations++;
-        console.log(`[SIMPLE ORCH] 🔧 Iteration ${iterations}`);
+        console.log(`[ORCH] 🔧 Tool execution iteration ${iterations}`);
         
-        const assistantMessage = response.choices[0].message;
-        const toolCalls = assistantMessage.tool_calls || [];
-        
-        messages.push({
+        // ✅ CRÍTICO: Agregar respuesta de Nova como assistant ANTES de ejecutar tools
+        // Esto mantiene la estructura: [user] → [assistant con toolUse] → [user con toolResult]
+        novaMessages.push({
           role: 'assistant',
-          content: assistantMessage.content || '',
-          tool_calls: toolCalls.map(tc => ({
-            id: tc.id,
-            type: 'function' as const,
-            function: { name: tc.function.name, arguments: tc.function.arguments },
-          })),
+          content: novaResponse.contentBlocks || []
         });
         
-        for (const toolCall of toolCalls) {
-          const toolName = toolCall.function.name;
-          const toolInput = JSON.parse(toolCall.function.arguments);
+        const toolUses = novaResponse.toolUses || [];
+        console.log(`[ORCH] Tools to execute: ${toolUses.length}`);
+        
+        // Construir nuevo mensaje con resultados de tools (reinicia cada iteración)
+        const toolResultBlocks: ContentBlock[] = [];
+        
+        for (const toolUse of toolUses) {
+          const toolName = toolUse.name || 'unknown';
+          const toolInput = toolUse.input || {};
+          const toolUseId = toolUse.toolUseId || '';
           
-          console.log(`[ORCH] ⚙️ Tool: ${toolName}`);
-          console.log(`[ORCH] tool_call_attempted = true`);
+          console.log(`[TOOLS] Executing: ${toolName}`);
           console.log(`[${toolName.toUpperCase()}] payload =`, JSON.stringify(toolInput));
           
           toolsUsed.push(toolName);
           
           try {
-            const result = await executeTool(request.userId, { name: toolName, parameters: toolInput });
+            const result = await executeTool(request.userId, { 
+              name: toolName, 
+              parameters: toolInput 
+            });
+            
             console.log(`[${toolName.toUpperCase()}] ✅ Success`);
             console.log(`[${toolName.toUpperCase()}] response =`, JSON.stringify(result).substring(0, 200));
             
-            // Guardar resultado para referee
+            // Guardar para logs
             toolResults.push({ tool: toolName, result });
             
-            messages.push({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: JSON.stringify(result),
-            });
+            // Construir toolResult block para Nova
+            toolResultBlocks.push(buildToolResultBlock(toolUseId, result));
+            
           } catch (error: any) {
             console.error(`[${toolName.toUpperCase()}] ❌ Error:`, error.message);
-            console.error(`[ORCH] tool_failed = true`);
-            console.error(`[ORCH] tool_error =`, error.message);
             
-            // Guardar error para referee
+            // Guardar error para logs
             toolResults.push({ tool: toolName, error: error.message });
             
-            messages.push({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: JSON.stringify({ success: false, error: error.message }),
-            });
+            // Construir toolResult block con error
+            toolResultBlocks.push(buildToolResultBlock(toolUseId, {
+              success: false,
+              error: error.message
+            }));
           }
         }
         
-        // 🔥 P0 CRÍTICO: Segunda llamada con resultados de tools - SIEMPRE Mistral Large 3
-        console.log('[ORCH] 🔁 Segunda llamada a Mistral Large 3 con tool results...');
+        // Agregar mensaje con tool results
+        novaMessages.push({
+          role: 'user',
+          content: toolResultBlocks
+        });
         
-        // Reconstruir system prompt con tools
-        const systemPromptContent = messages.find(m => m.role === 'system')?.content || '';
-        const baseSystemPrompt = typeof systemPromptContent === 'string' ? systemPromptContent : JSON.stringify(systemPromptContent);
-        
-        const toolsDescription = AVAILABLE_TOOLS.map(t => 
-          `- ${t.function.name}: ${t.function.description}`
-        ).join('\n');
-        
-        const enhancedSystemPrompt = `${baseSystemPrompt}
-
-═══════════════════════════════════════════════════════════
-🛠️ HERRAMIENTAS DISPONIBLES (USA CUANDO NECESITES):
-${toolsDescription}
-
-IMPORTANTE:
-- Tienes acceso real a estas herramientas
-- Si el usuario pide una acción que corresponde a una tool, ÚSALA
-- NO digas "no puedo hacer X" si la herramienta existe
-- Para usar una tool, responde en JSON: {"tool": "nombre", "params": {...}}
-═══════════════════════════════════════════════════════════`;
-        
-        // Convertir messages con tool_calls a formato Bedrock simple (texto plano)
-        const bedrockMessages: BedrockMessage[] = [];
-        for (const msg of messages) {
-          if (msg.role === 'system') continue; // Skip system (ya está en systemPrompt)
-          if (msg.role === 'tool') {
-            // Convertir tool result a user message
-            const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-            bedrockMessages.push({
-              role: 'user',
-              content: `Tool result: ${contentStr}`
-            });
-          } else if (msg.role === 'assistant' && msg.tool_calls) {
-            // Convertir tool call a assistant message descriptivo
-            const toolNames = msg.tool_calls.map((tc: any) => tc.function.name).join(', ');
-            const msgContentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-            bedrockMessages.push({
-              role: 'assistant',
-              content: msgContentStr || `Ejecutando herramientas: ${toolNames}`
-            });
-          } else {
-            // user o assistant normal
-            const msgContentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-            bedrockMessages.push({
-              role: msg.role as 'user' | 'assistant',
-              content: msgContentStr || ''
-            });
-          }
-        }
+        // Segunda llamada a Nova con resultados de tools
+        console.log('[ORCH] 🔁 Llamada a Nova con tool results...');
         
         try {
-          const mistralResponse = await callMistral(bedrockMessages, 4096, enhancedSystemPrompt);
-          // Convertir BedrockResponse a OpenAI-style response para compatibilidad
-          response = {
-            choices: [{
-              message: {
-                role: 'assistant',
-                content: mistralResponse.content
-              },
-              finish_reason: mistralResponse.stop_reason
-            }]
-          } as any;
-          console.log('[ORCH] ✅ Mistral Large 3 segunda llamada exitosa');
-        } catch (mistralError: any) {
-          console.error('[ORCH] ❌ Mistral Large 3 segunda llamada falló:', mistralError.message);
+          novaResponse = await callNovaPro(novaMessages, novaSystemPrompt, 4096);
+          console.log('[ORCH] ✅ Nova respondió con tool results');
+          console.log('[ORCH] Stop reason:', novaResponse.stopReason);
+          
+        } catch (novaError: any) {
+          console.error('[ORCH] ❌ Nova falló en segunda llamada:', novaError.message);
+          
           return {
             answer: 'Error al procesar los resultados de las herramientas. Por favor intenta de nuevo.',
             toolsUsed,
             executionTime: Date.now() - startTime,
             metadata: {
-              model: 'mistral-large-3',
-              error: mistralError.message,
-              error_handled: true
+              model: 'amazon.nova-pro-v1:0',
+              error: novaError.message,
+              tool_call_provider: 'bedrock_nova',
+              final_response_provider: 'bedrock_nova'
             },
           };
         }
-        
-        console.log('[ORCH] Segunda llamada - Finish reason:', response.choices[0]?.finish_reason);
       }
       
       const executionTime = Date.now() - startTime;
       
-      console.log('[SIMPLE ORCH] 🎯 Tools:', toolsUsed);
-      console.log('[SIMPLE ORCH] ⏱️', executionTime, 'ms');
+      console.log('[TOOLS] executed:', toolsUsed.join(', ') || 'none');
+      console.log('[ORCH] ⏱️ Execution time:', executionTime, 'ms');
       
-      // ====================================================================
-      // VALIDACIÓN POST-RESPUESTA: Verificar que menciona tools ejecutados
-      // ====================================================================
+      // ═══════════════════════════════════════════════════════════
+      // 📤 RESPUESTA FINAL DE AMAZON NOVA PRO
+      // ═══════════════════════════════════════════════════════════
       
-      let finalAnswer = response.choices[0]?.message?.content || '';
+      let finalAnswer = novaResponse.content || '';
       
-      console.log('[SIMPLE ORCH] 🔍 Validando respuesta...');
+      console.log('[ORCH] 📝 Final answer length:', finalAnswer.length);
+      console.log('[ORCH] 📝 Preview:', finalAnswer.substring(0, 150));
       
+      // Validación: menciona tools ejecutados?
       if (toolsUsed.length > 0) {
         const responseText = finalAnswer.toLowerCase();
         
         let mentionedTools = false;
         for (const tool of toolsUsed) {
           if (responseText.includes(tool.replace('_', ' ')) || 
-              responseText.includes('encontré') || 
-              responseText.includes('revisé') ||
-              responseText.includes('fuente:') ||
-              responseText.includes('resultado:')) {
+              responseText.includes('agendé') || 
+              responseText.includes('envié') ||
+              responseText.includes('confirmación')) {
             mentionedTools = true;
             break;
           }
         }
         
         if (!mentionedTools) {
-          console.warn('[SIMPLE ORCH] ⚠️ Respuesta no menciona tools ejecutados');
-          // 🚫 P0 UX: NO mostrar tool traces al usuario
-          // Tool traces quedan SOLO en logs del servidor
-          console.log('[SIMPLE ORCH] 📊 Tools ejecutados (solo logs):', toolsUsed);
-          console.log('[SIMPLE ORCH] 📊 Resultados (solo logs):', toolResults.map((tr: any) => ({
-            tool: tr.toolName,
-            success: tr.result?.success
-          })));
-        }
-      }
-      
-      // ====================================================================
-      // OPENAI REFEREE - Detección de evasiones
-      // ====================================================================
-      
-      let correctedAnswer = finalAnswer;
-      
-      if (process.env.OPENAI_ROLE === 'referee') {
-        try {
-          // Detectar si Groq evadió
-          const evasionCheck = detectGroqEvasion(
-            finalAnswer,
-            AVAILABLE_TOOLS.length > 0,
-            toolsUsed.length > 0
-          );
-          
-          // Detectar contradicción con evidencia
-          const evidenceMismatch = toolResults.length > 0
-            ? detectEvidenceMismatch(finalAnswer, { toolResults })
-            : false;
-          
-          const needsReferee = evasionCheck.needsReferee || evidenceMismatch;
-          
-          if (needsReferee) {
-            console.log(`[SIMPLE ORCH] ⚖️ OPENAI REFEREE INVOKED - reason=${evasionCheck.reason || 'evidence_mismatch'}`);
-            console.log(`[SIMPLE ORCH] 📝 RESPUESTA ANTES DEL REFEREE:`, finalAnswer.substring(0, 150));
-            
-            refereeUsed = true; // 📊 TRACKING
-            refereeReasonDetected = evasionCheck.reason || 'evidence_mismatch'; // 📊 TRACKING
-            finalResponseProvider = 'openai'; // 📊 TRACKING (respuesta final viene de referee)
-            
-            const refereeResult = await invokeOpenAIReferee({
-              userPrompt: request.userMessage,
-              groqResponse: finalAnswer,
-              toolResults: toolResults.length > 0 ? { tools: toolResults } : undefined,
-              systemState: {
-                tools_available: AVAILABLE_TOOLS.length,
-                tools_executed: toolsUsed.length,
-                execution_time_ms: executionTime
-              },
-              detectedIssue: evasionCheck.reason || 'evidence_mismatch'
-            });
-            
-            correctedAnswer = refereeResult.text;
-            console.log(`[SIMPLE ORCH] ✅ REFEREE CORRECTED`);
-            console.log(`[SIMPLE ORCH] 📝 RESPUESTA DESPUÉS DEL REFEREE:`, correctedAnswer.substring(0, 150));
-            console.log(`[SIMPLE ORCH] 🔄 CAMBIO: ${finalAnswer === correctedAnswer ? 'NINGUNO' : 'SÍ MODIFICÓ'}`);
-          }
-        } catch (refereeError: any) {
-          console.error(`[SIMPLE ORCH] ❌ REFEREE FAILED: ${refereeError.message}`);
-          // Continuar con respuesta de Groq
+          console.warn('[ORCH] ⚠️ Respuesta no menciona tools ejecutados');
+          console.log('[ORCH] 📊 Tools ejecutados (logs):', toolsUsed);
         }
       }
       
       // 💾 GUARDAR MEMORIA si la conversación fue importante (SOLO si NO es stateless)
-      if (!statelessMode && (toolsUsed.length > 0 || request.userMessage.length > 20)) { // ✅ FASE 2: Umbral bajado a 20 chars
-        console.log('[SIMPLE ORCH] 💾 Guardando memoria...');
+      if (!statelessMode && (toolsUsed.length > 0 || request.userMessage.length > 20)) {
+        console.log('[ORCH] 💾 Guardando memoria...');
         
         const memoryText = `${userNickname} preguntó: "${request.userMessage.substring(0, 200)}". ${assistantName} usó: ${toolsUsed.join(', ') || 'respuesta directa'}.`;
-        const importance = toolsUsed.length > 0 ? 5 : 3; // Más importante si usó tools
+        const importance = toolsUsed.length > 0 ? 5 : 3;
         
         await supabase
           .from('assistant_memories')
           .insert({
             workspace_id: workspaceId,
-            user_id_uuid: request.userId, // ✅ FASE 2: Usar user_id_uuid para UUIDs
+            user_id_uuid: request.userId,
             mode: 'universal',
             memory: memoryText,
             importance,
           })
           .then(({ error }) => {
-            if (error) console.error('[SIMPLE ORCH] ⚠️ Error guardando memoria:', error);
-            else console.log('[SIMPLE ORCH] 💾 Memoria guardada');
+            if (error) console.error('[ORCH] ⚠️ Error guardando memoria:', error);
+            else console.log('[ORCH] 💾 Memoria guardada');
           });
       } else if (statelessMode) {
-        console.log('[SIMPLE ORCH] 🚫 Stateless mode: NO se guarda memoria');
+        console.log('[ORCH] 🚫 Stateless mode: NO se guarda memoria');
       }
       
-      console.log('[SIMPLE ORCH] ══════════════════════════════════════');
+      console.log('[ORCH] ══════════════════════════════════════');
       
       logger.aiResponseSent({
         request_id: requestId,
@@ -1057,38 +669,40 @@ IMPORTANTE:
         latency_ms_total: executionTime,
       });
       
-      // 📊 P0: METADATA COMPLETA para observabilidad
+      // 📊 METADATA COMPLETA - Amazon Nova Pro
       return { 
-        answer: correctedAnswer,
-        session_id: request.sessionId || null, // ✅ FASE 2: Retornar session_id para persistencia
+        answer: finalAnswer,
+        session_id: request.sessionId || null,
         toolsUsed, 
         executionTime,
         metadata: {
-          tool_call_provider: toolCallProvider,
-          final_response_provider: finalResponseProvider,
-          referee_used: refereeUsed,
-          referee_reason: refereeReasonDetected,
+          model: 'amazon.nova-pro-v1:0',
+          finish_reason: novaResponse.stopReason,
+          tool_call_provider: toolsUsed.length > 0 ? 'bedrock_nova' : 'none',
+          final_response_provider: 'bedrock_nova',
           stateless_mode: statelessMode,
           server_now_iso: serverNowISO,
-          model: 'bedrock/mistral-large-3',
-          memories_loaded: !statelessMode ? userMemories.split('\n').length - 1 : 0, // Debug info
-          // 🧠 P0 TELEMETRÍA MEMORY-FIRST (Director 18-ene-2026)
+          memories_loaded: !statelessMode ? userMemories.split('\n').length - 1 : 0,
+          // 🧠 Memory-first telemetry
           memory_first_triggered: false,
           memory_first_source_id: '',
-          final_answer_source: refereeUsed ? 'llm+referee' : 'llm',
-          referee_skipped_reason: refereeUsed ? undefined : 'not_needed',
-          // 🧠 P0 TELEMETRÍA KB (Director 20-ene-2026)
+          final_answer_source: 'llm',
+          // 🧠 KB telemetry
           kb_retrieved: kbRetrieved,
           kb_top_scores: kbTopScores.length > 0 ? kbTopScores : undefined,
+          // 🧠 Nova telemetry
+          nova_input_tokens: novaResponse.usage?.inputTokens,
+          nova_output_tokens: novaResponse.usage?.outputTokens,
+          nova_total_tokens: novaResponse.usage?.totalTokens,
         }
       };
       
     } catch (error: any) {
-      console.error('[SIMPLE ORCH] 💥 Error:', error);
+      console.error('[ORCH] 💥 Error:', error);
       const executionTime = Date.now() - startTime;
       return {
         answer: `Disculpa, error: ${error.message}`,
-        session_id: request.sessionId || null, // ✅ FASE 2: Retornar session_id incluso en error
+        session_id: request.sessionId || null,
         toolsUsed: [],
         executionTime,
       };

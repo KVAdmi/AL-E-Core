@@ -1,12 +1,16 @@
 /**
  * =====================================================
- * LLM PROVIDER FACTORY
+ * LLM PROVIDER FACTORY (LEGACY)
  * =====================================================
  * 
- * Factory con fallback automático:
- * - Groq (primario - usado para tool calling)
- * - Mistral AI (secundario)
- * - OpenRouter (terciario)
+ * ⚠️  DEPRECADO: AL-E usa Amazon Nova Pro (Bedrock) como cerebro ejecutivo
+ * 
+ * Este factory mantiene proveedores auxiliares:
+ * - Groq (disponible como fallback)
+ * - Mistral AI (disponible como fallback)
+ * - OpenRouter (disponible como fallback)
+ * 
+ * NO se usan para tool calling ni orquestación principal.
  * =====================================================
  */
 
@@ -70,15 +74,18 @@ class LLMProviderFactory {
     const openrouterKey = process.env.OPENROUTER_API_KEY;
     const provider = process.env.LLM_PROVIDER || 'groq';
 
-    // Configurar providers disponibles (GROQ primero)
+    // ⚠️ NOTA: Este factory es LEGACY - AL-E usa Amazon Nova Pro (Bedrock) como cerebro ejecutivo
+    // Groq/Mistral disponibles solo como fallback auxiliar si Nova falla
+    
+    // Configurar providers disponibles
     if (groqKey) {
       this.groqProvider = new GroqProviderWrapper(groqKey);
-      console.log('[LLM FACTORY] ✅ Groq configurado (primario para tool calling)');
+      console.log('[LLM FACTORY] ✅ Groq disponible (fallback auxiliar - NO primario)');
     }
 
     if (mistralKey) {
       this.mistralProvider = new MistralProvider(mistralKey);
-      console.log('[LLM FACTORY] ✅ Mistral AI configurado (secundario)');
+      console.log('[LLM FACTORY] ✅ Mistral AI disponible (fallback auxiliar)');
     }
 
     if (openrouterKey) {
@@ -113,7 +120,7 @@ class LLMProviderFactory {
       else if (this.openrouterProvider) this.currentProvider = 'openrouter';
     }
 
-    console.log(`[LLM FACTORY] 🚀 Provider activo: ${this.currentProvider.toUpperCase()}`);
+    console.log(`[LLM FACTORY] ⚠️  Legacy provider: ${this.currentProvider.toUpperCase()} (NO usado - Nova Pro es cerebro ejecutivo)`);
   }
 
   /**

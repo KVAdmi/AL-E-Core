@@ -201,10 +201,31 @@ export async function readEmail(
   try {
     console.log('[EMAIL TOOLS] Leyendo correo:', emailId);
 
+    // ✅ FIX: Resolver alias "latest" o "last" a UUID real
+    let resolvedEmailId = emailId;
+    if (emailId === 'latest' || emailId === 'last') {
+      console.log('[EMAIL TOOLS] 🔍 Resolviendo alias "latest" a UUID...');
+      const { data: latestEmail, error: queryError } = await supabase
+        .from('email_messages')
+        .select('id')
+        .eq('owner_user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (queryError || !latestEmail) {
+        console.error('[EMAIL TOOLS] Error resolviendo "latest":', queryError);
+        throw new Error('No se encontró ningún correo reciente');
+      }
+      
+      resolvedEmailId = latestEmail.id;
+      console.log('[EMAIL TOOLS] ✅ "latest" resuelto a:', resolvedEmailId);
+    }
+
     const { data: message, error } = await supabase
       .from('email_messages')
       .select('*')
-      .eq('id', emailId)
+      .eq('id', resolvedEmailId)
       .eq('owner_user_id', userId)
       .single();
 
