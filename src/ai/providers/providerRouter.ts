@@ -59,49 +59,9 @@ function checkCircuitBreaker(provider: Provider): boolean {
 export function selectProvider(route: Route, requiresTools: boolean): Provider {
   console.log(`[ROUTER] 🎯 Seleccionando provider para route=${route}, requiresTools=${requiresTools}`);
   
-  // RULE 1: Tool-calling crítico -> Groq (o OpenAI fallback)
-  if (requiresTools) {
-    if (checkCircuitBreaker('groq')) {
-      console.log('[ROUTER] ✅ Groq seleccionado para tool-calling');
-      return 'groq';
-    }
-    // Fallback: OpenAI
-    if (checkCircuitBreaker('openai')) {
-      console.log('[ROUTER] ⚠️ Groq down, fallback a OpenAI para tools');
-      return 'openai';
-    }
-    throw new Error('No hay provider disponible para tool-calling');
-  }
-  
-  // RULE 2: Voz -> Groq obligatorio
-  if (route === 'voice') {
-    if (checkCircuitBreaker('groq')) {
-      console.log('[ROUTER] ✅ Groq seleccionado para voz');
-      return 'groq';
-    }
-    throw new Error('Groq no disponible para modo voz');
-  }
-  
-  // RULE 3: Razonamiento/chat/documentos -> Mistral Large 3 (Bedrock)
-  if (route === 'chat' || route === 'documents') {
-    if (checkCircuitBreaker('bedrock_mistral')) {
-      console.log('[ROUTER] ✅ Mistral Large 3 seleccionado para razonamiento');
-      return 'bedrock_mistral';
-    }
-    // Fallback: Groq
-    if (checkCircuitBreaker('groq')) {
-      console.log('[ROUTER] ⚠️ Mistral down, fallback a Groq');
-      return 'groq';
-    }
-    // Último fallback: OpenAI
-    if (checkCircuitBreaker('openai')) {
-      console.log('[ROUTER] ⚠️ Todo down, último fallback OpenAI');
-      return 'openai';
-    }
-  }
-  
-  // Default: Mistral
-  console.log('[ROUTER] ✅ Default: Mistral Large 3');
+  // 🔥 P0 CRÍTICO: MISTRAL LARGE 3 SIEMPRE - ÚNICO CEREBRO AUTORIZADO
+  // Sin fallbacks, sin excepciones
+  console.log('[ROUTER] ✅ Mistral Large 3 seleccionado (único cerebro autorizado)');
   return 'bedrock_mistral';
 }
 

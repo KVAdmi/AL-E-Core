@@ -23,7 +23,7 @@ import {
   type RefereeReason
 } from '../llm/openaiReferee';
 import { selectProvider, callProvider, type Provider, type Route } from './providers/providerRouter';
-import { type BedrockMessage } from './providers/bedrockClient';
+import { type BedrockMessage, callMistral } from './providers/bedrockClient';
 import { queryKnowledgeBase, requiresKnowledgeBase, formatKBContextForPrompt } from './knowledge/bedrockKB';
 
 const groq = new Groq({
@@ -620,11 +620,9 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
       messages.push({ role: 'user', content: request.userMessage });
       
       let response;
-      let groqFailed = false;
-      let usingOpenAI = false;
       
       // 🎯 P0: TRACKING de metadata para observabilidad
-      let toolCallProvider: 'groq' | 'openai' | 'bedrock_mistral' | 'none' = 'none';
+      let toolCallProvider: 'bedrock_mistral' | 'none' = 'none';
       let finalResponseProvider: Provider = 'bedrock_mistral';
       let refereeUsed = false;
       let refereeReasonDetected: string | undefined;
@@ -811,24 +809,84 @@ IMPORTANTE:
           }
         }
         
-        // Segunda llamada con resultados de tools (usar el mismo provider)
-        if (usingOpenAI) {
-          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-          response = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            max_tokens: 4096,
-            messages: messages as any,
-            tools: AVAILABLE_TOOLS as any,
-            tool_choice: 'auto',
-          });
-        } else {
-          response = await groq.chat.completions.create({
-            model: 'llama-3.3-70b-versatile',
-            max_tokens: 4096,
-            messages,
-            tools: AVAILABLE_TOOLS,
-            tool_choice: 'auto',
-          });
+        // 🔥 P0 CRÍTICO: Segunda llamada con resultados de tools - SIEMPRE Mistral Large 3
+        console.log('[ORCH] 🔁 Segunda llamada a Mistral Large 3 con tool results...');
+        
+        // Reconstruir system prompt con tools
+        const systemPromptContent = messages.find(m => m.role === 'system')?.content || '';
+        const baseSystemPrompt = typeof systemPromptContent === 'string' ? systemPromptContent : JSON.stringify(systemPromptContent);
+        
+        const toolsDescription = AVAILABLE_TOOLS.map(t => 
+          `- ${t.function.name}: ${t.function.description}`
+        ).join('\n');
+        
+        const enhancedSystemPrompt = `${baseSystemPrompt}
+
+═══════════════════════════════════════════════════════════
+🛠️ HERRAMIENTAS DISPONIBLES (USA CUANDO NECESITES):
+${toolsDescription}
+
+IMPORTANTE:
+- Tienes acceso real a estas herramientas
+- Si el usuario pide una acción que corresponde a una tool, ÚSALA
+- NO digas "no puedo hacer X" si la herramienta existe
+- Para usar una tool, responde en JSON: {"tool": "nombre", "params": {...}}
+═══════════════════════════════════════════════════════════`;
+        
+        // Convertir messages con tool_calls a formato Bedrock simple (texto plano)
+        const bedrockMessages: BedrockMessage[] = [];
+        for (const msg of messages) {
+          if (msg.role === 'system') continue; // Skip system (ya está en systemPrompt)
+          if (msg.role === 'tool') {
+            // Convertir tool result a user message
+            const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+            bedrockMessages.push({
+              role: 'user',
+              content: `Tool result: ${contentStr}`
+            });
+          } else if (msg.role === 'assistant' && msg.tool_calls) {
+            // Convertir tool call a assistant message descriptivo
+            const toolNames = msg.tool_calls.map((tc: any) => tc.function.name).join(', ');
+            const msgContentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+            bedrockMessages.push({
+              role: 'assistant',
+              content: msgContentStr || `Ejecutando herramientas: ${toolNames}`
+            });
+          } else {
+            // user o assistant normal
+            const msgContentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+            bedrockMessages.push({
+              role: msg.role as 'user' | 'assistant',
+              content: msgContentStr || ''
+            });
+          }
+        }
+        
+        try {
+          const mistralResponse = await callMistral(bedrockMessages, 4096, enhancedSystemPrompt);
+          // Convertir BedrockResponse a OpenAI-style response para compatibilidad
+          response = {
+            choices: [{
+              message: {
+                role: 'assistant',
+                content: mistralResponse.content
+              },
+              finish_reason: mistralResponse.stop_reason
+            }]
+          } as any;
+          console.log('[ORCH] ✅ Mistral Large 3 segunda llamada exitosa');
+        } catch (mistralError: any) {
+          console.error('[ORCH] ❌ Mistral Large 3 segunda llamada falló:', mistralError.message);
+          return {
+            answer: 'Error al procesar los resultados de las herramientas. Por favor intenta de nuevo.',
+            toolsUsed,
+            executionTime: Date.now() - startTime,
+            metadata: {
+              model: 'mistral-large-3',
+              error: mistralError.message,
+              error_handled: true
+            },
+          };
         }
         
         console.log('[ORCH] Segunda llamada - Finish reason:', response.choices[0]?.finish_reason);
@@ -974,7 +1032,7 @@ IMPORTANTE:
           referee_reason: refereeReasonDetected,
           stateless_mode: statelessMode,
           server_now_iso: serverNowISO,
-          model: usingOpenAI ? 'openai/gpt-4o-mini' : 'groq/llama-3.3-70b-versatile',
+          model: 'bedrock/mistral-large-3',
           memories_loaded: !statelessMode ? userMemories.split('\n').length - 1 : 0, // Debug info
           // 🧠 P0 TELEMETRÍA MEMORY-FIRST (Director 18-ene-2026)
           memory_first_triggered: false,
