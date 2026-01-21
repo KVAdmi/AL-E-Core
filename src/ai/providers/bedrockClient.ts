@@ -55,19 +55,28 @@ export async function callClaude(
 }
 
 /**
- * Llama a Mistral Large 3 via Bedrock (fallback/backup)
+ * Llama a Mistral Large 3 via Bedrock (Messages API format)
  */
 export async function callMistral(
   messages: BedrockMessage[],
   maxTokens: number = 2048,
   systemPrompt?: string
 ): Promise<BedrockResponse> {
+  // Mistral Large 3 usa Messages API format
   const body: any = {
-    prompt: formatMistralPrompt(messages, systemPrompt),
+    messages: messages.map(m => ({
+      role: m.role,
+      content: m.content
+    })),
     max_tokens: maxTokens,
     temperature: 0.7,
     top_p: 0.9
   };
+
+  // Agregar system prompt si existe
+  if (systemPrompt) {
+    body.system = systemPrompt;
+  }
 
   const command = new InvokeModelCommand({
     modelId: 'mistral.mistral-large-3-675b-instruct', // 🔥 P0: Mistral Large 3 (Bedrock namespace)
@@ -80,36 +89,10 @@ export async function callMistral(
   const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 
   return {
-    content: responseBody.outputs[0].text,
-    stop_reason: responseBody.outputs[0].stop_reason || 'complete',
-    usage: {
-      input_tokens: 0, // Mistral no siempre devuelve usage
-      output_tokens: 0
-    }
+    content: responseBody.choices[0].message.content,
+    stop_reason: responseBody.choices[0].finish_reason || 'complete',
+    usage: responseBody.usage || { input_tokens: 0, output_tokens: 0 }
   };
-}
-
-/**
- * Formatea mensajes para Mistral (usa formato de prompt simple)
- */
-function formatMistralPrompt(messages: BedrockMessage[], systemPrompt?: string): string {
-  let prompt = '';
-  
-  if (systemPrompt) {
-    prompt += `[INST] ${systemPrompt}\n\n`;
-  } else {
-    prompt += '[INST] ';
-  }
-
-  for (const msg of messages) {
-    if (msg.role === 'user') {
-      prompt += `${msg.content} [/INST]\n`;
-    } else {
-      prompt += `${msg.content}\n[INST] `;
-    }
-  }
-
-  return prompt.trim();
 }
 
 export { bedrockClient };
