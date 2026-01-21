@@ -24,7 +24,6 @@ import {
 } from '../llm/openaiReferee';
 import { selectProvider, callProvider, type Provider, type Route } from './providers/providerRouter';
 import { type BedrockMessage } from './providers/bedrockClient';
-import { queryKnowledgeBase, requiresKnowledgeBase, formatKBContextForPrompt } from './knowledge/bedrockKB';
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -64,7 +63,7 @@ interface SimpleOrchestratorResponse {
     memories_loaded?: number;
     memory_first_triggered?: boolean;
     memory_first_source_id?: string;
-    final_answer_source?: 'memory_first' | 'llm' | 'llm+referee' | 'kb_empty';
+    final_answer_source?: 'memory_first' | 'llm' | 'llm+referee';
     referee_skipped_reason?: string;
     groq_failed?: boolean;
     openai_failed?: boolean;
@@ -76,8 +75,6 @@ interface SimpleOrchestratorResponse {
     openai_blocked?: boolean;
     voice_mode?: boolean;
     requires_tools?: boolean; // ← P0: Flag para fallback que necesita tools
-    kb_retrieved?: number; // ← P0: Chunks retrieved from Bedrock KB
-    kb_top_scores?: number[]; // ← P0: Top relevance scores
     error?: string;
   };
 }
@@ -412,58 +409,6 @@ export class SimpleOrchestrator {
       // CONTINUAR CON FLUJO NORMAL (LLM)
       // ============================================
       
-      // 🧠 P0: BEDROCK KNOWLEDGE BASE - RAG (Director 20-ene-2026)
-      // Consultar KB ANTES de construir system prompt
-      // KB es fuente única de verdad para conocimiento interno
-      let kbContext = '';
-      let kbRetrieved = 0;
-      let kbTopScores: number[] = [];
-      
-      if (!statelessMode && requiresKnowledgeBase(request.userMessage)) {
-        console.log('[ORCH] 📚 Query requiere Knowledge Base - consultando...');
-        
-        try {
-          const kbResult = await queryKnowledgeBase(
-            request.userMessage,
-            request.userId,
-            workspaceId,
-            5 // Top 5 chunks
-          );
-          
-          kbRetrieved = kbResult.resultsCount;
-          kbTopScores = kbResult.topScores;
-          
-          if (kbResult.resultsCount === 0) {
-            // 🚨 FAIL-CLOSED: Si query de conocimiento y KB vacío → error explícito
-            console.warn('[ORCH] ⚠️ KB returned 0 chunks for knowledge query - fail-closed');
-            
-            return {
-              answer: 'No tengo registro de eso en mi base de conocimiento. ¿Podrías darme más contexto o reformular la pregunta?',
-              session_id: request.sessionId,
-              toolsUsed: [],
-              executionTime: Date.now() - startTime,
-              metadata: {
-                model: 'kb-fail-closed',
-                final_answer_source: 'kb_empty',
-                error: 'KB returned 0 chunks for knowledge query'
-              }
-            };
-          }
-          
-          // Formatear contexto para prompt
-          kbContext = formatKBContextForPrompt(kbResult);
-          
-          console.log('[ORCH] ✅ KB context ready:', kbResult.resultsCount, 'chunks');
-          
-        } catch (kbError: any) {
-          console.error('[ORCH] ❌ KB query failed:', kbError.message);
-          // No bloqueamos el flujo si KB falla, pero lo registramos
-          kbContext = 'Error consultando base de conocimiento.';
-        }
-      } else if (!statelessMode) {
-        console.log('[ORCH] 📚 Query NO requiere KB - usando memoria corta + LLM');
-      }
-      
       // 🕐 P0: TIME GROUNDING - Inyectar timestamp del servidor
       const serverNow = new Date();
       const serverNowISO = serverNow.toISOString();
@@ -589,16 +534,6 @@ Veredicto: Viable pero optimista. Duplica cash reserve.
 🧠 MEMORIA DE ${userNickname}:
 ${userMemories}
 
-📚 BASE DE CONOCIMIENTO (Bedrock KB):
-${kbContext || 'No se consultó KB para esta query (query de memoria corta o acción directa)'}
-
-🚫 REGLAS DE USO DE CONOCIMIENTO (CRÍTICAS):
-1. Si la pregunta es sobre memoria/conocimiento interno Y hay contexto de KB → USA SOLO KB
-2. Si KB dice "No hay información" → responde "No tengo registro de eso"
-3. NUNCA uses conocimiento general del modelo para hechos históricos del usuario
-4. SIEMPRE cita la fuente cuando uses KB: "Según [documento/fuente]..."
-5. KB es fuente de verdad absoluta para: políticas, procesos, acuerdos, decisiones pasadas
-
 Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una persona real.
 `;
 
@@ -702,8 +637,9 @@ IMPORTANTE:
             executionTime: Date.now() - startTime,
             metadata: {
               model: 'mistral-large-3',
+              status: 'failed',
               error: bedrockError.message,
-              error_handled: true
+              no_fallback: true
             },
           };
         }
@@ -712,42 +648,6 @@ IMPORTANTE:
       // 🚀 P0 FIX CRÍTICO: GROQ para tool calling O si Bedrock falló
       // OpenAI solo como fallback si Groq falla completamente
       
-      
-      // 🔥 P0 CRÍTICO: NO HAY FALLBACK A GROQ NI OPENAI
-      // Mistral Large 3 es el único cerebro autorizado
-      // Si Mistral falla → error explícito, usuario reintenta
-      
-      if (!response) {
-        console.error('[ORCH] ❌ CRITICAL: No response from Mistral');
-        return {
-          answer: 'Error crítico del sistema. Por favor intenta de nuevo.',
-          toolsUsed: [],
-          executionTime: Date.now() - startTime,
-          metadata: {
-            model: 'mistral-large-3',
-            error: 'No model executed',
-            error_handled: true
-          },
-        };
-      }
-      
-      // 🔥 P0 CRÍTICO: NO HAY FALLBACK A GROQ NI OPENAI
-      // Mistral Large 3 es el único cerebro autorizado
-      // Si Mistral falla → error explícito, usuario reintenta
-      
-      if (!response) {
-        console.error('[ORCH] ❌ CRITICAL: No response from Mistral');
-        return {
-          answer: 'Error crítico del sistema. Por favor intenta de nuevo.',
-          toolsUsed: [],
-          executionTime: Date.now() - startTime,
-          metadata: {
-            model: 'mistral-large-3',
-            error: 'No model executed',
-            error_handled: true
-          },
-        };
-      }
       // Array para guardar resultados de tools (para referee)
       const toolResults: any[] = [];
       
@@ -981,9 +881,6 @@ IMPORTANTE:
           memory_first_source_id: '',
           final_answer_source: refereeUsed ? 'llm+referee' : 'llm',
           referee_skipped_reason: refereeUsed ? undefined : 'not_needed',
-          // 🧠 P0 TELEMETRÍA KB (Director 20-ene-2026)
-          kb_retrieved: kbRetrieved,
-          kb_top_scores: kbTopScores.length > 0 ? kbTopScores : undefined,
         }
       };
       
