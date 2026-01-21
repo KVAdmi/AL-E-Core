@@ -30,12 +30,48 @@ import {
   invokeOpenAIReferee,
   RefereeReason 
 } from '../llm/openaiReferee';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 const router = express.Router();
 const orchestrator = new Orchestrator();
+const execPromise = promisify(exec);
 
 // Anti-duplicado: request_id tracking (30s TTL)
 const recentRequests = new Map<string, number>();
+
+/**
+ * Genera audio con Edge-TTS para respuestas de voz
+ */
+async function generateTTSAudio(text: string, voice: string = 'es-MX-DaliaNeural'): Promise<string | null> {
+  try {
+    // Limpiar texto de markdown
+    const cleanText = text.replace(/\*\*|\*|`|#/g, '').trim();
+    
+    // Truncar a 2 frases para respuestas rápidas
+    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+    const shortText = sentences.slice(0, 2).join(' ');
+    
+    const outputFile = path.join(os.tmpdir(), `tts_${uuidv4()}.mp3`);
+    
+    await execPromise(
+      `edge-tts --voice "${voice}" --text "${shortText.replace(/"/g, '\\"')}" --write-media "${outputFile}"`,
+      { timeout: 10000 }
+    );
+    
+    const audioBuffer = fs.readFileSync(outputFile);
+    fs.unlinkSync(outputFile);
+    
+    // Retornar como data URL
+    return `data:audio/mpeg;base64,${audioBuffer.toString('base64')}`;
+  } catch (error: any) {
+    console.error('[TTS] Error generating audio:', error.message);
+    return null;
+  }
+}
 
 /**
  * =====================================================
@@ -1798,13 +1834,34 @@ Ejemplo malo: "Visita https://... para ver el precio."`
     }
     
     // ============================================
-    // 12. RESPONDER AL FRONTEND
+    // 12. GENERAR AUDIO SI ES MODO VOZ
+    // ============================================
+    
+    let audioUrl: string | null = null;
+    
+    if (meta?.inputMode === 'voice' || meta?.voice === true) {
+      console.log('[CHAT_V2] 🔊 Generando audio TTS...');
+      const voiceGender = meta?.ttsGender || 'female';
+      const voiceId = voiceGender === 'female' ? 'es-MX-DaliaNeural' : 'es-MX-JorgeNeural';
+      
+      audioUrl = await generateTTSAudio(finalAnswer, voiceId);
+      
+      if (audioUrl) {
+        console.log('[CHAT_V2] ✅ Audio generado');
+      } else {
+        console.warn('[CHAT_V2] ⚠️ No se pudo generar audio');
+      }
+    }
+    
+    // ============================================
+    // 13. RESPONDER AL FRONTEND
     // ============================================
     
     return res.json({
       answer: finalAnswer,
       speak_text: markdownToSpeakable(finalAnswer),
       should_speak: shouldSpeak(finalAnswer),
+      audio_url: audioUrl, // ✅ Incluir audio si es modo voz
       session_id: sessionId,
       memories_to_add: [],  // Deprecated - se guarda automáticamente via memoryExtractor
       sources: knowledgeSources.length > 0 ? knowledgeSources : undefined, // Agregar sources si hay
@@ -1814,7 +1871,8 @@ Ejemplo malo: "Visita https://... para ver el precio."`
         model: orchestratorContext.modelSelected,
         intent: orchestratorContext.intent?.intent_type,
         action_executed: orchestratorContext.toolUsed !== 'none',
-        guardrail_applied: guardrailResult.sanitized
+        guardrail_applied: guardrailResult.sanitized,
+        tts_generated: !!audioUrl // ✅ Indicar si se generó audio
       }
     });
     
