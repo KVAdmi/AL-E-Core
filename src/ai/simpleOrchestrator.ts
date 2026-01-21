@@ -128,7 +128,29 @@ export class SimpleOrchestrator {
         
         console.log('[ORCH] 🧠 Memorias cargadas:', memories?.length || 0);
         
-        // 👤 2. CARGAR CONFIGURACIÓN DEL USUARIO
+        // �️ 1.5. CARGAR CONTEXTO DE SESIÓN (attachments persistidos)
+        if (request.sessionId) {
+          console.log('[ORCH] 🗂️ Cargando contexto de sesión...');
+          const { data: sessionData, error: sessionError } = await supabase
+            .from('ae_sessions')
+            .select('metadata')
+            .eq('id', request.sessionId)
+            .eq('user_id_uuid', request.userId)
+            .single();
+          
+          if (sessionError) {
+            console.error('[ORCH] ⚠️ Error cargando sesión:', sessionError);
+          } else if (sessionData?.metadata?.attachments_context) {
+            const sessionContext = sessionData.metadata.attachments_context;
+            const filesCount = sessionData.metadata.files?.length || 0;
+            console.log(`[ORCH] 🗂️ Contexto de sesión cargado: ${filesCount} archivo(s), ${sessionContext.length} caracteres`);
+            
+            // Agregar contexto de sesión a las memorias
+            userMemories = `${userMemories}\n\n=== KNOWLEDGE BASE (Archivos de esta sesión) ===\n${sessionContext}`;
+          }
+        }
+        
+        // �👤 2. CARGAR CONFIGURACIÓN DEL USUARIO
         console.log('[ORCH] 👤 Cargando configuración del usuario...');
         const { data: userProfile, error: profileError } = await supabase
           .from('user_profiles')
@@ -457,19 +479,47 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
       // 🧠 AMAZON NOVA PRO - CEREBRO EJECUTIVO ÚNICO
       // ═══════════════════════════════════════════════════════════
       
-      console.log('[MODEL] amazon.nova-pro-v1:0');
-      console.log('[ORCH] 🧠 AMAZON NOVA PRO - Cerebro único con tool calling nativo');
-      console.log('[ORCH] 🔧 Tools disponibles: create_event, send_email, read_email');
+      console.log('[ORCH] ═══════════════════════════════════════════════');
+      console.log('[ORCH] 🚀 PROVIDER ACTIVO: AMAZON NOVA PRO');
+      console.log('[ORCH] 📍 Model: amazon.nova-pro-v1:0');
+      console.log('[ORCH] 🔧 Tools: create_event, send_email, read_email, list_events, web_search');
+      console.log('[ORCH] ═══════════════════════════════════════════════');
       
-      // Convertir mensajes a formato Nova
+      // 🔥 BLOQUEADOR 1 FIX: CARGAR HISTORIAL COMPLETO DE LA SESIÓN
       const novaMessages: NovaMessage[] = [];
       let novaSystemPrompt = systemPrompt;
       
-      for (const msg of conversationMessages) {
-        novaMessages.push({
-          role: msg.role,
-          content: msg.content
-        });
+      // Cargar historial completo de Supabase si hay sessionId
+      if (request.sessionId && !statelessMode) {
+        console.log('[ORCH] 📚 Cargando historial completo de sesión...');
+        const { data: sessionHistory, error: historyError } = await supabase
+          .from('ae_messages')
+          .select('role, content')
+          .eq('session_id', request.sessionId)
+          .order('created_at', { ascending: true })
+          .limit(20); // Últimos 20 mensajes para contexto
+        
+        if (historyError) {
+          console.error('[ORCH] ⚠️ Error cargando historial:', historyError);
+        } else if (sessionHistory && sessionHistory.length > 0) {
+          console.log(`[ORCH] ✅ ${sessionHistory.length} mensajes de historial cargados`);
+          for (const msg of sessionHistory) {
+            novaMessages.push({
+              role: msg.role as 'user' | 'assistant',
+              content: msg.content
+            });
+          }
+        }
+      }
+      
+      // Agregar conversationMessages si existen (fallback)
+      if (conversationMessages.length > 0 && novaMessages.length === 0) {
+        for (const msg of conversationMessages) {
+          novaMessages.push({
+            role: msg.role,
+            content: msg.content
+          });
+        }
       }
       
       // Agregar mensaje actual del usuario
@@ -477,6 +527,8 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
         role: 'user',
         content: request.userMessage
       });
+      
+      console.log(`[ORCH] 📝 Total mensajes enviados a Nova: ${novaMessages.length}`);
       
       // Primera llamada a Nova Pro
       console.log('[ORCH] � Llamada inicial a Nova Pro...');

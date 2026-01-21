@@ -341,14 +341,17 @@ export async function sendEmail(
   userId: string,
   draft: DraftEmail,
   accountEmail?: string
-): Promise<{ success: boolean; messageId?: string; error?: string }> {
+): Promise<{ success: boolean; messageId?: string; error?: string; errorCode?: string; errorDetails?: any }> {
   try {
-    console.log('[EMAIL TOOLS] Enviando correo a:', draft.to);
+    console.log('[SEND_EMAIL] 📤 Iniciando envío de correo');
+    console.log('[SEND_EMAIL] 📧 To:', draft.to);
+    console.log('[SEND_EMAIL] 📝 Subject:', draft.subject);
+    console.log('[SEND_EMAIL] 👤 User ID:', userId);
 
-    // Obtener cuenta del usuario
+    // Obtener cuenta del usuario con TODOS los campos necesarios
     let query = supabase
       .from('email_accounts')
-      .select('id, from_email')
+      .select('id, from_email, provider, status, oauth_access_token, oauth_refresh_token, oauth_token_expiry, smtp_host, smtp_port, smtp_user, smtp_pass_enc')
       .eq('owner_user_id', userId);
 
     if (accountEmail) {
@@ -358,16 +361,58 @@ export async function sendEmail(
     const { data: accounts, error: accountError } = await query;
 
     if (accountError || !accounts || accounts.length === 0) {
-      throw new Error('No se encontró cuenta de correo configurada');
+      console.error('[SEND_EMAIL] ❌ No se encontró cuenta configurada');
+      return {
+        success: false,
+        error: 'NO_EMAIL_ACCOUNT_CONFIGURED',
+        errorCode: 'NO_ACCOUNT',
+        errorDetails: { userId, accountEmail }
+      };
     }
 
     const account = accounts[0];
+    console.log('[SEND_EMAIL] ✅ Cuenta encontrada:', account.from_email);
+    console.log('[SEND_EMAIL] 🔧 Provider:', account.provider);
+    console.log('[SEND_EMAIL] 📊 Status:', account.status);
+
+    // 🚨 DIAGNÓSTICO SMTP (MÉTODO REAL DE ENVÍO)
+    console.log('[SEND_EMAIL] 🔐 SMTP Configuration:');
+    console.log('  - Host:', account.smtp_host || 'NOT_SET');
+    console.log('  - Port:', account.smtp_port || 'NOT_SET');
+    console.log('  - User:', account.smtp_user || 'NOT_SET');
+    console.log('  - Password:', account.smtp_pass_enc ? 'ENCRYPTED_PRESENT' : 'MISSING');
+    
+    // NOTA: OAuth tokens NO SE USAN para SMTP. Solo para IMAP sync.
+    // El envío usa nodemailer con smtp_host, smtp_port, smtp_user, smtp_pass_enc.
+    
+    if (!account.smtp_host || !account.smtp_port || !account.smtp_pass_enc) {
+      console.error('[SEND_EMAIL] ❌ Credenciales SMTP incompletas');
+      return {
+        success: false,
+        error: 'SMTP_CREDENTIALS_INCOMPLETE: Faltan credenciales SMTP (host, port o password). Reconfigura tu cuenta en Email Hub.',
+        errorCode: 'SMTP_INCOMPLETE',
+        errorDetails: {
+          account: account.from_email,
+          smtp_host: account.smtp_host || 'missing',
+          smtp_port: account.smtp_port || 'missing',
+          has_password: !!account.smtp_pass_enc
+        }
+      };
+    }
+    
+    // Si es Gmail, advertir sobre App Password
+    if (account.smtp_host?.includes('gmail.com')) {
+      console.log('[SEND_EMAIL] ⚠️ Gmail detectado - debe usar App Password (16 chars)');
+      console.log('[SEND_EMAIL] ℹ️ Password normal de Gmail NO funciona desde 2022');
+      console.log('[SEND_EMAIL] ℹ️ Generar en: https://myaccount.google.com/apppasswords');
+    }
 
     // Llamar a la API de envío
+    console.log('[SEND_EMAIL] 📡 Llamando a /api/mail/send...');
     const response = await axios.post(
       `${API_BASE}/api/mail/send`,
       {
-        accountId: account.id, // ✅ REQUERIDO por el API
+        accountId: account.id,
         from: account.from_email,
         to: draft.to,
         subject: draft.subject,
@@ -377,21 +422,73 @@ export async function sendEmail(
       {
         headers: {
           'Content-Type': 'application/json'
-        }
+        },
+        validateStatus: () => true // No lanzar error en 4xx/5xx
       }
     );
 
-    console.log('[EMAIL TOOLS] ✓ Correo enviado exitosamente');
+    if (response.status === 401) {
+      console.error('[SEND_EMAIL] ❌ 401 Unauthorized del API /api/mail/send');
+      console.error('[SEND_EMAIL] Response data:', response.data);
+      
+      // SMTP 401 = Credenciales inválidas (no OAuth)
+      let errorMessage = 'SMTP_AUTH_FAILED: Las credenciales SMTP son inválidas.';
+      
+      if (account.smtp_host?.includes('gmail.com')) {
+        errorMessage += '\n\n⚠️ Gmail requiere App Password (NO password normal).\nGenera uno en: https://myaccount.google.com/apppasswords';
+      } else {
+        errorMessage += '\n\nVerifica usuario y password SMTP en Configuración → Email Hub.';
+      }
+      
+      return {
+        success: false,
+        error: errorMessage,
+        errorCode: 'SMTP_AUTH_FAILED',
+        errorDetails: {
+          status: 401,
+          smtp_host: account.smtp_host,
+          smtp_user: account.smtp_user,
+          responseData: response.data,
+          account: account.from_email
+        }
+      };
+    }
+
+    if (response.status >= 400) {
+      console.error('[SEND_EMAIL] ❌ Error del API:', response.status);
+      console.error('[SEND_EMAIL] Response data:', response.data);
+      
+      return {
+        success: false,
+        error: `EMAIL_SEND_FAILED: ${response.data?.message || 'Error desconocido'}`,
+        errorCode: 'API_ERROR',
+        errorDetails: {
+          status: response.status,
+          responseData: response.data
+        }
+      };
+    }
+
+    console.log('[SEND_EMAIL] ✅ Correo enviado exitosamente');
+    console.log('[SEND_EMAIL] 📬 Message ID:', response.data.messageId);
+    
     return {
       success: true,
       messageId: response.data.messageId
     };
 
   } catch (error: any) {
-    console.error('[EMAIL TOOLS] Error enviando correo:', error);
+    console.error('[SEND_EMAIL] ❌ Exception capturada:', error.message);
+    console.error('[SEND_EMAIL] Stack:', error.stack);
+    
     return {
       success: false,
-      error: error.message
+      error: `SEND_EMAIL_EXCEPTION: ${error.message}`,
+      errorCode: 'EXCEPTION',
+      errorDetails: {
+        message: error.message,
+        stack: error.stack
+      }
     };
   }
 }

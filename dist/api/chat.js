@@ -224,6 +224,32 @@ router.post('/chat', auth_1.optionalAuth, async (req, res) => {
                                 .join('\n');
                             attachmentsContext = `\n\n=== DOCUMENTOS ADJUNTOS ===\n${docsBlock}\n=== FIN DOCUMENTOS ===\n`;
                             console.log(`[ATTACHMENTS] ✓ Procesados ${extractedDocs.length} documento(s), ${attachmentsContext.length} caracteres de contexto`);
+                            // PERSISTIR CONTEXTO EN ae_sessions.metadata para memoria universal
+                            if (sessionId || requestSessionId) {
+                                const persistSessionId = sessionId || requestSessionId;
+                                const filesMetadata = extractedDocs.map(doc => ({
+                                    name: doc.name,
+                                    type: doc.type,
+                                    size: doc.text?.length || 0,
+                                    processed_at: new Date().toISOString()
+                                }));
+                                const { error: updateError } = await supabase_1.supabase
+                                    .from('ae_sessions')
+                                    .update({
+                                    metadata: {
+                                        attachments_context: attachmentsContext,
+                                        files: filesMetadata,
+                                        updated_at: new Date().toISOString()
+                                    }
+                                })
+                                    .eq('id', persistSessionId);
+                                if (updateError) {
+                                    console.error('[MEMORY] Error persistiendo attachments_context:', updateError);
+                                }
+                                else {
+                                    console.log(`[MEMORY] ✓ Contexto persistido en ae_sessions (${filesMetadata.length} archivo(s))`);
+                                }
+                            }
                         }
                     }
                 }
@@ -959,10 +985,6 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
     let message = ''; // Mensaje del usuario para memory extraction
     let finalAnswer = ''; // Respuesta del assistant para memory extraction
     try {
-        console.log('\n[CHAT_V2] ==================== NUEVA SOLICITUD ====================');
-        // CRITICAL: Verificar que OpenAI está bloqueado
-        const openaiCheck = (0, router_1.verifyOpenAIBlocked)();
-        console.log(`[CHAT_V2] OpenAI Status: ${openaiCheck.message}`);
         // ============================================
         // 1. VALIDAR PAYLOAD MÍNIMO
         // ============================================
@@ -973,6 +995,21 @@ router.post('/chat/v2', auth_1.optionalAuth, async (req, res) => {
         const meta = req.body.meta;
         // P0: Extraer userEmail y userDisplayName del payload (multi-user collaboration)
         userEmail = req.body.userEmail;
+        userDisplayName = req.body.userDisplayName;
+        console.log('\n[CHAT_V2] ==================== NUEVA SOLICITUD ====================');
+        console.log('[CHAT_V2] 📥 PAYLOAD RECIBIDO DEL FRONTEND:');
+        console.log('  - sessionId:', requestSessionId || 'NO_SESSION');
+        console.log('  - userId (body):', req.body.userId || 'NOT_IN_BODY');
+        console.log('  - message length:', message?.length || 0);
+        console.log('  - workspaceId:', workspaceId || 'NOT_PROVIDED');
+        console.log('  - hasAttachments:', !!req.body.attachments);
+        console.log('  - userEmail:', userEmail || 'NOT_PROVIDED');
+        console.log('  - userDisplayName:', userDisplayName || 'NOT_PROVIDED');
+        console.log('  - timestamp:', new Date().toISOString());
+        console.log('[CHAT_V2] ================================================================');
+        // CRITICAL: Verificar que OpenAI está bloqueado
+        const openaiCheck = (0, router_1.verifyOpenAIBlocked)();
+        console.log(`[CHAT_V2] OpenAI Status: ${openaiCheck.message}`);
         userDisplayName = req.body.userDisplayName;
         if (!message || typeof message !== 'string') {
             return res.status(400).json({

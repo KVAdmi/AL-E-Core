@@ -49,6 +49,7 @@ export interface ToolResult {
   success: boolean;
   data?: any;
   error?: string;
+  metadata?: Record<string, any>; // Error codes, tool info, etc.
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -177,10 +178,28 @@ export async function executeTool(
           },
           parameters.accountEmail
         );
+        
+        // 🚨 PROPAGAR ERROR CODES al metadata
+        if (!sendResult.success) {
+          return {
+            success: false,
+            error: sendResult.error,
+            metadata: {
+              errorCode: sendResult.errorCode,
+              errorDetails: sendResult.errorDetails,
+              tool: 'send_email'
+            }
+          };
+        }
+        
         return {
-          success: sendResult.success,
-          data: sendResult.success ? { messageId: sendResult.messageId } : undefined,
-          error: sendResult.error
+          success: true,
+          data: { messageId: sendResult.messageId },
+          metadata: {
+            tool: 'send_email',
+            to: parameters.to,
+            subject: parameters.subject
+          }
         };
 
       case 'create_and_send_email':

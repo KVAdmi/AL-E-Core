@@ -225,10 +225,13 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
     const audioMimeType = audioFile.mimetype || 'unknown';
     const estimatedDuration = audioSizeBytes > 0 ? Math.round(audioSizeBytes / 16000) : 0; // ~16KB/seg aprox
     
-    console.log('[VOICE] 📊 AUDIO RECIBIDO:');
+    console.log('═══════════════════════════════════════════════════════');
+    console.log('[VOICE] 📊 AUDIO RECIBIDO EN BACKEND:');
     console.log('  - Bytes:', audioSizeBytes);
     console.log('  - MimeType:', audioMimeType);
     console.log('  - Duración estimada:', estimatedDuration, 'seg');
+    console.log('  - Timestamp:', new Date().toISOString());
+    console.log('═══════════════════════════════════════════════════════');
     
     if (audioSizeBytes === 0) {
       console.error('[VOICE] ❌ Audio vacío (0 bytes)');
@@ -303,11 +306,16 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
       const audioSeconds = Math.ceil(audioFile.size / 16000); // Estimación aproximada
       
       // 🚨 P0: LOGS OBLIGATORIOS después de transcripción
-      console.log(`[STT] ✅ Transcripción completada en ${latency_ms}ms`);
-      console.log(`[STT] 📊 Duración estimada: ${audioSeconds}s`);
-      console.log(`[STT] 🌍 Idioma detectado: ${transcription.language || 'auto'}`);
-      console.log(`[STT] 🎯 Whisper llamado: ${whisperCalled ? 'true' : 'false'}`);
-      console.log(`[STT] 📝 Texto transcrito (${transcription.text.length} chars): "${transcription.text.substring(0, 100)}..."`);
+      console.log('═══════════════════════════════════════════════════════');
+      console.log('[STT] ✅ RESPUESTA ENVIADA AL FRONTEND:');
+      console.log(`  - Latencia: ${latency_ms}ms`);
+      console.log(`  - Duración audio: ${audioSeconds}s`);
+      console.log(`  - Idioma detectado: ${transcription.language || 'auto'}`);
+      console.log(`  - Whisper llamado: ${whisperCalled ? 'SÍ' : 'NO'}`);
+      console.log(`  - Transcript length: ${transcription.text.length} chars`);
+      console.log(`  - Transcript preview: "${transcription.text.substring(0, 150)}..."`);
+      console.log(`  - Timestamp: ${new Date().toISOString()}`);
+      console.log('═══════════════════════════════════════════════════════');
       
       // 🚨 P0 CRÍTICO: Detectar si ASR devolvió texto vacío
       if (!transcription.text || transcription.text.trim().length === 0) {

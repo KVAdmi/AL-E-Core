@@ -658,6 +658,15 @@ router.get('/chats', requireAuth, async (req, res) => {
   try {
     const ownerUserId = req.userId!; // Garantizado por requireAuth
     
+    // Primero verificar cuántos bots tiene el usuario
+    const { data: botsData, error: botsError } = await supabase
+      .from('telegram_bots')
+      .select('id, bot_username')
+      .eq('owner_user_id', ownerUserId)
+      .eq('is_active', true);
+    
+    const botsCount = botsData?.length || 0;
+    
     // Obtener chats con info del bot
     const { data, error } = await supabase
       .from('telegram_chats')
@@ -682,6 +691,15 @@ router.get('/chats', requireAuth, async (req, res) => {
       });
     }
     
+    const chatsCount = data?.length || 0;
+    
+    // 🚨 UX: Si hay bots pero no chats, dar mensaje claro
+    let helpMessage = null;
+    if (botsCount > 0 && chatsCount === 0) {
+      helpMessage = `Tienes ${botsCount} bot${botsCount > 1 ? 's' : ''} configurado${botsCount > 1 ? 's' : ''}, pero aún no hay conversaciones. Para comenzar, envía /start a tu bot en Telegram.`;
+      console.log(`[TELEGRAM] ℹ️ User ${ownerUserId}: ${botsCount} bot(s), 0 chats - Sending help message`);
+    }
+    
     // Formatear para frontend (compatibilidad telegram_accounts)
     const chats = (data || []).map(chat => ({
       chatId: chat.id, // UUID del chat
@@ -694,7 +712,12 @@ router.get('/chats', requireAuth, async (req, res) => {
     
     return res.json({
       ok: true,
-      chats
+      chats,
+      metadata: {
+        bots_count: botsCount,
+        chats_count: chatsCount,
+        help_message: helpMessage
+      }
     });
     
   } catch (error: any) {

@@ -113,6 +113,28 @@ const NOVA_TOOLS: Tool[] = [
   },
   {
     toolSpec: {
+      name: 'list_events',
+      description: 'Lista eventos del calendario del usuario. Usa esto cuando pregunten: "qué tengo hoy", "mi agenda", "eventos de mañana", "qué tengo programado", "reuniones de esta semana", "confirmame la agenda", etc.',
+      inputSchema: {
+        json: {
+          type: 'object',
+          properties: {
+            startDate: {
+              type: 'string',
+              description: 'Fecha de inicio en formato ISO 8601 (ej: 2026-01-22T00:00:00Z). Si dicen "hoy", usa fecha actual. Si dicen "esta semana", usa inicio de semana.'
+            },
+            endDate: {
+              type: 'string',
+              description: 'Fecha de fin en formato ISO 8601. Si no especifican, usa 7 días desde startDate.'
+            }
+          },
+          required: []
+        }
+      }
+    }
+  },
+  {
+    toolSpec: {
       name: 'web_search',
       description: 'Busca información en internet usando Tavily. Usa esto cuando necesites datos actuales, noticias, clima, o información que no está en tu conocimiento base.',
       inputSchema: {
