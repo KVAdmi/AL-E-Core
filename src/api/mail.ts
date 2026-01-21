@@ -101,6 +101,26 @@ router.post('/send', requireAuth, async (req, res) => {
       }
     });
     
+    // 🚨 P0: VALIDAR SMTP antes de enviar
+    console.log('[MAIL.SEND] 🔍 Verificando conexión SMTP...');
+    try {
+      await transporter.verify();
+      console.log('[MAIL.SEND] ✅ SMTP verify OK - conexión válida');
+    } catch (verifyError: any) {
+      console.error('[MAIL.SEND] ❌ SMTP verify FAILED:', verifyError.message);
+      return res.status(401).json({
+        success: false,
+        error: 'SMTP_VERIFY_FAILED',
+        message: `No se pudo conectar al servidor SMTP: ${verifyError.message}`,
+        details: {
+          host: account.smtp_host,
+          port: account.smtp_port,
+          user: account.smtp_user,
+          error: verifyError.message
+        }
+      });
+    }
+    
     // Preparar destinatarios
     const toArray = Array.isArray(to) ? to : [to];
     const ccArray = cc ? (Array.isArray(cc) ? cc : [cc]) : undefined;

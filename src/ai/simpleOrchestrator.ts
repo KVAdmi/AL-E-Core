@@ -143,10 +143,16 @@ export class SimpleOrchestrator {
           } else if (sessionData?.metadata?.attachments_context) {
             const sessionContext = sessionData.metadata.attachments_context;
             const filesCount = sessionData.metadata.files?.length || 0;
-            console.log(`[ORCH] 🗂️ Contexto de sesión cargado: ${filesCount} archivo(s), ${sessionContext.length} caracteres`);
+            const filesNames = sessionData.metadata.files?.map((f: any) => f.name).join(', ') || 'unknown';
+            
+            console.log(`[ORCH] � KB CARGADO: ${filesCount} archivo(s)`);
+            console.log(`[ORCH] 📄 Archivos: ${filesNames}`);
+            console.log(`[ORCH] 📊 Tamaño KB: ${sessionContext.length} caracteres`);
             
             // Agregar contexto de sesión a las memorias
             userMemories = `${userMemories}\n\n=== KNOWLEDGE BASE (Archivos de esta sesión) ===\n${sessionContext}`;
+          } else {
+            console.log('[ORCH] ℹ️ No hay archivos en KB de esta sesión');
           }
         }
         
@@ -587,7 +593,8 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
           const toolInput = toolUse.input || {};
           const toolUseId = toolUse.toolUseId || '';
           
-          console.log(`[TOOLS] Executing: ${toolName}`);
+          console.log(`[TOOLS] 🔧 Executing: ${toolName}`);
+          console.log(`[TOOLS] 🆔 toolUseId: ${toolUseId}`);
           console.log(`[${toolName.toUpperCase()}] payload =`, JSON.stringify(toolInput));
           
           toolsUsed.push(toolName);
@@ -605,7 +612,10 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
             toolResults.push({ tool: toolName, result });
             
             // Construir toolResult block para Nova
-            toolResultBlocks.push(buildToolResultBlock(toolUseId, result));
+            const toolResultBlock = buildToolResultBlock(toolUseId, result);
+            toolResultBlocks.push(toolResultBlock);
+            
+            console.log(`[TOOLS] ✅ toolResult creado para toolUseId: ${toolUseId}`);
             
           } catch (error: any) {
             console.error(`[${toolName.toUpperCase()}] ❌ Error:`, error.message);
@@ -614,10 +624,13 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
             toolResults.push({ tool: toolName, error: error.message });
             
             // Construir toolResult block con error
-            toolResultBlocks.push(buildToolResultBlock(toolUseId, {
+            const toolResultBlock = buildToolResultBlock(toolUseId, {
               success: false,
               error: error.message
-            }));
+            });
+            toolResultBlocks.push(toolResultBlock);
+            
+            console.log(`[TOOLS] ⚠️ toolResult con error creado para toolUseId: ${toolUseId}`);
           }
         }
         
