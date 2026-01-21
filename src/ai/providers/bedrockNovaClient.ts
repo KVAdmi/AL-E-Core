@@ -95,8 +95,34 @@ const NOVA_TOOLS: Tool[] = [
   },
   {
     toolSpec: {
+      name: 'list_emails',
+      description: 'Lista los correos del usuario. Usa esto cuando pregunten: "mis correos", "últimos emails", "revisa mi correo", "qué correos tengo", "inbox", etc. Devuelve resumen de cada email (from, subject, date).',
+      inputSchema: {
+        json: {
+          type: 'object',
+          properties: {
+            limit: {
+              type: 'number',
+              description: 'Número máximo de correos a listar (default: 20, máximo: 50)'
+            },
+            unreadOnly: {
+              type: 'boolean',
+              description: 'true para mostrar solo correos no leídos'
+            },
+            folderType: {
+              type: 'string',
+              description: 'Carpeta a leer: "inbox" (default), "sent", "drafts", "trash", "archive"'
+            }
+          },
+          required: []
+        }
+      }
+    }
+  },
+  {
+    toolSpec: {
       name: 'read_email',
-      description: 'Lee el contenido completo de un correo específico. Si el usuario NO especifica cuál correo, usa "latest" como emailId para leer el más reciente.',
+      description: 'Lee el contenido completo de un correo específico. Usa DESPUÉS de list_emails para leer correos completos. Si el usuario NO especifica cuál correo, usa "latest" como emailId para leer el más reciente.',
       inputSchema: {
         json: {
           type: 'object',

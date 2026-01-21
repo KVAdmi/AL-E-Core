@@ -488,7 +488,7 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
       console.log('[ORCH] ═══════════════════════════════════════════════');
       console.log('[ORCH] 🚀 PROVIDER ACTIVO: AMAZON NOVA PRO');
       console.log('[ORCH] 📍 Model: amazon.nova-pro-v1:0');
-      console.log('[ORCH] 🔧 Tools: create_event, send_email, read_email, list_events, web_search');
+      console.log('[ORCH] 🔧 Tools: create_event, send_email, list_emails, read_email, list_events, web_search');
       console.log('[ORCH] ═══════════════════════════════════════════════');
       
       // 🔥 BLOQUEADOR 1 FIX: CARGAR HISTORIAL COMPLETO DE LA SESIÓN

@@ -421,7 +421,8 @@ export async function sendEmail(
       },
       {
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'x-user-id': userId // ← Agregar user ID para bypass interno
         },
         validateStatus: () => true // No lanzar error en 4xx/5xx
       }

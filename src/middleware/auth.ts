@@ -87,6 +87,18 @@ export async function optionalAuth(req: Request, res: Response, next: NextFuncti
  */
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
+    // 🔥 BYPASS para llamadas internas con x-user-id
+    const internalUserId = req.headers['x-user-id'] as string;
+    if (internalUserId) {
+      console.log('[AUTH] ⚡ Internal call with x-user-id:', internalUserId);
+      req.user = {
+        id: internalUserId,
+        email: 'internal@al-eon.com'
+      };
+      req.userId = internalUserId;
+      return next();
+    }
+    
     // 1) Extraer token
     const authHeader = req.headers.authorization || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;

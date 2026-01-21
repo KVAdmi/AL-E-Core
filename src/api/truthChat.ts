@@ -15,14 +15,19 @@ const router = express.Router();
 
 const looksLikeTimeOrDateQuestion = (text: string): boolean => {
   const t = (text || '').toLowerCase();
-  // Español informal + variantes comunes
+  
+  // 🔥 FIX: NO capturar si menciona "agendar", "cita", "reunión", "llamada", "evento"
+  // Esas palabras indican que quiere CREAR un evento, no solo saber la hora
+  if (/\b(agendar|cita|reuni[oó]n|llamada|evento|crear|programar|poner|agregar)\b/.test(t)) {
+    return false;
+  }
+  
+  // Solo capturar preguntas DIRECTAS sobre hora/fecha
   return (
-    /\b(que\s*)?hora\b/.test(t) ||
-    /\bhoras\b/.test(t) ||
-    /\bfecha\b/.test(t) ||
-    /\bd[ií]a\s+es\s+hoy\b/.test(t) ||
-    /\b(que\s*)?d[ií]a\b/.test(t) ||
-    /\bhoy\b/.test(t)
+    /\b(qu[eé]\s+)?hora\s+(es|son|tenemos|hay)\b/.test(t) ||
+    /\b(qu[eé]\s+)?d[ií]a\s+(es|son)\s+(hoy|ma[ñn]ana)\b/.test(t) ||
+    /\b(qu[eé]\s+)?fecha\s+(es|tenemos)\b/.test(t) ||
+    /^\s*(hora|fecha|d[ií]a)\s*[\?]?\s*$/.test(t) // Solo "hora?", "fecha?", "día?"
   );
 };
 
