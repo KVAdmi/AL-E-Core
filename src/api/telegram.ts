@@ -814,15 +814,51 @@ router.get('/messages', requireAuth, async (req, res) => {
       });
     }
     
-    // Primero verificar que el chat pertenezca al usuario
-    const { data: chat, error: chatError } = await supabase
-      .from('telegram_chats')
-      .select('id, bot_id, chat_id')
-      .eq('id', chatId as string)
-      .eq('owner_user_id', ownerUserId)
-      .single();
+    console.log(`[TELEGRAM] 📨 GET /messages - chatId: ${chatId}, userId: ${ownerUserId}`);
     
-    if (chatError || !chat) {
+    // 🔥 FIX: chatId puede ser UUID (id tabla) O numeric Telegram chat_id
+    // Intentar ambos para compatibilidad
+    const chatIdStr = chatId as string;
+    const isNumeric = /^\d+$/.test(chatIdStr);
+    
+    let chat: any = null;
+    
+    if (isNumeric) {
+      // Es chat_id numérico de Telegram (ej: 6691289316)
+      console.log(`[TELEGRAM] 🔍 Buscando por chat_id numérico: ${chatIdStr}`);
+      const { data, error } = await supabase
+        .from('telegram_chats')
+        .select('id, bot_id, chat_id')
+        .eq('chat_id', parseInt(chatIdStr))
+        .eq('owner_user_id', ownerUserId)
+        .single();
+      
+      if (error) {
+        console.error(`[TELEGRAM] ❌ Error buscando chat: ${error.message}`);
+      } else {
+        chat = data;
+        console.log(`[TELEGRAM] ✅ Chat encontrado por chat_id: ${chat?.id}`);
+      }
+    } else {
+      // Es UUID del registro telegram_chats
+      console.log(`[TELEGRAM] 🔍 Buscando por UUID: ${chatIdStr}`);
+      const { data, error } = await supabase
+        .from('telegram_chats')
+        .select('id, bot_id, chat_id')
+        .eq('id', chatIdStr)
+        .eq('owner_user_id', ownerUserId)
+        .single();
+      
+      if (error) {
+        console.error(`[TELEGRAM] ❌ Error buscando chat: ${error.message}`);
+      } else {
+        chat = data;
+        console.log(`[TELEGRAM] ✅ Chat encontrado por UUID: ${chat?.id}`);
+      }
+    }
+    
+    if (!chat) {
+      console.error(`[TELEGRAM] ❌ Chat no encontrado - chatId: ${chatId}`);
       return res.status(404).json({
         ok: false,
         error: 'CHAT_NOT_FOUND',
