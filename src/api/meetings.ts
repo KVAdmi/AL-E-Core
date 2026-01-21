@@ -1095,4 +1095,217 @@ router.post('/:id/ingest', async (req: Request, res: Response) => {
   }
 });
 
+// ==========================================
+// TRANSCRIPCIÓN CON DIARIZACIÓN (PYANNOTE)
+// ==========================================
+
+import {
+  processMeetingAudio,
+  getMeetingTranscription,
+  listMeetingTranscriptions,
+  deleteMeetingTranscription
+} from '../services/meetingTranscription';
+
+const uploadDiarize = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 500 * 1024 * 1024 // 500MB máximo
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = [
+      'audio/webm',
+      'audio/wav',
+      'audio/mpeg',
+      'audio/mp3',
+      'audio/ogg',
+      'audio/x-m4a',
+      'audio/mp4'
+    ];
+    
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Formato no soportado: ${file.mimetype}`));
+    }
+  }
+});
+
+/**
+ * POST /api/meetings/transcribe
+ * Transcribe reunión con diarización de speakers (Pyannote + faster-whisper)
+ */
+router.post('/transcribe', uploadDiarize.single('audio'), async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'No authorization header' });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    if (!req.file) {
+      return res.status(400).json({ 
+        error: 'No se recibió archivo de audio. Enviar como multipart/form-data con campo "audio"' 
+      });
+    }
+    
+    console.log('[MEETINGS.TRANSCRIBE] 🎙️ Request:', {
+      userId: user.id,
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: `${(req.file.size / 1024 / 1024).toFixed(2)} MB`
+    });
+    
+    // Validar duración estimada
+    const estimatedMinutes = req.file.size / 1024 / 1024;
+    if (estimatedMinutes > 35) {
+      return res.status(400).json({
+        error: 'Audio demasiado largo. Máximo 30 minutos por reunión.'
+      });
+    }
+    
+    const startTime = Date.now();
+    
+    const transcription = await processMeetingAudio(
+      req.file.buffer,
+      user.id,
+      req.file.originalname
+    );
+    
+    const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
+    
+    console.log('[MEETINGS.TRANSCRIBE] ✅ Success:', {
+      meetingId: transcription.id,
+      segments: transcription.segments.length,
+      speakers: transcription.speakers_count,
+      duration: `${transcription.duration}s`,
+      processingTime: `${processingTime}s`
+    });
+    
+    res.json({
+      id: transcription.id,
+      segments: transcription.segments,
+      duration: transcription.duration,
+      speakers_count: transcription.speakers_count,
+      created_at: transcription.created_at,
+      processing_time: parseFloat(processingTime)
+    });
+    
+  } catch (error: any) {
+    console.error('[MEETINGS.TRANSCRIBE] ❌ Error:', error);
+    res.status(500).json({
+      error: error.message || 'Error al procesar reunión'
+    });
+  }
+});
+
+/**
+ * GET /api/meetings/list
+ * Lista reuniones transcritas del usuario
+ */
+router.get('/list', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'No authorization header' });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    const limit = parseInt(req.query.limit as string) || 50;
+    const meetings = await listMeetingTranscriptions(user.id, limit);
+    
+    const metadata = meetings.map(m => ({
+      id: m.id,
+      title: m.title,
+      duration: m.duration,
+      speakers_count: m.speakers_count,
+      segments_count: m.segments.length,
+      created_at: m.created_at
+    }));
+    
+    res.json({ meetings: metadata });
+    
+  } catch (error: any) {
+    console.error('[MEETINGS.LIST] ❌ Error:', error);
+    res.status(500).json({ error: 'Error al listar reuniones' });
+  }
+});
+
+/**
+ * GET /api/meetings/transcription/:id
+ * Obtiene transcripción completa específica
+ */
+router.get('/transcription/:id', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'No authorization header' });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    const meetingId = req.params.id;
+    const meeting = await getMeetingTranscription(meetingId, user.id);
+    
+    if (!meeting) {
+      return res.status(404).json({ error: 'Reunión no encontrada' });
+    }
+    
+    res.json(meeting);
+    
+  } catch (error: any) {
+    console.error('[MEETINGS.GET] ❌ Error:', error);
+    res.status(500).json({ error: 'Error al obtener reunión' });
+  }
+});
+
+/**
+ * DELETE /api/meetings/transcription/:id
+ * Elimina reunión transcrita
+ */
+router.delete('/transcription/:id', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'No authorization header' });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    const meetingId = req.params.id;
+    const success = await deleteMeetingTranscription(meetingId, user.id);
+    
+    if (!success) {
+      return res.status(404).json({ error: 'Reunión no encontrada' });
+    }
+    
+    res.json({ success: true });
+    
+  } catch (error: any) {
+    console.error('[MEETINGS.DELETE] ❌ Error:', error);
+    res.status(500).json({ error: 'Error al eliminar reunión' });
+  }
+});
+
 export default router;
