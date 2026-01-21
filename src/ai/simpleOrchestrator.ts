@@ -560,20 +560,19 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
       
       // 🎯 P0: TRACKING de metadata para observabilidad
       let toolCallProvider: 'groq' | 'openai' | 'bedrock_mistral' | 'none' = 'none';
-      let finalResponseProvider: Provider = 'groq';
+      let finalResponseProvider: Provider = 'bedrock_mistral';
       let refereeUsed = false;
       let refereeReasonDetected: string | undefined;
       
-      // 🧠 P0: DETECCIÓN INTELIGENTE - ¿Necesita tools?
-      const needsTools = /revisar|leer|ver|lista|correo|email|agenda|calendario|cita|evento|enviar|buscar|clima|noticia/i.test(request.userMessage);
-      console.log(`[ORCH] 🔍 Mensaje requiere tools? ${needsTools ? 'SÍ' : 'NO'}`);
+      // 🔥 P0 CRÍTICO: MISTRAL LARGE 3 SIEMPRE - NO FALLBACK
+      // Eliminada detección de tools - SIEMPRE usa Mistral con tools disponibles
+      console.log('[ORCH] 🧠 MISTRAL LARGE 3 - Único cerebro, tools siempre disponibles');
       
-      // 🎯 P0: MULTI-PROVIDER ROUTER
-      // Si NO necesita tools Y NO es voz → Usar Bedrock Mistral
-      const shouldUseBedrock = !needsTools && !openaiBlocked;
+      // 🎯 FORZAR MISTRAL (NO OPCIONAL)
+      const shouldUseBedrock = true;  // SIEMPRE usar Mistral
       
       if (shouldUseBedrock) {
-        console.log('[ORCH] 🧠 Razonamiento sin tools → Intentando Mistral Large 3...');
+        console.log('[ORCH] 🧠 Llamando Mistral Large 3 con TODAS las tools...');
         try {
           const route: Route = request.route?.includes('document') ? 'documents' : 'chat';
           const provider = selectProvider(route, false);
@@ -584,15 +583,34 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
           const systemPrompt = typeof systemPromptContent === 'string' ? systemPromptContent : JSON.stringify(systemPromptContent);
           const chatMessages = messages.filter(m => m.role !== 'system');
           
-          // Convertir mensajes al formato simple (no BedrockMessage aún)
+          // 🔥 CRÍTICO: Incluir tools en system prompt para Mistral
+          const toolsDescription = AVAILABLE_TOOLS.map(t => 
+            `- ${t.function.name}: ${t.function.description}`
+          ).join('\n');
+          
+          const enhancedSystemPrompt = `${systemPrompt}
+
+═══════════════════════════════════════════════════════════
+🛠️ HERRAMIENTAS DISPONIBLES (USA CUANDO NECESITES):
+${toolsDescription}
+
+IMPORTANTE:
+- Tienes acceso real a estas herramientas
+- Si el usuario pide una acción que corresponde a una tool, ÚSALA
+- NO digas "no puedo hacer X" si la herramienta existe
+- Para usar una tool, responde en JSON: {"tool": "nombre", "params": {...}}
+═══════════════════════════════════════════════════════════`;
+          
+          // Convertir mensajes al formato simple
           const simpleMessages = chatMessages.map(m => ({
             role: m.role,
             content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
           }));
           
-          const result = await callProvider(provider, simpleMessages, systemPrompt);
+          const result = await callProvider(provider, simpleMessages, enhancedSystemPrompt);
           
-          console.log(`[ORCH] ✅ ${provider} response OK`);
+          console.log(`[ORCH] ✅ Mistral Large 3 respondió correctamente`);
+          console.log(`[ORCH] 📊 Tools disponibles: ${AVAILABLE_TOOLS.length}`);
           
           // Simular estructura de response compatible con Groq/OpenAI
           response = {
@@ -606,129 +624,65 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
             usage: result.usage
           };
           
-          toolCallProvider = 'none'; // Bedrock no tiene tool-calling por ahora
+          toolCallProvider = 'bedrock_mistral';
           
         } catch (bedrockError: any) {
-          console.error('[ORCH] ❌ Bedrock failed:', bedrockError.message);
-          console.log('[ORCH] ⚠️ Fallback a Groq...');
-          // Continúa al flujo normal de Groq
+          console.error('[ORCH] ❌ Mistral Large 3 FAILED:', bedrockError.message);
+          console.error('[ORCH] 🚫 NO HAY FALLBACK - Retornando error');
+          
+          // 🔥 SIN FALLBACK - Error explícito
+          return {
+            answer: 'Tengo un problema técnico temporal con mi sistema de razonamiento. Por favor intenta de nuevo en unos segundos.',
+            toolsUsed: [],
+            executionTime: Date.now() - startTime,
+            metadata: {
+              model: 'mistral-large-3',
+              error: bedrockError.message,
+              error_handled: true
+            },
+          };
         }
       }
       
       // 🚀 P0 FIX CRÍTICO: GROQ para tool calling O si Bedrock falló
       // OpenAI solo como fallback si Groq falla completamente
       
-      if (!response) { // Solo si Bedrock no respondió
-      try {
-        // � GUARDRAIL: Si modo voz, bloquear OpenAI
-        if (openaiBlocked) {
-          console.warn('[GUARDRAIL] 🔒 Voice mode active - OpenAI blocked, Groq only');
-        }
-        
-        console.log('[ORCH] 🚀 Llamando GROQ con tools...');
-        toolCallProvider = 'groq';
-        
-        response = await groq.chat.completions.create({
-          model: 'llama-3.3-70b-versatile',
-          max_tokens: 4096,
-          messages: messages as any,
-          tools: AVAILABLE_TOOLS as any,
-          tool_choice: 'auto',
-        });
-        
-        console.log('[ORCH] ✅ GROQ response OK - Finish reason:', response.choices[0]?.finish_reason);
-        
-      } catch (groqError: any) {
-        console.error('[ORCH] ❌ GROQ FAILED:', groqError.message);
-        groqFailed = true;
-        
-        // 🔒 Si modo voz Y Groq falló, NO usar OpenAI
-        if (openaiBlocked) {
-          console.error('[GUARDRAIL] 🚫 Voice mode + Groq failed = NO FALLBACK');
-          return {
-            answer: 'Estoy teniendo problemas técnicos en modo voz. Intenta de nuevo o usa modo texto.',
-            toolsUsed: [],
-            executionTime: Date.now() - startTime,
-            metadata: { 
-              model: 'blocked', 
-              openai_blocked: true, 
-              voice_mode: true,
-              groq_failed: true,
-              error: groqError.message
-            },
-          };
-        }
-        
-        // � Verificar límites OpenAI antes de usarlo como fallback
-        const rateLimitCheck = canCallOpenAI();
-        if (!rateLimitCheck.allowed) {
-          console.error('[OPENAI LIMITER] ❌ Límite excedido:', rateLimitCheck.reason);
-          return {
-            answer: `Estoy teniendo problemas técnicos temporales. Intenta de nuevo en unos minutos.
-
-(Groq falló: ${groqError.message.substring(0, 100)})
-(OpenAI: ${rateLimitCheck.reason})`,
-            toolsUsed: [],
-            executionTime: Date.now() - startTime,
-            metadata: { 
-              model: 'all-failed', 
-              groq_failed: true,
-              rate_limit_exceeded: true, 
-              limit: rateLimitCheck.limit,
-              error: `Groq: ${groqError.message} | OpenAI: ${rateLimitCheck.reason}`
-            },
-          };
-        }
-        
-        // ⚠️ FALLBACK: OpenAI texto-only (sin tools)
-        try {
-          console.log('[ORCH] ⚠️ OPENAI FALLBACK activado (Groq falló)');
-          console.log('[OPENAI] 📋 RESTRICCIONES: Texto-only, sin tools');
-          console.log('[OPENAI LIMITER] ✅ Rate limit OK');
-          
-          const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-          
-          usingOpenAI = true;
-          toolCallProvider = 'none'; // ← Sin tools disponibles
-          
-          response = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            max_tokens: 600,
-            messages: [
-              {
-                role: 'system',
-                content: `Eres ${assistantName}. IMPORTANTE: No puedes ejecutar acciones (correos, agenda, búsquedas). Si te piden una acción, responde: "No puedo ejecutar esa acción ahora (problemas técnicos temporales). Intenta de nuevo en unos minutos."`
-              },
-              { role: 'user', content: request.userMessage }
-            ],
-            // NO tools - texto-only
-          });
-          
-          // Registrar uso y costo
-          const inputTokens = response.usage?.prompt_tokens || 0;
-          const outputTokens = response.usage?.completion_tokens || 0;
-          const estimatedCost = estimateOpenAICost(inputTokens, outputTokens);
-          recordOpenAICall(inputTokens + outputTokens, estimatedCost);
-          
-          console.log('[ORCH] ✅ OpenAI fallback completado (texto-only)');
-          
-        } catch (openaiError: any) {
-          console.error('[ORCH] ❌ OpenAI fallback TAMBIÉN falló:', openaiError.message);
-          return {
-            answer: 'Estoy teniendo problemas técnicos graves. Por favor intenta de nuevo más tarde.',
-            toolsUsed: [],
-            executionTime: Date.now() - startTime,
-            metadata: {
-              model: 'all-failed',
-              groq_failed: true,
-              openai_failed: true,
-              error: `Groq: ${groqError.message} | OpenAI: ${openaiError.message}`
-            },
-          };
-        }
-      }
-      } // fin if (!response)
       
+      // 🔥 P0 CRÍTICO: NO HAY FALLBACK A GROQ NI OPENAI
+      // Mistral Large 3 es el único cerebro autorizado
+      // Si Mistral falla → error explícito, usuario reintenta
+      
+      if (!response) {
+        console.error('[ORCH] ❌ CRITICAL: No response from Mistral');
+        return {
+          answer: 'Error crítico del sistema. Por favor intenta de nuevo.',
+          toolsUsed: [],
+          executionTime: Date.now() - startTime,
+          metadata: {
+            model: 'mistral-large-3',
+            error: 'No model executed',
+            error_handled: true
+          },
+        };
+      }
+      
+      // 🔥 P0 CRÍTICO: NO HAY FALLBACK A GROQ NI OPENAI
+      // Mistral Large 3 es el único cerebro autorizado
+      // Si Mistral falla → error explícito, usuario reintenta
+      
+      if (!response) {
+        console.error('[ORCH] ❌ CRITICAL: No response from Mistral');
+        return {
+          answer: 'Error crítico del sistema. Por favor intenta de nuevo.',
+          toolsUsed: [],
+          executionTime: Date.now() - startTime,
+          metadata: {
+            model: 'mistral-large-3',
+            error: 'No model executed',
+            error_handled: true
+          },
+        };
+      }
       // Array para guardar resultados de tools (para referee)
       const toolResults: any[] = [];
       
