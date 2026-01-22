@@ -230,6 +230,13 @@ export async function executeTool(
           throw new Error(eventsResult.error || 'Error listando eventos');
         }
         
+        // 🚨 P0 FIX: Si NO hay eventos, lanzar error explícito para que Nova NO invente
+        if (eventsResult.events.length === 0) {
+          const start = new Date(startDate);
+          const end = new Date(endDate);
+          throw new Error(`NO_EVENTS_FOUND: No tienes eventos agendados entre ${start.toLocaleDateString('es-MX')} y ${end.toLocaleDateString('es-MX')}. Tu agenda está vacía para ese período.`);
+        }
+        
         return {
           success: true,
           data: {
@@ -275,6 +282,25 @@ export async function executeTool(
             title: eventResult.event.title,
             start: eventResult.event.start_at,
             end: eventResult.event.end_at
+          }
+        };
+
+      case 'delete_event':
+        if (!parameters.eventId) {
+          throw new Error('eventId es requerido para borrar evento');
+        }
+        
+        const { deleteEvent } = await import('./calendarTools');
+        const deleteResult = await deleteEvent(userId, parameters.eventId);
+        
+        if (!deleteResult.success) {
+          throw new Error(deleteResult.error || 'Error eliminando evento');
+        }
+        
+        return {
+          success: true,
+          data: {
+            message: 'Evento eliminado correctamente'
           }
         };
 

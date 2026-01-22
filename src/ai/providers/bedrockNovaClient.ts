@@ -34,7 +34,7 @@ const MODEL_ID = 'amazon.nova-pro-v1:0';
 
 /**
  * Tool definitions para Bedrock Converse API.
- * Tools: create_event, send_email, read_email, web_search.
+ * Tools: create_event, delete_event, send_email, list_emails, read_email, list_events, web_search.
  */
 const NOVA_TOOLS: Tool[] = [
   {
@@ -159,6 +159,24 @@ const NOVA_TOOLS: Tool[] = [
             }
           },
           required: []
+        }
+      }
+    }
+  },
+  {
+    toolSpec: {
+      name: 'delete_event',
+      description: 'Elimina un evento del calendario. Usa cuando pidan borrar, cancelar o eliminar evento/cita/reunión. Si dicen "borra TODA mi agenda" o "cancela TODOS mis eventos", primero lista eventos con list_events, luego borra cada uno con su eventId.',
+      inputSchema: {
+        json: {
+          type: 'object',
+          properties: {
+            eventId: {
+              type: 'string',
+              description: 'ID del evento a eliminar (viene del campo "id" de list_events). REQUERIDO.'
+            }
+          },
+          required: ['eventId']
         }
       }
     }

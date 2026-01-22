@@ -136,6 +136,54 @@ export async function listEvents(
 }
 
 /**
+ * Elimina un evento del calendario
+ */
+export async function deleteEvent(
+  userId: string,
+  eventId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    console.log('[CALENDAR TOOLS] 🗑️ Eliminando evento:', eventId);
+    
+    // Verificar que el evento pertenece al usuario
+    const { data: event, error: fetchError } = await supabase
+      .from('calendar_events')
+      .select('id, title')
+      .eq('id', eventId)
+      .eq('owner_user_id', userId)
+      .single();
+    
+    if (fetchError || !event) {
+      throw new Error('Evento no encontrado o no tienes permiso para eliminarlo');
+    }
+    
+    // Eliminar el evento
+    const { error: deleteError } = await supabase
+      .from('calendar_events')
+      .delete()
+      .eq('id', eventId)
+      .eq('owner_user_id', userId);
+    
+    if (deleteError) {
+      throw new Error(deleteError.message);
+    }
+    
+    console.log('[CALENDAR TOOLS] ✅ Evento eliminado:', event.title);
+    
+    return {
+      success: true
+    };
+    
+  } catch (error: any) {
+    console.error('[CALENDAR TOOLS] ❌ Error eliminando evento:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
  * Verifica conflictos de horario
  */
 async function checkConflicts(
