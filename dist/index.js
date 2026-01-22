@@ -39,6 +39,7 @@ const documentText_1 = require("./utils/documentText");
 const notificationWorker_1 = require("./workers/notificationWorker");
 const emailSyncWorker_1 = require("./workers/emailSyncWorker");
 const meetingTimeoutWorker_1 = require("./workers/meetingTimeoutWorker");
+const meetingQueue_1 = require("./jobs/meetingQueue");
 const app = (0, express_1.default)();
 // Configurar multer para subida de archivos en memoria
 const upload = (0, multer_1.default)({
@@ -265,4 +266,7 @@ app.listen(PORT, "0.0.0.0", () => {
     // Iniciar meeting timeout worker (iOS PWA reality)
     console.log('[AL-E CORE] Iniciando meeting timeout worker...');
     (0, meetingTimeoutWorker_1.startMeetingTimeoutWorker)();
+    // Iniciar meeting queue worker (CRÍTICO: procesa transcripciones)
+    console.log('[AL-E CORE] Iniciando meeting queue worker...');
+    (0, meetingQueue_1.startMeetingWorker)();
 });

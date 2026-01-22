@@ -34,6 +34,7 @@ import { extractTextFromFiles, documentsToContext } from "./utils/documentText";
 import { startNotificationWorker } from "./workers/notificationWorker";
 import { startEmailSyncWorker } from "./workers/emailSyncWorker";
 import { startMeetingTimeoutWorker } from "./workers/meetingTimeoutWorker";
+import { startMeetingWorker } from "./jobs/meetingQueue";
 import { llmFactory } from "./llm/providerFactory"; // LLM Factory init (P0-CRÍTICO para tool calling)
 
 const app = express();
@@ -286,4 +287,8 @@ app.listen(PORT, "0.0.0.0", () => {
 	// Iniciar meeting timeout worker (iOS PWA reality)
 	console.log('[AL-E CORE] Iniciando meeting timeout worker...');
 	startMeetingTimeoutWorker();
+	
+	// Iniciar meeting queue worker (CRÍTICO: procesa transcripciones)
+	console.log('[AL-E CORE] Iniciando meeting queue worker...');
+	startMeetingWorker();
 });
