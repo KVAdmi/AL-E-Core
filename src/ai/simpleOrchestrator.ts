@@ -60,6 +60,7 @@ interface SimpleOrchestratorResponse {
     nova_output_tokens?: number;
     nova_total_tokens?: number;
     error?: string;
+    failed_tools?: Array<{ tool: string; error: string }>; // 🚨 CRÍTICO: Track de tools que fallaron
   };
 }
 
@@ -671,7 +672,49 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
       console.log('[ORCH] ⏱️ Execution time:', executionTime, 'ms');
       
       // ═══════════════════════════════════════════════════════════
-      // 📤 RESPUESTA FINAL DE AMAZON NOVA PRO
+      // � VALIDACIÓN CRÍTICA: NO MENTIR SOBRE TOOL FAILURES
+      // ═══════════════════════════════════════════════════════════
+      
+      // Detectar si algún tool falló
+      const failedTools = toolResults.filter((t: any) => t.error);
+      const hasToolFailures = failedTools.length > 0;
+      
+      if (hasToolFailures) {
+        console.error('[ORCH] � TOOL FAILURES DETECTADOS:', failedTools.map((t: any) => t.tool));
+        
+        // Construir mensaje honesto de error
+        const failedToolNames = failedTools.map((t: any) => {
+          const displayName = t.tool === 'create_event' ? 'agendar la cita' :
+                              t.tool === 'send_email' ? 'enviar el correo' :
+                              t.tool === 'web_search' ? 'buscar en internet' :
+                              t.tool === 'read_email' ? 'leer el correo' :
+                              t.tool;
+          return `${displayName} (${t.error})`;
+        }).join(', ');
+        
+        // Reemplazar respuesta de Nova con mensaje honesto
+        const executionTime = Date.now() - startTime;
+        
+        return {
+          answer: `Lo siento, no pude ${failedToolNames}. Por favor intenta de nuevo o contacta a soporte si el problema persiste.`,
+          session_id: request.sessionId || null,
+          toolsUsed,
+          executionTime,
+          metadata: {
+            model: 'amazon.nova-pro-v1:0',
+            finish_reason: 'tool_execution_failed',
+            tool_call_provider: 'bedrock_nova',
+            final_response_provider: 'bedrock_nova',
+            error: `Tool failures: ${failedTools.map((t: any) => t.tool).join(', ')}`,
+            failed_tools: failedTools,
+            stateless_mode: statelessMode,
+            server_now_iso: serverNowISO,
+          }
+        };
+      }
+      
+      // ═══════════════════════════════════════════════════════════
+      // 📤 RESPUESTA FINAL DE AMAZON NOVA PRO (SOLO SI NO HAY ERRORS)
       // ═══════════════════════════════════════════════════════════
       
       let finalAnswer = novaResponse.content || '';
@@ -679,25 +722,9 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
       console.log('[ORCH] 📝 Final answer length:', finalAnswer.length);
       console.log('[ORCH] 📝 Preview:', finalAnswer.substring(0, 150));
       
-      // Validación: menciona tools ejecutados?
+      // Validación adicional: menciona tools ejecutados correctamente?
       if (toolsUsed.length > 0) {
-        const responseText = finalAnswer.toLowerCase();
-        
-        let mentionedTools = false;
-        for (const tool of toolsUsed) {
-          if (responseText.includes(tool.replace('_', ' ')) || 
-              responseText.includes('agendé') || 
-              responseText.includes('envié') ||
-              responseText.includes('confirmación')) {
-            mentionedTools = true;
-            break;
-          }
-        }
-        
-        if (!mentionedTools) {
-          console.warn('[ORCH] ⚠️ Respuesta no menciona tools ejecutados');
-          console.log('[ORCH] 📊 Tools ejecutados (logs):', toolsUsed);
-        }
+        console.log('[ORCH] ✅ Tools ejecutados exitosamente:', toolsUsed.join(', '));
       }
       
       // 💾 GUARDAR MEMORIA si la conversación fue importante (SOLO si NO es stateless)
