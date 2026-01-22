@@ -100,6 +100,8 @@ export async function listEvents(
 ): Promise<{ success: boolean; events?: CalendarEvent[]; error?: string }> {
   try {
     console.log('[CALENDAR TOOLS] 📋 Listando eventos');
+    console.log('[CALENDAR TOOLS] 🔍 USER ID:', userId);
+    console.log('[CALENDAR TOOLS] 📅 Rango fechas:', { startDate, endDate });
     
     let query = supabase
       .from('calendar_events')
@@ -119,6 +121,11 @@ export async function listEvents(
     
     if (error) {
       throw new Error(error.message);
+    }
+    
+    console.log('[CALENDAR TOOLS] ✅ Eventos encontrados:', data?.length || 0);
+    if (data && data.length > 0) {
+      console.log('[CALENDAR TOOLS] 📋 Primeros 3:', data.slice(0, 3).map(e => `${e.title} (${e.start_at})`));
     }
     
     return {
