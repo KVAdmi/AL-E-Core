@@ -162,14 +162,14 @@ const NOVA_TOOLS: Tool[] = [
   {
     toolSpec: {
       name: 'web_search',
-      description: 'Busca información en internet usando Tavily. SOLO usa cuando el usuario pida EXPLÍCITAMENTE buscar, investigar, o encontrar info externa (ej: "busca Vitacard 365", "investiga modelos de IA", "encuentra información sobre X"). NO uses para clima ni noticias a menos que pidan explícitamente.',
+      description: 'Busca información en internet usando Tavily. SOLO usa cuando el usuario pida EXPLÍCITAMENTE buscar, investigar, o encontrar info externa. CRÍTICO: Antes de buscar, REESCRIBE el query para desambiguar intención. Ejemplos: "Vitacard 365" → "Vitacard 365 membresía precio beneficios México". "modelos de IA" → "modelos de IA más potentes 2026 comparación precios". Si la intención es ambigua, PREGUNTA primero al usuario qué busca exactamente (producto, servicio, empresa, etc.).',
       inputSchema: {
         json: {
           type: 'object',
           properties: {
             query: {
               type: 'string',
-              description: 'Query de búsqueda'
+              description: 'Query de búsqueda REESCRITO con intención clara, contexto geográfico si aplica, y keywords específicos (ej: "precio", "beneficios", "cómo funciona", "disponibilidad México")'
             },
             maxResults: {
               type: 'number',

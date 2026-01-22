@@ -488,6 +488,28 @@ export async function analyzeDocument(
   fileType?: string
 ): Promise<DocumentAnalysisResult> {
   try {
+    // 🚨 P0 FIX: Validar que fileUrl es válida antes de procesar
+    if (!fileUrl || typeof fileUrl !== 'string') {
+      console.error('[DOCUMENT TOOLS] ❌ fileUrl inválida o vacía');
+      return {
+        success: false,
+        documentType: 'unknown',
+        error: 'NO_FILE_URL: No se proporcionó URL del archivo para analizar. Esto es un bug del sistema.'
+      };
+    }
+
+    // Validar que es una URL real (no metadata de request)
+    if (!fileUrl.startsWith('http://') && !fileUrl.startsWith('https://')) {
+      console.error('[DOCUMENT TOOLS] ❌ fileUrl no es una URL HTTP válida:', fileUrl.substring(0, 100));
+      return {
+        success: false,
+        documentType: 'unknown',
+        error: 'INVALID_FILE_URL: La URL del archivo no es válida. Solo se aceptan URLs HTTP/HTTPS.'
+      };
+    }
+
+    console.log('[DOCUMENT TOOLS] ✅ Analizando documento desde URL:', fileUrl.substring(0, 100));
+    
     // Detectar tipo si no se especifica
     if (!fileType) {
       if (fileUrl.includes('.pdf')) fileType = 'pdf';

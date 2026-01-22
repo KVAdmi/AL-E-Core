@@ -182,8 +182,31 @@ export async function listEmails(
       throw new Error(`Error al listar correos: ${messagesError.message}`);
     }
 
-    console.log(`[EMAIL TOOLS] ✓ ${messages?.length || 0} correos encontrados en carpeta "${folderType}"`);
-    return messages || [];
+    // 🚨 P0 FIX: VALIDACIÓN CRÍTICA - NO INVENTAR CORREOS
+    if (!messages || messages.length === 0) {
+      console.log(`[EMAIL TOOLS] ⚠️ No se encontraron correos en carpeta "${folderType}"`);
+      throw new Error(`NO_EMAILS_FOUND: No hay correos en tu ${folderType === 'inbox' ? 'bandeja de entrada' : folderType}. Verifica que la sincronización IMAP esté funcionando.`);
+    }
+
+    // Validar que cada correo tenga metadatos mínimos reales
+    const validEmails = messages.filter(email => 
+      email.from_address && 
+      email.subject && 
+      email.date && 
+      email.id
+    );
+
+    if (validEmails.length === 0) {
+      console.error('[EMAIL TOOLS] ❌ Correos sin metadatos válidos detectados');
+      throw new Error('EMAIL_VALIDATION_FAILED: Los correos encontrados no tienen metadatos válidos (from, subject, date, id). Reporta este error a soporte.');
+    }
+
+    if (validEmails.length < messages.length) {
+      console.warn(`[EMAIL TOOLS] ⚠️ ${messages.length - validEmails.length} correos con metadatos incompletos fueron filtrados`);
+    }
+
+    console.log(`[EMAIL TOOLS] ✓ ${validEmails.length} correos válidos encontrados en carpeta "${folderType}"`);
+    return validEmails;
 
   } catch (error: any) {
     console.error('[EMAIL TOOLS] Error en listEmails:', error);
