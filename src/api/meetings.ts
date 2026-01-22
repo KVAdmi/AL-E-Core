@@ -1115,11 +1115,13 @@ const uploadDiarize = multer({
     const allowedMimes = [
       'audio/webm',
       'audio/wav',
+      'audio/x-wav',
       'audio/mpeg',
       'audio/mp3',
       'audio/ogg',
       'audio/x-m4a',
-      'audio/mp4'
+      'audio/mp4',
+      'application/octet-stream' // ffmpeg output sin extensión específica
     ];
     
     if (allowedMimes.includes(file.mimetype)) {
