@@ -70,22 +70,26 @@ const NOVA_TOOLS: Tool[] = [
   {
     toolSpec: {
       name: 'send_email',
-      description: 'Envía un correo electrónico. Usa esto cuando pidan enviar email, mandar correo, o confirmar por email.',
+      description: 'Envía un correo electrónico. RESPONDER correo: usa "inReplyTo" con Message-ID del correo original (campo "id" de list_emails/read_email). NUEVO correo: omite "inReplyTo".',
       inputSchema: {
         json: {
           type: 'object',
           properties: {
             to: {
               type: 'string',
-              description: 'Email del destinatario'
+              description: 'Email del destinatario. Para responder, usa el "from_address" del correo original.'
             },
             subject: {
               type: 'string',
-              description: 'Asunto del correo'
+              description: 'Asunto del correo. Para responder, usa "Re: " + subject original.'
             },
             body: {
               type: 'string',
               description: 'Cuerpo del correo en texto plano o HTML'
+            },
+            inReplyTo: {
+              type: 'string',
+              description: 'OPCIONAL: Message-ID del correo al que respondes (campo "id" de list_emails/read_email). Para RESPONDER correos usa esto. Para correos nuevos NO lo uses.'
             }
           },
           required: ['to', 'subject', 'body']

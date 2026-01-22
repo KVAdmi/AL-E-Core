@@ -403,6 +403,8 @@ export async function executeTool(
           maxResults: parameters.maxResults || 5
         });
         
+        // 🚨 P0 FIX: Truncar content para evitar HTTP 424 de Nova
+        // Nova crashea con toolResults >10KB. Limitamos a 500 chars por resultado.
         return {
           success: true,
           data: {
@@ -410,7 +412,7 @@ export async function executeTool(
             results: searchResults.results.map((r: any) => ({
               title: r.title,
               url: r.url,
-              content: r.content,
+              content: r.content?.substring(0, 500) || '', // MAX 500 chars
               score: r.score
             }))
           }
