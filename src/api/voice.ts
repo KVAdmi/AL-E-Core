@@ -530,7 +530,7 @@ router.post('/chat', upload.single('audio'), async (req, res) => {
     // ============================================
     console.log('[VOICE_CHAT] 🧠 Step 2/3: Processing with orchestrator (with memory)...');
     
-    const chatResponse = await fetch(`http://localhost:${process.env.PORT || 3001}/api/ai/chat/v2`, {
+    const chatResponse = await fetch(`http://localhost:${process.env.PORT || 3000}/api/ai/chat/v2`, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
