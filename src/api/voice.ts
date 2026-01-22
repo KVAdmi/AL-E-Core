@@ -201,7 +201,21 @@ router.post('/tts', async (req, res) => {
 // Handler compartido para STT
 const handleSTT = async (req: express.Request, res: express.Response) => {
   const startTime = Date.now();
-  console.log('[STT] 🎤 Request recibido');
+  const requestId = uuidv4();
+  
+  // 🚨 INSTRUMENTACIÓN P0: Log completo al entrar
+  console.log('═══════════════════════════════════════════════════════');
+  console.log('[STT] 🎤 REQUEST RECIBIDO');
+  console.log(`  - request_id: ${requestId}`);
+  console.log(`  - content-type: ${req.headers['content-type'] || 'N/A'}`);
+  console.log(`  - content-length: ${req.headers['content-length'] || 'N/A'}`);
+  console.log(`  - origin: ${req.headers['origin'] || 'N/A'}`);
+  console.log(`  - hasFile: ${!!req.file}`);
+  console.log(`  - file.mimetype: ${req.file?.mimetype || 'N/A'}`);
+  console.log(`  - file.size: ${req.file?.size || 'N/A'}`);
+  console.log(`  - file.fieldname: ${req.file?.fieldname || 'N/A'}`);
+  console.log(`  - timestamp: ${new Date().toISOString()}`);
+  console.log('═══════════════════════════════════════════════════════');
 
   try {
     const { language, sessionId, userId }: STTRequest = req.body;
@@ -209,9 +223,11 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
 
     // Validaciones
     if (!audioFile) {
+      console.error(`[STT] ❌ NO FILE RECEIVED - request_id: ${requestId}`);
       return res.status(400).json({
         success: false,
         safe_message: 'No recibimos el audio. ¿Puedes intentar grabar de nuevo?',
+        request_id: requestId,
         metadata: {
           reason: 'no_audio_file',
           code: 'AUDIO_001',
@@ -234,10 +250,11 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
     console.log('═══════════════════════════════════════════════════════');
     
     if (audioSizeBytes === 0) {
-      console.error('[VOICE] ❌ Audio vacío (0 bytes)');
+      console.error(`[VOICE] ❌ Audio vacío (0 bytes) - request_id: ${requestId}`);
       return res.status(400).json({
         success: false,
         safe_message: 'No detectamos audio. Verifica tu micrófono e intenta de nuevo',
+        request_id: requestId,
         metadata: {
           reason: 'empty_audio',
           size: 0,
@@ -248,9 +265,11 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
     }
 
     if (!audioFile.mimetype.startsWith('audio/')) {
+      console.error(`[VOICE] ❌ Invalid mimetype: ${audioFile.mimetype} - request_id: ${requestId}`);
       return res.status(400).json({
         success: false,
         safe_message: 'El archivo debe ser de audio',
+        request_id: requestId,
         metadata: {
           reason: 'invalid_file_type',
           received: audioFile.mimetype,
@@ -285,7 +304,13 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
     
     try {
       // Llamar a Groq Whisper API con timeout
-      console.log('[STT] 🔄 Calling Groq Whisper API...');
+      console.log(`[STT] 🔄 Calling Groq Whisper API... (request_id: ${requestId})`);
+      console.log(`[STT] 📍 Provider: groq`);
+      console.log(`[STT] 📍 Model: whisper-large-v3-turbo`);
+      console.log(`[STT] 📍 Language: ${language || 'auto-detect'}`);
+      console.log(`[STT] 📍 Temp file: ${tempFilePath}`);
+      console.log(`[STT] 📍 GROQ_API_KEY present: ${!!process.env.GROQ_API_KEY}`);
+      
       whisperCalled = true; // 🚨 P0: Marca que SÍ se llamó
       
       const transcriptionPromise = groq.audio.transcriptions.create({
@@ -377,10 +402,21 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
       
       const latency_ms = Date.now() - startTime;
       
+      // 🚨 LOG DETALLADO DEL ERROR
+      console.error('═══════════════════════════════════════════════════════');
+      console.error(`[STT] ❌ TRANSCRIPTION ERROR - request_id: ${requestId}`);
+      console.error(`  - Error message: ${transcriptionError.message}`);
+      console.error(`  - Error name: ${transcriptionError.name}`);
+      console.error(`  - Error code: ${transcriptionError.code || 'N/A'}`);
+      console.error(`  - Provider: groq`);
+      console.error(`  - Stack trace:`);
+      console.error(transcriptionError.stack);
+      console.error('═══════════════════════════════════════════════════════');
+      
       // Log error
       try {
         await supabase.from('ae_requests').insert({
-          request_id: uuidv4(),
+          request_id: requestId,
           session_id: sessionId || null,
           user_id: userId || null,
           endpoint: '/api/voice/stt',
@@ -389,6 +425,9 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
           latency_ms,
           metadata: {
             error: transcriptionError.message,
+            error_name: transcriptionError.name,
+            error_code: transcriptionError.code,
+            error_stack: transcriptionError.stack?.substring(0, 500),
             error_type: transcriptionError.message === 'STT_TIMEOUT' ? 'TIMEOUT' : 'STT_ERROR',
             audio_size_bytes: audioFile.size,
             stt_provider: 'groq'
@@ -402,18 +441,29 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
     }
 
   } catch (error: any) {
-    console.error('[STT] ❌ Error:', error);
+    console.error('═══════════════════════════════════════════════════════');
+    console.error(`[STT] ❌ FATAL ERROR - request_id: ${requestId}`);
+    console.error(`  - Error message: ${error.message}`);
+    console.error(`  - Error name: ${error.name}`);
+    console.error(`  - Error code: ${error.code || 'N/A'}`);
+    console.error(`  - Stack trace:`);
+    console.error(error.stack);
+    console.error('═══════════════════════════════════════════════════════');
     
     if (error.message === 'STT_TIMEOUT') {
       return res.status(504).json({
         error: 'STT_TIMEOUT',
-        message: 'La transcripción tomó demasiado tiempo (>20s)'
+        request_id: requestId,
+        message: 'La transcripción tomó demasiado tiempo (>20s)',
+        details: error.message
       });
     }
     
     return res.status(500).json({
-      error: 'STT_ERROR',
-      message: 'Error interno al procesar STT'
+      error: 'STT_FAILED',
+      request_id: requestId,
+      message: 'Error interno al procesar STT',
+      details: error.message || 'Unknown error'
     });
   }
 };
