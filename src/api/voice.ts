@@ -315,7 +315,7 @@ const handleSTT = async (req: express.Request, res: express.Response) => {
       
       const transcriptionPromise = groq.audio.transcriptions.create({
         file: fs.createReadStream(tempFilePath),
-        model: 'whisper-large-v3-turbo',
+        model: 'whisper-large-v3', // Cambiar a modelo sin restricciones
         language: language || undefined, // auto-detect si no se especifica
         response_format: 'json',
         temperature: 0.0 // Máxima precisión
@@ -515,7 +515,7 @@ router.post('/chat', upload.single('audio'), async (req, res) => {
     
     const transcription = await groq.audio.transcriptions.create({
       file: fs.createReadStream(tempFilePath),
-      model: 'whisper-large-v3-turbo',
+      model: 'whisper-large-v3', // Cambiar a modelo sin restricciones
       language: 'es',
       response_format: 'json',
       temperature: 0.0
