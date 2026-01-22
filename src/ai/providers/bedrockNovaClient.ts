@@ -96,7 +96,7 @@ const NOVA_TOOLS: Tool[] = [
   {
     toolSpec: {
       name: 'list_emails',
-      description: 'Lista los correos del usuario. Usa esto cuando pregunten: "mis correos", "últimos emails", "revisa mi correo", "qué correos tengo", "inbox", etc. Devuelve resumen de cada email (from, subject, date).',
+      description: 'EMAILS ONLY: Lista correos electrónicos (inbox, mensajes). Usa cuando mencionen: "correos", "emails", "mensajes", "inbox", "bandeja", "checa mi correo", "revisa email". NO uses para agenda/calendario/eventos/citas.',
       inputSchema: {
         json: {
           type: 'object',
@@ -122,7 +122,7 @@ const NOVA_TOOLS: Tool[] = [
   {
     toolSpec: {
       name: 'read_email',
-      description: 'Lee el contenido completo de un correo específico. Usa DESPUÉS de list_emails para leer correos completos. Si el usuario NO especifica cuál correo, usa "latest" como emailId para leer el más reciente.',
+      description: 'Lee el contenido COMPLETO de un correo específico. Usa DESPUÉS de list_emails para leer correos completos. Si el usuario NO especifica cuál correo, usa "latest" como emailId para leer el más reciente.',
       inputSchema: {
         json: {
           type: 'object',
@@ -140,7 +140,7 @@ const NOVA_TOOLS: Tool[] = [
   {
     toolSpec: {
       name: 'list_events',
-      description: 'Lista eventos del calendario del usuario. Usa esto cuando pregunten: "qué tengo hoy", "mi agenda", "eventos de mañana", "qué tengo programado", "reuniones de esta semana", "confirmame la agenda", etc.',
+      description: 'CALENDARIO ONLY: Lista eventos/citas/reuniones del calendario. Usa cuando mencionen: "agenda", "calendario", "eventos", "citas", "reuniones", "qué tengo programado", "confirmame agenda", "qué tengo hoy/mañana/esta semana". NO uses para correos/emails.',
       inputSchema: {
         json: {
           type: 'object',
@@ -162,7 +162,7 @@ const NOVA_TOOLS: Tool[] = [
   {
     toolSpec: {
       name: 'web_search',
-      description: 'Busca información en internet usando Tavily. Usa esto cuando necesites datos actuales, noticias, clima, o información que no está en tu conocimiento base.',
+      description: 'Busca información en internet usando Tavily. SOLO usa cuando el usuario pida EXPLÍCITAMENTE buscar, investigar, o encontrar info externa (ej: "busca Vitacard 365", "investiga modelos de IA", "encuentra información sobre X"). NO uses para clima ni noticias a menos que pidan explícitamente.',
       inputSchema: {
         json: {
           type: 'object',
