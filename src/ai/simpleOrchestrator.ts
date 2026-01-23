@@ -597,8 +597,8 @@ Basándote ÚNICAMENTE en los datos arriba, presenta un resumen natural de los c
             metadata: {
               model: 'force-execution-failed',
               error: toolError.message,
-              tool_call_provider: 'pre-execution',
-              final_response_provider: 'error'
+              tool_call_provider: 'none',
+              final_response_provider: 'bedrock_nova'
             }
           };
         }
