@@ -100,7 +100,7 @@ const NOVA_TOOLS: Tool[] = [
   {
     toolSpec: {
       name: 'list_emails',
-      description: 'EMAILS ONLY: Lista correos electrónicos (inbox, mensajes). Usa cuando mencionen: "correos", "emails", "mensajes", "inbox", "bandeja", "checa mi correo", "revisa email". NO uses para agenda/calendario/eventos/citas.',
+      description: '⚠️ EMAILS ONLY: Lista correos electrónicos del inbox. EJECUTA SIEMPRE cuando el usuario diga: "revisa correos", "revisa mi correo", "checa emails", "mis mensajes", "inbox", "segunda cuenta", "ambas cuentas". NO inventes respuestas sin ejecutar este tool. NO digas "tengo problemas" sin intentar. EJEMPLO: Usuario dice "revisa correos" → TÚ EJECUTAS list_emails{} → RECIBES lista real → RESPONDES con datos reales. NO uses para agenda/calendario/eventos.',
       inputSchema: {
         json: {
           type: 'object',
