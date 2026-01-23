@@ -552,6 +552,58 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
       
       console.log(`[ORCH] 📝 Total mensajes enviados a Nova: ${novaMessages.length}`);
       
+      // 🔥 HACK CRÍTICO: PRE-EJECUTAR TOOLS SI DETECTAMOS KEYWORDS
+      // Nova está ignorando system prompt, así que ejecutamos tools ANTES de llamarla
+      const userMsgLower = request.userMessage.toLowerCase();
+      const forceListEmails = /revisa.*correo|checa.*email|mis.*mensaje|inbox|segunda.*cuenta|ambas.*cuenta/i.test(userMsgLower);
+      
+      if (forceListEmails && !statelessMode) {
+        console.log('[ORCH] 🚨 FORCE EXECUTION: Detectado request de correos - ejecutando list_emails ANTES de Nova');
+        
+        try {
+          const emailsResult = await executeTool(request.userId, { 
+            name: 'list_emails', 
+            parameters: {} 
+          });
+          
+          console.log('[ORCH] ✅ list_emails pre-ejecutado exitosamente');
+          console.log('[ORCH] 📧 Correos obtenidos:', JSON.stringify(emailsResult).substring(0, 200));
+          
+          // Agregar resultado como contexto en el mensaje del usuario
+          const enrichedMessage = `${request.userMessage}
+
+[DATOS REALES OBTENIDOS]:
+${JSON.stringify(emailsResult, null, 2)}
+
+Basándote ÚNICAMENTE en los datos arriba, presenta un resumen natural de los correos. NO inventes información.`;
+          
+          // Reemplazar último mensaje con versión enriquecida
+          novaMessages[novaMessages.length - 1] = {
+            role: 'user',
+            content: enrichedMessage
+          };
+          
+          console.log('[ORCH] 📝 Mensaje enriquecido con datos reales de correos');
+          
+        } catch (toolError: any) {
+          console.error('[ORCH] ❌ Error pre-ejecutando list_emails:', toolError.message);
+          
+          // Si falla, retornar error inmediatamente (no llamar a Nova)
+          return {
+            answer: `No pude acceder a tus correos: ${toolError.message}. Por favor verifica tu configuración de email.`,
+            session_id: request.sessionId,
+            toolsUsed: ['list_emails'],
+            executionTime: Date.now() - startTime,
+            metadata: {
+              model: 'force-execution-failed',
+              error: toolError.message,
+              tool_call_provider: 'pre-execution',
+              final_response_provider: 'error'
+            }
+          };
+        }
+      }
+      
       // Primera llamada a Nova Pro
       console.log('[ORCH] � Llamada inicial a Nova Pro...');
       let novaResponse;
