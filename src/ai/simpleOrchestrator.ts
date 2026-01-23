@@ -555,7 +555,7 @@ Ahora actúa como ${assistantName}. No como un modelo de lenguaje. Como una pers
       // 🔥 HACK CRÍTICO: PRE-EJECUTAR TOOLS SI DETECTAMOS KEYWORDS
       // Nova está ignorando system prompt, así que ejecutamos tools ANTES de llamarla
       const userMsgLower = request.userMessage.toLowerCase();
-      const forceListEmails = /revisa.*correo|checa.*email|mis.*mensaje|inbox|segunda.*cuenta|ambas.*cuenta/i.test(userMsgLower);
+      const forceListEmails = /revisa.*correo|checa.*correo|checar.*correo|checa.*email|mis.*mensaje|inbox|segunda.*cuenta|ambas.*cuenta|ver.*correo|leer.*correo/i.test(userMsgLower);
       
       if (forceListEmails && !statelessMode) {
         console.log('[ORCH] 🚨 FORCE EXECUTION: Detectado request de correos - ejecutando list_emails ANTES de Nova');
