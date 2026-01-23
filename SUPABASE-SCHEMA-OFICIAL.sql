@@ -1,9 +1,3 @@
--- =====================================================
--- SUPABASE SCHEMA OFICIAL - AL-E CORE
--- =====================================================
--- Fecha: 18 de enero de 2026
--- Fuente: Frontend (producción actual)
--- Propósito: Documento de referencia único para backend y frontend
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
 
@@ -626,6 +620,19 @@ CREATE TABLE public.meeting_minutes (
   CONSTRAINT meeting_minutes_pkey PRIMARY KEY (id),
   CONSTRAINT meeting_minutes_meeting_id_fkey FOREIGN KEY (meeting_id) REFERENCES public.meetings(id)
 );
+CREATE TABLE public.meeting_transcriptions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  title text NOT NULL,
+  duration numeric NOT NULL DEFAULT 0,
+  speakers_count integer NOT NULL DEFAULT 0,
+  segments jsonb NOT NULL DEFAULT '[]'::jsonb,
+  audio_path text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT meeting_transcriptions_pkey PRIMARY KEY (id),
+  CONSTRAINT meeting_transcriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
 CREATE TABLE public.meeting_transcripts (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   meeting_id uuid NOT NULL,
@@ -859,6 +866,10 @@ CREATE TABLE public.user_settings (
   ai_model text DEFAULT 'gpt-4'::text,
   ai_temperature numeric DEFAULT 0.7,
   updated_at timestamp with time zone DEFAULT now(),
+  tts_gender text DEFAULT 'female'::text CHECK (tts_gender = ANY (ARRAY['female'::text, 'male'::text])),
+  tts_enabled boolean DEFAULT false,
+  tts_voice_name text,
+  tts_lang text DEFAULT 'es-MX'::text,
   CONSTRAINT user_settings_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.vision_requests (
