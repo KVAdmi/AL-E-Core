@@ -794,6 +794,48 @@ Basándote ÚNICAMENTE en los datos arriba, presenta un resumen natural de los c
         console.log('[ORCH] ✅ Tools ejecutados exitosamente:', toolsUsed.join(', '));
       }
       
+      // ═══════════════════════════════════════════════════════════
+      // 🛡️ TRUTH LAYER: VALIDAR QUE LA RESPUESTA SEA HONESTA
+      // ═══════════════════════════════════════════════════════════
+      
+      const { validateResponse, generateDebugMetadata } = await import('./truthLayer');
+      
+      const toolResultsForValidation = toolResults.map((r: any) => ({
+        tool: r.tool,
+        success: !r.error,
+        result: r.result,
+        error: r.error,
+        timestamp: Date.now()
+      }));
+      
+      const validation = validateResponse(
+        request.userMessage,
+        finalAnswer,
+        toolsUsed,
+        toolResultsForValidation
+      );
+      
+      console.log('[TRUTH LAYER] 🛡️ Validation:', validation.allowed ? '✅ ALLOWED' : '❌ BLOCKED');
+      
+      if (!validation.allowed) {
+        console.error('[TRUTH LAYER] 🚫 BLOCKED RESPONSE:', validation.error);
+        console.error('[TRUTH LAYER] 🚫 Original answer:', finalAnswer.substring(0, 200));
+        
+        finalAnswer = validation.sanitizedAnswer || 'No pude completar tu solicitud correctamente. Por favor, intenta de nuevo.';
+        
+        // Log metadata de debug
+        const debugMetadata = generateDebugMetadata(
+          request.userMessage,
+          novaResponse.content || '',
+          toolsUsed,
+          toolResultsForValidation
+        );
+        
+        console.error('[TRUTH LAYER] 📊 Debug:', JSON.stringify(debugMetadata, null, 2));
+      } else {
+        console.log('[TRUTH LAYER] ✅ Response validated successfully');
+      }
+      
       // 💾 GUARDAR MEMORIA si la conversación fue importante (SOLO si NO es stateless)
       if (!statelessMode && (toolsUsed.length > 0 || request.userMessage.length > 20)) {
         console.log('[ORCH] 💾 Guardando memoria...');
@@ -827,6 +869,45 @@ Basándote ÚNICAMENTE en los datos arriba, presenta un resumen natural de los c
         evidence_ids_summary: { toolsUsed },
         latency_ms_total: executionTime,
       });
+      
+      // =================================================================
+      // 🛡️ TRUTH LAYER: Validar antes de retornar
+      // =================================================================
+      
+      const { validateTruth, getTruthLayerErrorMessage } = await import('../guards/truthLayer');
+      
+      const validation = validateTruth({
+        userMessage: request.userMessage,
+        answer: finalAnswer,
+        toolsUsed,
+        toolResults: toolResultsArray,
+        metadata: {
+          route: request.route,
+          voice: request.voice,
+        }
+      });
+      
+      if (!validation.isValid) {
+        console.error('[ORCH] 🚫 TRUTH LAYER BLOCKED RESPONSE');
+        console.error('[ORCH] Error code:', validation.errorCode);
+        console.error('[ORCH] Blocked answer:', finalAnswer.substring(0, 200));
+        
+        return {
+          answer: getTruthLayerErrorMessage(validation.errorCode!),
+          session_id: request.sessionId || null,
+          toolsUsed,
+          executionTime,
+          metadata: {
+            model: 'amazon.nova-pro-v1:0',
+            finish_reason: 'truth_layer_blocked',
+            blocked_reason: validation.errorCode,
+            tool_call_provider: toolsUsed.length > 0 ? 'bedrock_nova' : 'none',
+            final_response_provider: 'truth_layer',
+          }
+        };
+      }
+      
+      console.log('[ORCH] ✅ Truth Layer validation passed');
       
       // 📊 METADATA COMPLETA - Amazon Nova Pro
       return { 

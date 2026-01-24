@@ -55,7 +55,32 @@ router.post('/tts', async (req, res) => {
   console.log('[TTS] 🔊 Request recibido:', req.body);
 
   try {
-    const { text, voice, gender, format = 'mp3', language, sessionId, userId }: TTSRequest & { gender?: PollyGender } = req.body;
+    const { text, voice, gender, format = 'mp3', language, sessionId, userId, voiceMode }: TTSRequest & { gender?: PollyGender; voiceMode?: boolean } = req.body;
+
+    // ═══════════════════════════════════════════════════════════
+    // 🛡️ GATE: TTS SOLO SI VOICE MODE ESTÁ HABILITADO
+    // ═══════════════════════════════════════════════════════════
+    
+    const { isCapabilityEnabled } = await import('../config/capabilities');
+    
+    if (!isCapabilityEnabled('VOICE')) {
+      console.log('[TTS] 🚫 VOICE capability is DISABLED - blocking TTS');
+      return res.status(403).json({
+        error: 'VOICE_DISABLED',
+        message: 'La funcionalidad de voz está temporalmente deshabilitada.'
+      });
+    }
+    
+    // Verificar que voice mode esté explícitamente habilitado
+    if (voiceMode !== true) {
+      console.log('[TTS] 🚫 voiceMode is FALSE or undefined - blocking TTS');
+      return res.status(403).json({
+        error: 'VOICE_MODE_NOT_ENABLED',
+        message: 'TTS solo funciona cuando el modo voz está activado.'
+      });
+    }
+    
+    console.log('[TTS] ✅ VOICE capability enabled + voiceMode=true - proceeding');
 
     // Validaciones básicas
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
