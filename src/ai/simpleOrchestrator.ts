@@ -876,34 +876,40 @@ Basándote ÚNICAMENTE en los datos arriba, presenta un resumen natural de los c
       
       const { validateTruth, getTruthLayerErrorMessage } = await import('../guards/truthLayer');
       
-      const validation = validateTruth({
+      const toolResultsForTruthLayer = toolResults.map((r: any) => ({
+        tool: r.tool,
+        success: !r.error,
+        result: r.result,
+        error: r.error,
+      }));
+      
+      const truthValidation = validateTruth({
         userMessage: request.userMessage,
         answer: finalAnswer,
         toolsUsed,
-        toolResults: toolResultsArray,
+        toolResults: toolResultsForTruthLayer,
         metadata: {
           route: request.route,
           voice: request.voice,
         }
       });
       
-      if (!validation.isValid) {
+      if (!truthValidation.isValid) {
         console.error('[ORCH] 🚫 TRUTH LAYER BLOCKED RESPONSE');
-        console.error('[ORCH] Error code:', validation.errorCode);
+        console.error('[ORCH] Error code:', truthValidation.errorCode);
         console.error('[ORCH] Blocked answer:', finalAnswer.substring(0, 200));
         
         return {
-          answer: getTruthLayerErrorMessage(validation.errorCode!),
+          answer: getTruthLayerErrorMessage(truthValidation.errorCode!),
           session_id: request.sessionId || null,
           toolsUsed,
           executionTime,
           metadata: {
             model: 'amazon.nova-pro-v1:0',
             finish_reason: 'truth_layer_blocked',
-            blocked_reason: validation.errorCode,
-            tool_call_provider: toolsUsed.length > 0 ? 'bedrock_nova' : 'none',
-            final_response_provider: 'truth_layer',
-          }
+            tool_call_provider: (toolsUsed.length > 0 ? 'bedrock_nova' : 'none') as any,
+            final_response_provider: 'bedrock_nova',
+          } as any
         };
       }
       
