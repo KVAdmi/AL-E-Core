@@ -30,22 +30,22 @@ export interface Capabilities {
  * ❌ = NO funciona o NO está implementado
  */
 export const CAPABILITIES: Capabilities = {
-  // ⚠️ Email sync funciona, pero Nova no ejecuta tool consistentemente
+  // ✅ Email sync funciona, force-execution implementado
   EMAIL_READ: {
-    enabled: false, // OFF hasta que nuclear fix se valide
-    reason: 'Nova Pro no ejecuta list_emails consistentemente. Nuclear fix pendiente validación.'
+    enabled: true, // ON - Orquestador fuerza ejecución de list_emails
+    reason: 'Force-execution implementado en orquestador. Sincronización IMAP funcional.'
   },
 
-  // ❌ Tool existe pero Nova nunca lo ejecuta + SMTP no validado
+  // ⚠️ Tool existe pero Nova no lo ejecuta consistentemente
   EMAIL_SEND: {
     enabled: false,
     reason: 'Nova Pro no ejecuta send_email. SMTP auth sin validar.'
   },
 
-  // ❌ Solo DB interna, sin Google Calendar API
+  // ✅ Base de datos interna funcional
   CALENDAR: {
-    enabled: false,
-    reason: 'Solo escribe en DB interna. Sin integración con Google Calendar.'
+    enabled: true, // ON - create_event y list_events funcionan
+    reason: 'DB interna funcional. Eventos se guardan correctamente.'
   },
 
   // ❌ STT funciona, pero crea nueva sesión + TTS se dispara sin permiso
